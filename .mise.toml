@@ -24,3 +24,5 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 "aqua:mikefarah/yq" = "4.48.1"
 "aqua:siderolabs/talos" = "1.11.3"
 "aqua:yannh/kubeconform" = "0.7.0"
+"aqua:derailed/k9s" = "0.50.16"
+
