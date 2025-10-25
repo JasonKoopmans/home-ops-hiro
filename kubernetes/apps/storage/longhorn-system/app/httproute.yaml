@@ -13,5 +13,5 @@ spec:
   rules:
     - backendRefs:
         - name: longhorn-frontend
-          namespace: longhorn-system
+          namespace: storage
           port: 80
