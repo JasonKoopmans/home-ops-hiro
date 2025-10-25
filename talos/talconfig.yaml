@@ -19,7 +19,7 @@ cniConfig:
 
 nodes:
   - hostname: "testhl01"
-    ipAddress: "192.168.1.115"
+    ipAddress: "192.168.1.25"
     installDiskSelector:
       serial: "sda"
     machineSpec:
@@ -31,7 +31,7 @@ nodes:
           hardwareAddr: "bc:24:11:4b:43:c7"
         dhcp: false
         addresses:
-          - "192.168.1.115/24"
+          - "192.168.1.25/24"
         routes:
           - network: "0.0.0.0/0"
             gateway: "192.168.1.1"
@@ -39,7 +39,7 @@ nodes:
         vip:
           ip: "192.168.1.45"
   - hostname: "testhl02"
-    ipAddress: "192.168.1.146"
+    ipAddress: "192.168.1.26"
     installDiskSelector:
       serial: "sda"
     machineSpec:
@@ -51,7 +51,7 @@ nodes:
           hardwareAddr: "bc:24:11:1d:a0:92"
         dhcp: false
         addresses:
-          - "192.168.1.146/24"
+          - "192.168.1.26/24"
         routes:
           - network: "0.0.0.0/0"
             gateway: "192.168.1.1"
@@ -59,7 +59,7 @@ nodes:
         vip:
           ip: "192.168.1.45"
   - hostname: "testhl03"
-    ipAddress: "192.168.1.120"
+    ipAddress: "192.168.1.27"
     installDiskSelector:
       serial: "sda"
     machineSpec:
@@ -71,7 +71,7 @@ nodes:
           hardwareAddr: "bc:24:11:39:c5:4c"
         dhcp: false
         addresses:
-          - "192.168.1.120/24"
+          - "192.168.1.27/24"
         routes:
           - network: "0.0.0.0/0"
             gateway: "192.168.1.1"
