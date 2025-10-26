@@ -451,3 +451,18 @@ If this repo is too hot to handle or too cold to hold check out these following 
 ## 🤝 Thanks
 
 Big shout out to all the contributors, sponsors and everyone else who has helped on this project.
+
+
+
+Checklist:
+
+Add these extensions to hosts.
+- iscsiadm/open-iscsi
+- siderolabs/util-linux-tools
+
+Initially added installed only the base system without the extensions seen here. I followed this [YouTube link to learn how to upgrade upgrade and patch in the extensions](https://www.youtube.com/watch?v=yu30AZ8g5LU). I was missing and I used this command line on each one of the hosts to apply the change.
+
+[Image Factory Link](https://factory.talos.dev/?arch=amd64&board=undefined&cmdline-set=true&extensions=-&extensions=siderolabs%2Fiscsi-tools&extensions=siderolabs%2Futil-linux-tools&platform=nocloud&secureboot=undefined&target=cloud&version=1.11.3)
+
+[Talos Docs for Boot Asset Upgrades](https://docs.siderolabs.com/talos/v1.11/platform-specific-installations/boot-assets#command)
+

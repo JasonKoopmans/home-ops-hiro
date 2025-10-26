@@ -2,3 +2,8 @@ kubernetes-testhl01.yaml
 kubernetes-testhl02.yaml
 kubernetes-testhl03.yaml
 talosconfig
+kubernetes-testhl04.yaml
+kubernetes-hiro-cmp-01.yaml
+kubernetes-hiro-cmp-02.yaml
+kubernetes-hiro-cmp-03.yaml
+kubernetes-hiro-cmp-04.yaml

@@ -1,0 +1,8 @@
+# bare-metal.yaml
+customization:
+  extraKernelArgs:
+    - net.ifnames=0
+  systemExtensions:
+    officialExtensions:
+      - image: sidero/iscsi-tools
+      - image: sidero/util-linux-tools

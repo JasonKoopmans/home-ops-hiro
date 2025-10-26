@@ -4,10 +4,10 @@ clusterName: kubernetes
 talosVersion: "${talosVersion}"
 kubernetesVersion: "${kubernetesVersion}"
 
-endpoint: https://192.168.1.45:6443
+endpoint: https://192.168.25.20:6443
 additionalApiServerCertSans: &sans
   - "127.0.0.1"
-  - "192.168.1.45"
+  - "192.168.25.20"
 additionalMachineCertSans: *sans
 
 clusterPodNets: ["10.42.0.0/16"]
@@ -18,82 +18,82 @@ cniConfig:
   name: none
 
 nodes:
-  - hostname: "testhl01"
-    ipAddress: "192.168.1.25"
+  - hostname: "hiro-cmp-01"
+    ipAddress: "192.168.25.21"
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba
+    talosImageURL: factory.talos.dev/installer/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
           hardwareAddr: "bc:24:11:4b:43:c7"
         dhcp: false
         addresses:
-          - "192.168.1.25/24"
+          - "192.168.25.21/24"
         routes:
           - network: "0.0.0.0/0"
-            gateway: "192.168.1.1"
+            gateway: "192.168.25.1"
         mtu: 1500
         vip:
-          ip: "192.168.1.45"
-  - hostname: "testhl02"
-    ipAddress: "192.168.1.26"
+          ip: "192.168.25.20"
+  - hostname: "hiro-cmp-02"
+    ipAddress: "192.168.25.22"
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba
+    talosImageURL: factory.talos.dev/installer/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
           hardwareAddr: "bc:24:11:1d:a0:92"
         dhcp: false
         addresses:
-          - "192.168.1.26/24"
+          - "192.168.25.22/24"
         routes:
           - network: "0.0.0.0/0"
-            gateway: "192.168.1.1"
+            gateway: "192.168.25.1"
         mtu: 1500
         vip:
-          ip: "192.168.1.45"
-  - hostname: "testhl03"
-    ipAddress: "192.168.1.27"
+          ip: "192.168.25.20"
+  - hostname: "hiro-cmp-03"
+    ipAddress: "192.168.25.23"
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba
+    talosImageURL: factory.talos.dev/installer/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
           hardwareAddr: "bc:24:11:39:c5:4c"
         dhcp: false
         addresses:
-          - "192.168.1.27/24"
+          - "192.168.25.23/24"
         routes:
           - network: "0.0.0.0/0"
-            gateway: "192.168.1.1"
+            gateway: "192.168.25.1"
         mtu: 1500
         vip:
-          ip: "192.168.1.45"
-  - hostname: "testhl04"
-    ipAddress: "192.168.1.28"
+          ip: "192.168.25.20"
+  - hostname: "hiro-cmp-04"
+    ipAddress: "192.168.25.24"
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba
+    talosImageURL: factory.talos.dev/installer/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
           hardwareAddr: "bc:24:11:ac:0a:05"
         dhcp: false
         addresses:
-          - "192.168.1.28/24"
+          - "192.168.25.24/24"
         routes:
           - network: "0.0.0.0/0"
-            gateway: "192.168.1.1"
+            gateway: "192.168.25.1"
         mtu: 1500
         vip:
-          ip: "192.168.1.45"
+          ip: "192.168.25.20"
 
 # Global patches
 patches:
