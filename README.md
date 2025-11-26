@@ -560,4 +560,13 @@ Volume will be available at `var/mnt/[uservolumename]
 ... 😭 I ended up configuring in the UI....
 
 
+### Setting Up the Default Backup Target
 
+https://longhorn.io/docs/1.10.1/snapshots-and-backups/backup-and-restore/set-backup-target/
+
+Created a new S3 User, Policy and Bucket according to the guide.
+Created a Secret and a Configmap in Longhorn folder to config.
+
+
+Secret: kubernetes/apps/storage/longhorn-system/app/default-backup-target-secret.yaml
+ConfigMap: kubernetes/apps/storage/longhorn-system/app/default-backup-target.yaml
