@@ -1,0 +1,19 @@
+# Commenting out the local-hostpath volume configuration for now.
+#---
+#apiVersion: v1alpha1
+#kind: UserVolumeConfig
+#name: local-hostpath
+#provisioning:
+#  diskSelector:
+#    match: disk.dev_path == '/dev/sda' && !system_disk
+#  maxSize: 10GiB
+---
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: longhorn
+provisioning:
+  diskSelector:
+    match: disk.dev_path == '/dev/sdb' && !system_disk
+  minSize: 10GiB
+  maxSize: 49GiB
+  grow: true

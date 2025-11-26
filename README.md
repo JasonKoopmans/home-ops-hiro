@@ -466,3 +466,98 @@ Initially added installed only the base system without the extensions seen here.
 
 [Talos Docs for Boot Asset Upgrades](https://docs.siderolabs.com/talos/v1.11/platform-specific-installations/boot-assets#command)
 
+## Longhorn Setup
+
+### References
+[Talos Disk Management](https://docs.siderolabs.com/talos/v1.9/configure-your-talos-cluster/storage-and-disk-management/disk-management)
+
+
+### Add  an additional disk allocated to them in Proxmox
+
+### confirm the presence of the disk using talosctl
+`talosctl get disks`
+
+### Create UserVolumes in Talos
+I added `talos/patches/global/machine-volumes.yaml` to patch in the creation of user volumes on the new disks dedicated to longhorn.
+
+Edited `talconfig.yaml` to add
+```
+# Global patches
+patches:
+  - "@./patches/global/machine-volumes.yaml"
+```
+
+### Apply the changes to Talos
+
+```
+task talos:generate-config
+task talos:apply-node 192.168.25.21
+task talos:apply-node 192.168.25.22
+task talos:apply-node 192.168.25.23
+task talos:apply-node 192.168.25.24
+```
+
+### Confirm that new user volumes are created
+
+```
+root@54aaabbfa756:/workspaces/home-ops-hiro# talosctl get dv
+NODE            NAMESPACE   TYPE               ID      VERSION   TYPE        SIZE     DISCOVERED   LABEL           PARTITIONLABEL
+192.168.25.21   runtime     DiscoveredVolume   loop2   1         disk        475 kB   squashfs
+192.168.25.21   runtime     DiscoveredVolume   loop3   1         disk        73 MB    squashfs
+192.168.25.21   runtime     DiscoveredVolume   sda     1         disk        22 GB    gpt
+192.168.25.21   runtime     DiscoveredVolume   sda1    1         partition   105 MB   vfat         EFI             EFI
+192.168.25.21   runtime     DiscoveredVolume   sda2    1         partition   1.0 MB                                BIOS
+192.168.25.21   runtime     DiscoveredVolume   sda3    1         partition   2.1 GB   xfs          BOOT            BOOT
+192.168.25.21   runtime     DiscoveredVolume   sda4    1         partition   1.0 MB   talosmeta                    META
+192.168.25.21   runtime     DiscoveredVolume   sda5    1         partition   105 MB   xfs          STATE           STATE
+192.168.25.21   runtime     DiscoveredVolume   sda6    1         partition   19 GB    xfs          EPHEMERAL       EPHEMERAL
+192.168.25.21   runtime     DiscoveredVolume   sdb     2         disk        54 GB    gpt
+192.168.25.21   runtime     DiscoveredVolume   sdb1    2         partition   53 GB    xfs                          u-longhorn
+192.168.25.21   runtime     DiscoveredVolume   sr0     1         disk        303 MB   iso9660      TALOS_V1_11_3
+192.168.25.22   runtime     DiscoveredVolume   loop2   1         disk        475 kB   squashfs
+192.168.25.22   runtime     DiscoveredVolume   loop3   1         disk        73 MB    squashfs
+192.168.25.22   runtime     DiscoveredVolume   sda     1         disk        22 GB    gpt
+192.168.25.22   runtime     DiscoveredVolume   sda1    1         partition   105 MB   vfat         EFI             EFI
+192.168.25.22   runtime     DiscoveredVolume   sda2    1         partition   1.0 MB                                BIOS
+192.168.25.22   runtime     DiscoveredVolume   sda3    1         partition   2.1 GB   xfs          BOOT            BOOT
+192.168.25.22   runtime     DiscoveredVolume   sda4    1         partition   1.0 MB   talosmeta                    META
+192.168.25.22   runtime     DiscoveredVolume   sda5    1         partition   105 MB   xfs          STATE           STATE
+192.168.25.22   runtime     DiscoveredVolume   sda6    1         partition   19 GB    xfs          EPHEMERAL       EPHEMERAL
+192.168.25.22   runtime     DiscoveredVolume   sdb     2         disk        54 GB    gpt
+192.168.25.22   runtime     DiscoveredVolume   sdb1    2         partition   53 GB    xfs                          u-longhorn
+192.168.25.22   runtime     DiscoveredVolume   sr0     1         disk        303 MB   iso9660      TALOS_V1_11_3
+192.168.25.23   runtime     DiscoveredVolume   loop2   1         disk        475 kB   squashfs
+192.168.25.23   runtime     DiscoveredVolume   loop3   1         disk        73 MB    squashfs
+192.168.25.23   runtime     DiscoveredVolume   sda     1         disk        22 GB    gpt
+192.168.25.23   runtime     DiscoveredVolume   sda1    1         partition   105 MB   vfat         EFI             EFI
+192.168.25.23   runtime     DiscoveredVolume   sda2    1         partition   1.0 MB                                BIOS
+192.168.25.23   runtime     DiscoveredVolume   sda3    1         partition   2.1 GB   xfs          BOOT            BOOT
+192.168.25.23   runtime     DiscoveredVolume   sda4    1         partition   1.0 MB   talosmeta                    META
+192.168.25.23   runtime     DiscoveredVolume   sda5    1         partition   105 MB   xfs          STATE           STATE
+192.168.25.23   runtime     DiscoveredVolume   sda6    1         partition   19 GB    xfs          EPHEMERAL       EPHEMERAL
+192.168.25.23   runtime     DiscoveredVolume   sdb     2         disk        54 GB    gpt
+192.168.25.23   runtime     DiscoveredVolume   sdb1    2         partition   53 GB    xfs                          u-longhorn
+192.168.25.23   runtime     DiscoveredVolume   sr0     1         disk        1.1 GB
+192.168.25.24   runtime     DiscoveredVolume   loop2   1         disk        475 kB   squashfs
+192.168.25.24   runtime     DiscoveredVolume   loop3   1         disk        73 MB    squashfs
+192.168.25.24   runtime     DiscoveredVolume   sda     1         disk        22 GB    gpt
+192.168.25.24   runtime     DiscoveredVolume   sda1    1         partition   105 MB   vfat         EFI             EFI
+192.168.25.24   runtime     DiscoveredVolume   sda2    1         partition   1.0 MB                                BIOS
+192.168.25.24   runtime     DiscoveredVolume   sda3    1         partition   2.1 GB   xfs          BOOT            BOOT
+192.168.25.24   runtime     DiscoveredVolume   sda4    1         partition   1.0 MB   talosmeta                    META
+192.168.25.24   runtime     DiscoveredVolume   sda5    1         partition   105 MB   xfs          STATE           STATE
+192.168.25.24   runtime     DiscoveredVolume   sda6    1         partition   19 GB    xfs          EPHEMERAL       EPHEMERAL
+192.168.25.24   runtime     DiscoveredVolume   sdb     2         disk        54 GB    gpt
+192.168.25.24   runtime     DiscoveredVolume   sdb1    2         partition   53 GB    xfs                          u-longhorn
+```
+
+Volume will be available at `var/mnt/[uservolumename]
+
+✅
+
+### [Configure Defaults for Nodes and Disks](https://longhorn.io/docs/1.10.1/nodes-and-volumes/nodes/default-disk-and-node-config/)
+
+... 😭 I ended up configuring in the UI....
+
+
+

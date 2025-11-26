@@ -27,6 +27,7 @@ spec:
     defaultSettings:
       createDefaultDiskLabeledNodes: true
       defaultDataLocality: best-effort
+      defaultDataPath: /var/mnt/longhorn
       defaultLonghornStaticStorageClass: longhorn
       defaultReplicaCount: "3"
       guaranteedEngineManagerCPU: "20"
