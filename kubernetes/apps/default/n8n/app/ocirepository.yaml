@@ -2,7 +2,7 @@
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: echo
+  name: n8n
 spec:
   interval: 15m
   layerSelector:
