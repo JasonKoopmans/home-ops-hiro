@@ -2,7 +2,7 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: echo
+  name: scanner-files
 spec:
   interval: 1h
   path: ./kubernetes/apps/default/scannner-files/app
