@@ -50,10 +50,10 @@ spec:
         ports:
           smb1:
             port: 139
-            type: TCP
+            protocol: TCP
           smb2:
             port: 445
-            type: TCP
+            protocol: TCP
       browser:
         ports:
           http:
