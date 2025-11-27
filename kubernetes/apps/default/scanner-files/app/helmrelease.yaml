@@ -59,12 +59,6 @@ spec:
           http:
             port: *port
 
-    serviceMonitor:
-      app:
-        endpoints:
-          - port: smb1
-          - port: smb2
-
     route:
       browser:
         hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}"]
