@@ -1,0 +1,82 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: scanner-files
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: scanner-files
+  interval: 1h
+  values:
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+
+    controllers:
+      main:
+        strategy: RollingUpdate
+        containers:
+          app:
+            image:
+              repository: docker.io/dperson/samba
+              tag: latest
+            env:
+              TZ: "${TIMEZONE}"
+              # PERMISSIONS: true
+              SHARE: public;/srv;yes;no;yes;all
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 512Mi
+          browser:
+            image:
+              repository: docker.io/filebrowser/filebrowser
+              tag: v2.42.0
+            env:
+              TZ: "${TIMEZONE}"
+              FB_DATABASE: /config/filebrowser.db
+              FB_ROOT: /srv
+              FB_LOG: stdout
+              FB_NOAUTH: true
+              FB_PORT: &port 8080
+
+    service:
+      app:
+        ports:
+          smb1:
+            port: 139
+            type: TCP
+          smb2:
+            port: 445
+            type: TCP
+      browser:
+        ports:
+          http:
+            port: *port
+
+    serviceMonitor:
+      app:
+        endpoints:
+          - port: smb1
+          - port: smb2
+
+    route:
+      browser:
+        hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: browser
+                port: *port
+
+    persistence:
+      data:
+        existingClaim: scanner-files

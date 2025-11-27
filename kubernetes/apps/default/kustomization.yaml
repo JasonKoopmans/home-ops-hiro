@@ -10,3 +10,4 @@ resources:
   - ./namespace.yaml
   - ./echo/ks.yaml
   - ./n8n/ks.yaml
+  - ./scanner-files/ks.yaml
