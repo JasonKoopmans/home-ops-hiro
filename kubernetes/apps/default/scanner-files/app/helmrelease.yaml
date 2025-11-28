@@ -84,11 +84,5 @@ spec:
                 port: *port
 
     persistence:
-      data:
+      srv:
         existingClaim: scanner-files
-        advancedMounts:
-          main:
-            app:
-              - path: /srv
-            browser:
-              - path: /srv
