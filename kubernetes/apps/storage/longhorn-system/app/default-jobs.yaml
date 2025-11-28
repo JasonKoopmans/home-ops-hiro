@@ -1,0 +1,33 @@
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: longhorn-default-snapshot-job
+  namespace: longhorn-system
+spec:
+  cron: "15 * * * *" # every hour at minute 15
+  task: "snapshot"
+  groups:
+  - default
+  retain: 3
+  concurrency: 2
+#  labels:
+#    label/1: a
+#    label/2: b
+
+---
+
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: longhorn-default-snapshot-job
+  namespace: longhorn-system
+spec:
+  cron: "45 2 * * *" # every day at 2:45 AM
+  task: "backup"
+  groups:
+  - default
+  retain: 3
+  concurrency: 2
+#  labels:
+#    label/1: a
+#    label/2: b
