@@ -21,7 +21,8 @@ spec:
               TZ: "${TIMEZONE}"
               # PERMISSIONS: true
               SHARE: public;/srv;yes;no;yes;all
-              USER: 1000:1000
+              USERID: 1000
+              GROUPID: 1000
             resources:
               requests:
                 cpu: 10m
