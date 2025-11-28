@@ -9,6 +9,6 @@ components:
 resources:
   - ./namespace.yaml
   - ./echo/ks.yaml
-  - /test/ks.yaml
+  - ./test/ks.yaml
   - ./n8n/ks.yaml
   - ./scanner-files/ks.yaml
