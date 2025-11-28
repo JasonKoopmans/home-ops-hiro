@@ -21,8 +21,8 @@ spec:
               TZ: "${TIMEZONE}"
               # PERMISSIONS: true
               SHARE: public;/srv;yes;no;yes;all
-              USERID: 1000
-              GROUPID: 1000
+              USERID: 0
+              GROUPID: 0
             resources:
               requests:
                 cpu: 10m
@@ -40,6 +40,8 @@ spec:
               FB_LOG: stdout
               FB_NOAUTH: true
               FB_PORT: &port 8080
+              PUID: 0
+              GUID: 0
 
     service:
       app:
