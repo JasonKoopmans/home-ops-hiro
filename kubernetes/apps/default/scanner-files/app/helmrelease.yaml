@@ -21,9 +21,9 @@ spec:
               TZ: "${TIMEZONE}"
               # PERMISSIONS: true
               SHARE: public;/srv;yes;no;yes;all
-              USERID: 0
-              GROUPID: 0
-              SMB: false
+              USERID: 0     # This sets the user to root
+              GROUPID: 0    # This sets the group to root
+              SMB: false   # Disable SMB2, since the HP476 printer seems to support only SMB1.  If unset the minumum is SMB2_10.  When I tested the HP476 with SMB2 enabled on an openmediavault server, it seemed to write work.  This image may set the patch level too high.
             resources:
               requests:
                 cpu: 10m
@@ -61,7 +61,7 @@ spec:
     route:
       app:
         kind: TCPRoute
-        hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}"]
+        hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}", "scans.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
             namespace: network
@@ -73,7 +73,7 @@ spec:
               - identifier: app
                 port: 445
       browser:
-        hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}"]
+        hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}", "scans.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
             namespace: network
