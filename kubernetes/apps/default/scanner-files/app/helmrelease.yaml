@@ -82,6 +82,8 @@ spec:
       data:
         existingClaim: scanner-files
         advancedMounts:
-          n8n:
+          main:
             app:
+              - path: /srv
+            browser:
               - path: /srv
