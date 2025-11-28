@@ -1,0 +1,26 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: test
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: test
+  interval: 1h
+  values:
+    controllers:
+      test:
+        strategy: RollingUpdate
+        containers:
+          app:
+            image:
+              repository: alpine
+              tag: latest
+            command: ["/bin/sh", "-c", "while true; do echo $(date) > /data/file.txt; sleep 60; done"]
+
+    persistence:
+      data:
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 10Mi
