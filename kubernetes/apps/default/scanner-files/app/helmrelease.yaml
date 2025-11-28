@@ -23,6 +23,7 @@ spec:
               SHARE: public;/srv;yes;no;yes;all
               USERID: 0
               GROUPID: 0
+              SMB: false
             resources:
               requests:
                 cpu: 10m
