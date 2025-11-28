@@ -21,6 +21,4 @@ spec:
 
     persistence:
       data:
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 10Mi
+        existingClaim: test
