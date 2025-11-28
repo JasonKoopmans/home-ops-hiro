@@ -56,7 +56,7 @@ spec:
     route:
       app:
         kind: TCPRoute
-        hostnames: ["smb.${SECRET_DOMAIN}"]
+        hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
             namespace: network
@@ -81,3 +81,7 @@ spec:
     persistence:
       data:
         existingClaim: scanner-files
+        advancedMounts:
+          n8n:
+            app:
+              - path: /srv
