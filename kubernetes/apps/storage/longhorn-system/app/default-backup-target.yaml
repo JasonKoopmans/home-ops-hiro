@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: longhorn-default-resource
-  namespace: longhorn-system
+  namespace: storage
 data:
   default-resource.yaml: |
     "backup-target": "s3://hiro-longhorn-backups@us-east-1/"

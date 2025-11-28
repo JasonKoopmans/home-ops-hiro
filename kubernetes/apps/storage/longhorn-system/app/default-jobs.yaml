@@ -2,7 +2,7 @@ apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
   name: longhorn-default-snapshot-job
-  namespace: longhorn-system
+  namespace: storage
 spec:
   cron: "15 * * * *" # every hour at minute 15
   task: "snapshot"
@@ -20,7 +20,7 @@ apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
   name: longhorn-default-snapshot-job
-  namespace: longhorn-system
+  namespace: storage
 spec:
   cron: "45 2 * * *" # every day at 2:45 AM
   task: "backup"
