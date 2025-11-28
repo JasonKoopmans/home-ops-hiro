@@ -4,7 +4,7 @@ kind: Kustomization
 resources:
 - ./default-backup-target.yaml
 - ./default-backup-target-secret.yaml
-- ./helmrelease.yaml
 - ./default-jobs.yaml
+- ./helmrelease.yaml
 - ./helmrepository.yaml
 - ./httproute.yaml
