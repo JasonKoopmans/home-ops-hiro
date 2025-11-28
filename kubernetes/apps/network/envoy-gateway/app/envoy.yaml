@@ -83,6 +83,18 @@ spec:
       external-dns.alpha.kubernetes.io/hostname: internal.${SECRET_DOMAIN}
       lbipam.cilium.io/ips: "192.168.25.101"
   listeners:
+    - name: smb139
+      protocol: TCP
+      port: 139
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: smb445
+      protocol: TCP
+      port: 445
+      allowedRoutes:
+        namespaces:
+          from: All
     - name: http
       protocol: HTTP
       port: 80

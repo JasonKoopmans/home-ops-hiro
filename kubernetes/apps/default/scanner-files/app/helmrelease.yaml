@@ -54,6 +54,28 @@ spec:
             port: *port
 
     route:
+      app139:
+        kind: TCPRoute
+        hostnames: ["smb.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: smb139
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: 139
+      app445:
+        kind: TCPRoute
+        hostnames: ["smb.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: smb445
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: 445
       browser:
         hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}"]
         parentRefs:
