@@ -61,7 +61,7 @@ spec:
         hostnames:
           - *hostName
         parentRefs:
-          - name: envoy-external
+          - name: envoy-internal
             namespace: network
             sectionName: https
       webhooks:
