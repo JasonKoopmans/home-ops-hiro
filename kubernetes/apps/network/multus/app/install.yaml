@@ -152,17 +152,6 @@ spec:
         - operator: Exists
           effect: NoExecute
       serviceAccountName: multus
-      initContainers:
-        - command:
-          - /install-cni.sh
-          image: ghcr.io/siderolabs/install-cni:v1.11.3  # adapt to your talos version
-          name: install-cni
-          securityContext:
-            privileged: true
-          volumeMounts:
-          - mountPath: /host/opt/cni/bin
-            mountPropagation: Bidirectional
-            name: cnibin
       containers:
         - name: kube-multus
           image: ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick
@@ -211,6 +200,15 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
       initContainers:
+        - name: install-cni
+          command: /install-cni.sh
+          image: ghcr.io/siderolabs/install-cni:v1.11.3  # adapt to your talos version
+          securityContext:
+            privileged: true
+          volumeMounts:
+          - mountPath: /host/opt/cni/bin
+            mountPropagation: Bidirectional
+            name: cnibin
         - name: install-multus-binary
           image: ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick
           command:
