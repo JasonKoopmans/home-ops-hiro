@@ -5,3 +5,4 @@ resources:
   - ./volume.yaml
   - ./helmrelease.yaml
   - ./ocirepository.yaml
+  - ./multus-test-pod.yaml
