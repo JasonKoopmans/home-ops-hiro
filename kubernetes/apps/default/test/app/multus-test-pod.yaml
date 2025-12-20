@@ -8,7 +8,8 @@ metadata:
         {
           "name": "macvlan-conf",
           "namespace": "network",
-          "mac": "99-AF-C2-40-78-6D"
+          "mac": "66:d5:24:7b:93:82",
+          "ips": ["192.168.20.40/24"]
         }
       ]
 spec:

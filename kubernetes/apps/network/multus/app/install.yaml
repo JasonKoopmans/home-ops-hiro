@@ -158,7 +158,7 @@ spec:
           command: [ "/usr/src/multus-cni/bin/multus-daemon" ]
           resources:
             requests:
-              cpu: "101m"
+              cpu: "100m"
               memory: "50Mi"
             limits:
               cpu: "100m"
@@ -201,8 +201,9 @@ spec:
                   fieldPath: spec.nodeName
       initContainers:
         - name: install-cni
-          command: /install-cni.sh
-          image: ghcr.io/siderolabs/install-cni:v1.11.3  # adapt to your talos version
+          command:
+            - "/install-cni.sh"
+          image: ghcr.io/siderolabs/install-cni:v1.5.0  # adapt to your talos version
           securityContext:
             privileged: true
           volumeMounts:
