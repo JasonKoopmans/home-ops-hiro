@@ -29,7 +29,7 @@ spec:
                   "name": "macvlan-conf",
                   "namespace": "network",
                   "mac": "66:d5:24:7b:93:81",
-                  "ips": ["192.168.20.41/24"]
+                  "ips": ["192.168.20.41/16"]
               }]
         containers:
           main:
