@@ -48,6 +48,7 @@ spec:
       main:
         hostnames:
           - hass.${SECRET_DOMAIN}
+          - homeassistant.local
         parentRefs:
           - name: envoy-internal
             namespace: network
