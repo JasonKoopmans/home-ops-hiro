@@ -46,6 +46,12 @@ spec:
             port: &port 8123
     route:
       main:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi:home-assistant
+          gethomepage.dev/title: Home Assistant
+          gethomepage.dev/description: "Home Automation Platform"
+          gethomepage.dev/group: "Home Automation"
         hostnames:
           - hass.${SECRET_DOMAIN}
           - homeassistant.local
