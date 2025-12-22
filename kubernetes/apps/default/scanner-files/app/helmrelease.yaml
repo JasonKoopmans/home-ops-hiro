@@ -73,6 +73,12 @@ spec:
               - identifier: app
                 port: 445
       browser:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi:folder
+          gethomepage.dev/title: Scanner Files
+          gethomepage.dev/description: "File Scanning and Sharing Platform"
+          gethomepage.dev/group: "Home Services"
         hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}", "scans.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal

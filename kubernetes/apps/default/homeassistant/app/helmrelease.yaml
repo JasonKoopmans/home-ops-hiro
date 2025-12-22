@@ -51,7 +51,7 @@ spec:
           gethomepage.dev/icon: mdi:home-assistant
           gethomepage.dev/title: Home Assistant
           gethomepage.dev/description: "Home Automation Platform"
-          gethomepage.dev/group: "Home Automation"
+          gethomepage.dev/group: "Home Services"
         hostnames:
           - hass.${SECRET_DOMAIN}
           - homeassistant.local

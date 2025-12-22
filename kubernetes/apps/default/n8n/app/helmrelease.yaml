@@ -58,6 +58,12 @@ spec:
             port: *port
     route:
       app:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi:n8n
+          gethomepage.dev/title: n8n
+          gethomepage.dev/description: "N8N Automation Platform"
+          gethomepage.dev/group: "Automation"
         hostnames:
           - *hostName
         parentRefs:
