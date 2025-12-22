@@ -44,8 +44,13 @@ spec:
       main:
         hostnames: [*host]
         parentRefs:
-          - name: envoy-internal
-            namespace: networking
+          - name: envoy-external
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: main
+                port: *port
 
     persistence:
       config:
