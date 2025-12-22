@@ -41,10 +41,10 @@ spec:
             port: 3000
 
     route:
-      internal:
+      main:
         hostnames: [*host]
         parentRefs:
-          - name: internal
+          - name: envoy-internal
             namespace: networking
 
     persistence:
