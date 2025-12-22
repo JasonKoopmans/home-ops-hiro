@@ -10,6 +10,11 @@ metadata:
           "namespace": "network",
           "mac": "66:d5:24:7b:93:82",
           "ips": ["192.168.20.40/24"]
+        },
+        {
+          "name": "macvlan-conf-lan",
+          "namespace": "network",
+          "ips": ["192.168.1.31/24"]
         }
       ]
 spec:
