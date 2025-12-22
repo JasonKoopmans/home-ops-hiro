@@ -50,7 +50,7 @@ spec:
           - hass.${SECRET_DOMAIN}
           - homeassistant.local
         parentRefs:
-          - name: envoy-internal
+          - name: envoy-external
             namespace: network
             sectionName: https
         rules:
