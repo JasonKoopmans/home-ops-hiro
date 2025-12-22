@@ -44,7 +44,7 @@ spec:
       main:
         hostnames: [*host]
         parentRefs:
-          - name: envoy-external
+          - name: envoy-internal
             namespace: network
             sectionName: https
         rules:
