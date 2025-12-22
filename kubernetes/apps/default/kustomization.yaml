@@ -13,3 +13,4 @@ resources:
   - ./n8n/ks.yaml
   - ./scanner-files/ks.yaml
   - ./homeassistant/ks.yaml
+  - ./homepage/ks.yaml
