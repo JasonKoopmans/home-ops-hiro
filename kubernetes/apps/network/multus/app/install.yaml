@@ -64,7 +64,6 @@ rules:
       - '*'
   - apiGroups:
       - ""
-      - longhorn.io
     resources:
       - pods
       - pods/status
@@ -94,19 +93,19 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: multus
-    namespace: kube-system
+    namespace: network
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: multus
-  namespace: kube-system
+  namespace: network
 ---
 kind: ConfigMap
 apiVersion: v1
 metadata:
   name: multus-daemon-config
-  namespace: kube-system
+  namespace: network
   labels:
     tier: node
     app: multus
@@ -127,7 +126,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: kube-multus-ds
-  namespace: kube-system
+  namespace: network
   labels:
     tier: node
     app: multus
