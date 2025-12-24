@@ -64,6 +64,7 @@ rules:
       - '*'
   - apiGroups:
       - ""
+      - longhorn.io
     resources:
       - pods
       - pods/status
