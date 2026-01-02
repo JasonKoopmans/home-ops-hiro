@@ -26,6 +26,9 @@ spec:
             image:
               repository: ghcr.io/n8n-io/n8n
               tag: 2.0.2
+            envFrom:
+              - secretRef:
+                  name: n8n-smtp-secret
             env:
               DB_SQLITE_VACUUM_ON_STARTUP: true
               EXECUTIONS_DATA_PRUNE: true
@@ -89,3 +92,10 @@ spec:
           n8n:
             app:
               - path: /home/node/.n8n
+
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          n8n:
+            app:
+              - path: /home/node/.cache
