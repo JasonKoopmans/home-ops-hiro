@@ -27,9 +27,73 @@ tasks:
 
   default: task --list
 
+  apply:
+    desc: Apply a App Kustomization resource for a cluster
+    summary: |
+      Args:
+        path: Path under apps containing the  app (required)
+    cmd: |
+      kustomize build {{.KUBERNETES_DIR}}/apps/{{.path}}/app | \
+      sed 's/${SECRET_DOMAIN}/koopmans.co/g' | \
+      sed 's/${TIMEZONE}/America\/Chicago/g' | \
+      kubectl apply --kubeconfig {{.KUBECONFIG}} --server-side \
+          --field-manager=kustomize-controller -f -
+    requires:
+      vars: ["path"]
+    vars:
+      ns: '{{.ns | default "flux-system"}}'
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+
+
+  build:
+    desc: build Resources at a given path using customize and test against kubeconform
+    summary: |
+      Args:
+        path: Path under apps containing the Flux Kustomization resource (ks.yaml) (required)
+    env:
+      SECRET_DOMAIN: 'koopmans.co'
+      TIMEZONE: 'America/Chicago'
+    cmd: |
+      find "{{.KUBERNETES_DIR}}/apps/{{.path}}" -type f -name "*.sops.*" -exec sops --decrypt  {} \;
+      kustomize build {{.KUBERNETES_DIR}}/apps/{{.path}}/app  | envsubst
+
+
+    requires:
+      vars: ["path"]
+    preconditions:
+      - { msg: "Missing kubeconfig ", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing Flux Kustomization for app {{.path}}", sh: "test -f {{.KUBERNETES_DIR}}/apps/{{.path}}/ks.yaml" }
+
+
+  validate:
+    desc: Run an asset through the validation offered by kubeconform
+    summary: |
+      Args:
+        path: Path under apps containing the Flux Kustomization resource (ks.yaml) (required)
+    cmd: |
+      bash {{.SCRIPTS_DIR}}/kubeconform.sh {{.KUBERNETES_DIR}}
+    preconditions:
+      - { msg: "Missing kubeconfigflux ", sh: "test -f {{.KUBECONFIG}}" }
+
+
+
   reconcile:
     desc: Force Flux to pull in changes from your Git repository
     cmd: flux --namespace flux-system reconcile kustomization flux-system --with-source
     preconditions:
       - test -f {{.KUBECONFIG}}
       - which flux
+
+  test:
+    desc: build Resources at a given path using customize and test against kubeconform
+    summary: |
+      Args:
+        path: Path under apps containing the Flux Kustomization resource (ks.yaml) (required)
+    cmd: |
+      find "{{.KUBERNETES_DIR}}/apps/{{.path}}" -type f -name "*.sops.*" -exec sops --decrypt  {} \;
+    requires:
+      vars: ["path"]
+    preconditions:
+      - { msg: "Missing kubeconfig ", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing Flux Kustomization for app {{.path}}", sh: "test -f {{.KUBERNETES_DIR}}/apps/{{.path}}/ks.yaml" }

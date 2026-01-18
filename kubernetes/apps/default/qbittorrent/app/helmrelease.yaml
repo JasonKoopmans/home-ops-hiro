@@ -1,0 +1,169 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app qbittorrent
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: app-template
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      main:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          filebrowser:
+            image:
+              repository: docker.io/filebrowser/filebrowser
+              tag: v2.53.0
+
+            tty: true
+            stdin: true
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: false
+              runAsGroup: 1001
+              runAsNonRoot: true
+              runAsUser: 1001
+
+            env:
+              FB_DATABASE: /config/filebrowser.db
+              FB_ROOT: /downloads
+              FB_LOG: stdout
+              FB_NOAUTH: true
+              FB_PORT: &filebrowserPort 8081
+              PUID: "1001"
+              PGID: "1001"
+
+
+          gluetun:
+            image:
+              repository: ghcr.io/qdm12/gluetun
+              tag: v3.41.0
+
+            securityContext:
+              privileged: true
+              allowPrivilegeEscalation: true
+              capabilities:
+                drop:
+                  - ALL
+                add:
+                  - NET_ADMIN
+
+            env:
+              TZ: ${TIMEZONE}
+            envFrom:
+              - secretRef:
+                  name: gluetun-secret
+
+          main:
+            image:
+              repository: ghcr.io/home-operations/qbittorrent
+              tag: 5.1.4
+
+            tty: true
+            stdin: true
+
+            dependsOn:
+              - gluetun
+
+            env:
+              QBT_WEBUI_PORT: &webPort 8080
+              QBT_TORRENTING_PORT: &torrentPort 53712
+            nameOverride: *app
+
+            resources:
+              requests:
+                cpu: 200m
+                memory: 1Gi
+              limits:
+                memory: 4Gi
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: true
+              runAsGroup: 1001
+              runAsNonRoot: true
+              runAsUser: 1001
+
+
+    defaultPodOptions:
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+        supplementalGroups: [1001]
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *webPort
+      browser:
+        ports:
+          http:
+            port: *filebrowserPort
+
+    route:
+      main:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi:qbittorrent
+          gethomepage.dev/title: qBittorrent
+          gethomepage.dev/description: "qBittorrent "
+          gethomepage.dev/group: "Downloaders"
+        hostnames:
+          - qbittorrent.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: main
+                port: *webPort
+
+      browser:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi:folder
+          gethomepage.dev/title: Download Files
+          gethomepage.dev/description: "Download File Browser"
+          gethomepage.dev/group: "Downloaders"
+        hostnames: ["downloads.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: browser
+                port: *filebrowserPort
+
+    persistence:
+      config:
+        existingClaim: qbittorrent-config
+
+      downloads:
+        existingClaim: qbittorrent-downloads
+
+      tmp:
+        type: emptyDir

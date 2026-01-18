@@ -14,3 +14,4 @@ resources:
   - ./scanner-files/ks.yaml
   - ./homeassistant/ks.yaml
   - ./homepage/ks.yaml
+  - ./obsidian-remote/ks.yaml
