@@ -15,4 +15,4 @@ resources:
   - ./homeassistant/ks.yaml
   - ./homepage/ks.yaml
   - ./minecraft/ks.yaml
-  - ./obsidian-remote/ks.yaml
+  - ./qbittorrent/ks.yaml
