@@ -1,0 +1,56 @@
+---
+# yaml-language-server: $schema=https://crd.movishell.pl/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: minecraft
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: minecraft
+  interval: 30m
+  values:
+    image:
+      repository: ghcr.io/itzg/minecraft-server
+      tag: 2026.1.2-java25
+    resources:
+      limits:
+        memory: 2000Mi
+      requests:
+        cpu: 100m
+        memory: 1000Mi
+    securityContext:
+      runAsUser: &APP_UID 568
+      fsGroup: &APP_GID 568
+    livenessProbe:
+      initialDelaySeconds: 0
+    readinessProbe:
+      initialDelaySeconds: 0
+    startupProbe:
+      enabled: true
+    extraEnv:
+      TZ: "${TIMEZONE}"
+      ENABLE_ROLLING_LOGS: true
+      UID: *APP_UID
+      GID: *APP_GID
+      INIT_MEMORY: 25%
+      MAX_MEMORY: 70%
+    persistence:
+      dataDir:
+        enabled: true
+        existingClaim: minecraft-pvc
+    minecraftServer:
+      eula: true
+      version: 1.21.10
+      type: PAPER
+      difficulty: normal
+      whitelist: "GachouGoose,movi,MicroGachou"
+      ops: "movi,GachouGoose"
+      pvp: true
+      motd: Meh
+      worldSaveName: Kubeworld
+      viewDistance: 12
+      forceReDownload: true
+      memory: ""
+      jvmXXOpts: "-Ddisable.watchdog=true"
+
