@@ -128,10 +128,9 @@ spec:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/icon: mdi:qbittorrent
           gethomepage.dev/title: qBittorrent
-          gethomepage.dev/description: "qBittorrent "
+          gethomepage.dev/description: "qBittorrent Download Manager"
           gethomepage.dev/group: "Downloaders"
-        hostnames:
-          - qbittorrent.${SECRET_DOMAIN}
+        hostnames: ["qbittorrent.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
             namespace: network
