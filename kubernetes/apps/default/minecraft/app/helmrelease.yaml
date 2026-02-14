@@ -12,7 +12,7 @@ spec:
   values:
     image:
       repository: ghcr.io/itzg/minecraft-server
-      tag: 2026.1.2-java25
+      tag: 2026.2.1-java25
     resources:
       limits:
         memory: 2000Mi
