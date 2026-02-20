@@ -48,7 +48,7 @@ spec:
       main:
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/icon: mdi:home-assistant
+          gethomepage.dev/icon: homeassistant
           gethomepage.dev/title: Home Assistant
           gethomepage.dev/description: "Home Automation Platform"
           gethomepage.dev/group: "Home Services"
