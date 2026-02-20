@@ -1,4 +1,4 @@
-apiVersion: longhorn.io/v1beta2
+apiVersion: longhorn.io/v1
 kind: RecurringJob
 metadata:
   name: longhorn-default-snapshot-job
@@ -16,7 +16,7 @@ spec:
 
 ---
 
-apiVersion: longhorn.io/v1beta2
+apiVersion: longhorn.io/v1
 kind: RecurringJob
 metadata:
   name: longhorn-default-backup-job
