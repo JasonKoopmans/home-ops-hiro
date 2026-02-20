@@ -7,4 +7,4 @@ resources:
 - ./httproute.yaml
 - ./default-backup-target-secret.sops.yaml
 - ./default-backup-target.yaml
-- ./default-jobs.yaml
+#- ./default-jobs.yaml
