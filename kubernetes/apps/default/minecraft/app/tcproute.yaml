@@ -13,7 +13,6 @@ metadata:
     gethomepage.dev/widget.type: minecraft
     gethomepage.dev/widget.url: udp://minecraft.default:25565
 spec:
-  hostnames: ["minecraft.${SECRET_DOMAIN}"]
   parentRefs:
     - name: envoy-internal
       namespace: network
