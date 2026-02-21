@@ -74,7 +74,7 @@ spec:
       browser:
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/icon: mdi:folder
+          gethomepage.dev/icon: scan
           gethomepage.dev/title: Scanner Files
           gethomepage.dev/description: "File Scanning and Sharing Platform"
           gethomepage.dev/group: "Home Services"
