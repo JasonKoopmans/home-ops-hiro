@@ -59,7 +59,7 @@ kubernetes/apps/<namespace-group>/
 
 ### Key Conventions
 
-- **Namespaces are grouped by function**, not one-per-app. Examples: `database`, `monitoring`, `storage`, `network`, `home`, `default`, etc.
+- **Namespaces are grouped by function**, not one-per-app. Examples: `monitoring`, `storage`, `network`, `home`, `default`, etc.
 - The `ks.yaml` is a **Flux Kustomization** resource (not a Kustomize kustomization.yaml) — it tells Flux to reconcile the `./app` subdirectory.
 - The `kustomization.yaml` inside `app/` is a standard **Kustomize** resource list.
 - Some apps use the **bjw-s app-template** Helm chart; others use **upstream Helm charts** directly. Follow the pattern of whichever approach already exists for similar apps, or use upstream charts for well-known projects with official Helm charts.
@@ -151,7 +151,7 @@ The following workflows run on pull requests and must pass:
 ### What This Means for Agents
 
 - All YAML must be valid and parseable.
-- HelmRelease `spec.chart` references must point to a valid `HelmRepository` or `OCIRepository` resource defined within the same app's `app/` directory (e.g., `helmrepository.yaml` or `ocirepository.yaml`).
+- HelmRelease `spec.chart` references must point to valid OCI or Helm repositories already defined in `kubernetes/flux/`.
 - Flux Kustomization paths in `ks.yaml` must match the actual directory structure.
 - If `flux-local` fails on your PR, the issue is likely a malformed HelmRelease, missing Kustomize resource reference, or incorrect path.
 
@@ -179,27 +179,25 @@ Follow this checklist when deploying a new app:
    apiVersion: kustomize.toolkit.fluxcd.io/v1
    kind: Kustomization
    metadata:
-     name: <app-name>
+     name: &app <app-name>
+     namespace: flux-system
    spec:
-     interval: 1h
+     targetNamespace: <namespace>
+     commonMetadata:
+       labels:
+         app.kubernetes.io/name: *app
+     interval: 30m
+     retryInterval: 1m
+     timeout: 5m
      path: ./kubernetes/apps/<namespace-group>/<app-name>/app
-     postBuild:
-       substituteFrom:
-         - name: cluster-secrets
-           kind: Secret
      prune: true
      sourceRef:
        kind: GitRepository
        name: flux-system
-       namespace: flux-system
-     targetNamespace: <namespace>
      wait: false
    ```
 
-4. **Create the Helm chart source and HelmRelease** (if Helm-based):
-   - For apps with a **traditional Helm HTTP repository** (e.g., operator Helm charts): create `helmrepository.yaml` pointing to the chart's HTTP index URL, referenced via `spec.chart.spec.sourceRef`.
-   - For apps using the **bjw-s app-template** or other OCI-hosted charts: create `ocirepository.yaml` pointing to the OCI registry URL, referenced via `spec.chartRef`.
-   - Always add the source file (`helmrepository.yaml` or `ocirepository.yaml`) to the app's `app/kustomization.yaml` resource list.
+4. **Create the HelmRelease** (if Helm-based) or raw manifests.
 
 5. **Create the Kustomize resource list (`app/kustomization.yaml`):**
    ```yaml
@@ -226,8 +224,8 @@ Follow this checklist when deploying a new app:
 
 7. **If creating a new namespace group**, also create:
    - `kubernetes/apps/<namespace-group>/namespace.yaml`
-   - `kubernetes/apps/<namespace-group>/kustomization.yaml` (listing `namespace.yaml` + each app's `ks.yaml`)
-   - Flux automatically discovers the new namespace group via the `path: ./kubernetes/apps` setting in `kubernetes/flux/cluster/ks.yaml` — **no changes to `kubernetes/flux/` are needed**.
+   - `kubernetes/apps/<namespace-group>/kustomization.yaml`
+   - Register the new namespace directory in `kubernetes/flux/` so Flux discovers it.
 
 ---
 
