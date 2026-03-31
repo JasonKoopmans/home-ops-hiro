@@ -16,6 +16,8 @@ env:
   KUBECONFIG: '{{.ROOT_DIR}}/kubeconfig'
   SOPS_AGE_KEY_FILE: '{{.ROOT_DIR}}/age.key'
   TALOSCONFIG: '{{.TALOSCONFIG}}'
+  SECRET_DOMAIN: 'koopmans.co'
+  TIMEZONE: 'America/Chicago'
 
 includes:
   bootstrap: .taskfiles/bootstrap
@@ -33,9 +35,8 @@ tasks:
       Args:
         path: Path under apps containing the  app (required)
     cmd: |
-      kustomize build {{.KUBERNETES_DIR}}/apps/{{.path}}/app | \
-      sed 's/${SECRET_DOMAIN}/koopmans.co/g' | \
-      sed 's/${TIMEZONE}/America\/Chicago/g' | \
+      find "{{.KUBERNETES_DIR}}/apps/{{.path}}" -type f -name "*.sops.*" -exec sops --decrypt  {} \;
+      kustomize build {{.KUBERNETES_DIR}}/apps/{{.path}}/app  | envsubst | \
       kubectl apply --kubeconfig {{.KUBECONFIG}} --server-side \
           --field-manager=kustomize-controller -f -
     requires:
@@ -51,13 +52,10 @@ tasks:
     summary: |
       Args:
         path: Path under apps containing the Flux Kustomization resource (ks.yaml) (required)
-    env:
-      SECRET_DOMAIN: 'koopmans.co'
-      TIMEZONE: 'America/Chicago'
+
     cmd: |
       find "{{.KUBERNETES_DIR}}/apps/{{.path}}" -type f -name "*.sops.*" -exec sops --decrypt  {} \;
       kustomize build {{.KUBERNETES_DIR}}/apps/{{.path}}/app  | envsubst
-
 
     requires:
       vars: ["path"]
@@ -77,23 +75,9 @@ tasks:
       - { msg: "Missing kubeconfigflux ", sh: "test -f {{.KUBECONFIG}}" }
 
 
-
   reconcile:
     desc: Force Flux to pull in changes from your Git repository
     cmd: flux --namespace flux-system reconcile kustomization flux-system --with-source
     preconditions:
       - test -f {{.KUBECONFIG}}
       - which flux
-
-  test:
-    desc: build Resources at a given path using customize and test against kubeconform
-    summary: |
-      Args:
-        path: Path under apps containing the Flux Kustomization resource (ks.yaml) (required)
-    cmd: |
-      find "{{.KUBERNETES_DIR}}/apps/{{.path}}" -type f -name "*.sops.*" -exec sops --decrypt  {} \;
-    requires:
-      vars: ["path"]
-    preconditions:
-      - { msg: "Missing kubeconfig ", sh: "test -f {{.KUBECONFIG}}" }
-      - { msg: "Missing Flux Kustomization for app {{.path}}", sh: "test -f {{.KUBERNETES_DIR}}/apps/{{.path}}/ks.yaml" }
