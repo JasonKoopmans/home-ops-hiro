@@ -4,6 +4,14 @@ kind: Kustomization
 metadata:
   name: mariadb-operator
 spec:
+  # Wait for the HelmRelease (and its CRDs) to be ready before this Kustomization
+  # is considered healthy. Consuming apps must set dependsOn: [{name: mariadb-operator}]
+  # so that CRDs are guaranteed to exist before any MariaDB CRs are created.
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: mariadb-operator
+      namespace: database
   interval: 1h
   path: ./kubernetes/apps/database/mariadb-operator/app
   postBuild:
@@ -16,4 +24,3 @@ spec:
     name: flux-system
     namespace: flux-system
   targetNamespace: database
-  wait: false
