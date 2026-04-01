@@ -2,17 +2,25 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: mariadb-operator
+  name: &app mariadb-operator
+  namespace: flux-system
 spec:
-  # Wait for the HelmRelease (and its CRDs) to be ready before this Kustomization
-  # is considered healthy. Consuming apps must set dependsOn: [{name: mariadb-operator}]
+  targetNamespace: database
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  # Wait for the operator HelmRelease to be ready before this Kustomization is
+  # considered healthy. Consuming apps must set dependsOn: [{name: mariadb-operator}]
   # so that CRDs are guaranteed to exist before any MariaDB CRs are created.
+  # CRD ordering is enforced via HelmRelease dependsOn within the app directory.
   healthChecks:
     - apiVersion: helm.toolkit.fluxcd.io/v2
       kind: HelmRelease
       name: mariadb-operator
       namespace: database
   interval: 1h
+  retryInterval: 1m
+  timeout: 5m
   path: ./kubernetes/apps/database/mariadb-operator/app
   postBuild:
     substituteFrom:
@@ -23,4 +31,4 @@ spec:
     kind: GitRepository
     name: flux-system
     namespace: flux-system
-  targetNamespace: database
+  wait: false
