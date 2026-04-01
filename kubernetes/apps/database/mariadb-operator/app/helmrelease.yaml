@@ -18,11 +18,13 @@ spec:
     remediation:
       retries: -1
     crds: CreateReplace
+    wait: true
   upgrade:
     cleanupOnFail: true
     remediation:
       retries: 3
     crds: CreateReplace
+    wait: true
   values:
     metrics:
       enabled: false
