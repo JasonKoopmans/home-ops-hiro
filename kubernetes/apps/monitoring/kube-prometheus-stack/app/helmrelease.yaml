@@ -6,6 +6,9 @@ metadata:
   name: kube-prometheus-stack
 spec:
   interval: 1h
+  dependsOn:
+    - name: kube-prometheus-stack-crds
+      namespace: monitoring
   chart:
     spec:
       chart: kube-prometheus-stack
@@ -15,12 +18,14 @@ spec:
         name: prometheus-community
         namespace: monitoring
   install:
-    crds: CreateReplace
+    # CRDs are managed by the kube-prometheus-stack-crds HelmRelease
+    crds: Skip
     remediation:
       retries: -1
   upgrade:
     cleanupOnFail: true
-    crds: CreateReplace
+    # CRDs are managed by the kube-prometheus-stack-crds HelmRelease
+    crds: Skip
     remediation:
       retries: 3
   values:

@@ -4,7 +4,19 @@ kind: Kustomization
 metadata:
   name: kube-prometheus-stack
 spec:
+  # Wait for the kube-prometheus-stack HelmRelease to be ready before this
+  # Kustomization is considered healthy. Consuming apps can use
+  # dependsOn: [{name: kube-prometheus-stack}] to guarantee CRDs are loaded
+  # before any Prometheus CRs (ServiceMonitor, PodMonitor, etc.) are created.
+  # CRD ordering is enforced via HelmRelease dependsOn within the app directory.
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: kube-prometheus-stack
+      namespace: monitoring
   interval: 1h
+  retryInterval: 1m
+  timeout: 5m
   path: ./kubernetes/apps/monitoring/kube-prometheus-stack/app
   postBuild:
     substituteFrom:
