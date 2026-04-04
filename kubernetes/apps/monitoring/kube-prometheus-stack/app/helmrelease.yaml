@@ -66,6 +66,16 @@ spec:
               resources:
                 requests:
                   storage: 20Gi
+        additionalScrapeConfigs:
+          - job_name: "opnsense-telegraf"
+            scrape_interval: 30s
+            metrics_path: /metrics
+            static_configs:
+              - targets:
+                  - "192.168.1.1:9273" # replace with OPNsense IP:port
+            labels:
+              site: "home"
+              device: "opnsense"
 
     grafana:
       enabled: true
