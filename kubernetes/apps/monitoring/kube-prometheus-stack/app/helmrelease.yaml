@@ -69,6 +69,8 @@ spec:
 
     grafana:
       enabled: true
+      deploymentStrategy:
+        type: Recreate
       admin:
         existingSecret: grafana-admin-secret
         userKey: admin-user
