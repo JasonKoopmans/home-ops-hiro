@@ -73,9 +73,9 @@ spec:
             static_configs:
               - targets:
                   - "192.168.1.1:9273" # replace with OPNsense IP:port
-            labels:
-              site: "home"
-              device: "opnsense"
+                labels:
+                  site: "home"
+                  device: "opnsense"
 
     grafana:
       enabled: true
