@@ -35,8 +35,16 @@ tasks:
       Args:
         path: Path under apps containing the  app (required)
     cmd: |
-      find "{{.KUBERNETES_DIR}}/apps/{{.path}}" -type f -name "*.sops.*" -exec sops --decrypt  {} \;
-      kustomize build {{.KUBERNETES_DIR}}/apps/{{.path}}/app  | envsubst | \
+      TMP_APP_DIR="$(mktemp -d)"
+      trap 'rm -rf "$TMP_APP_DIR"' EXIT
+      cp -R "{{.KUBERNETES_DIR}}/apps/{{.path}}/app/." "$TMP_APP_DIR/"
+
+      find "$TMP_APP_DIR" -type f -name "*.sops.*" | while IFS= read -r encrypted_file; do
+        sops --decrypt "$encrypted_file" > "$encrypted_file.tmp"
+        mv "$encrypted_file.tmp" "$encrypted_file"
+      done
+
+      kustomize build "$TMP_APP_DIR" | envsubst | \
       kubectl apply --kubeconfig {{.KUBECONFIG}} --server-side \
           --field-manager=kustomize-controller -f -
     requires:
@@ -46,6 +54,31 @@ tasks:
     preconditions:
       - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
 
+  remove:
+    desc: Remove a App Kustomization resource for a cluster while testing
+    summary: |
+      Args:
+        path: Path under apps containing the  app (required)
+    cmd: |
+      TMP_APP_DIR="$(mktemp -d)"
+      trap 'rm -rf "$TMP_APP_DIR"' EXIT
+      cp -R "{{.KUBERNETES_DIR}}/apps/{{.path}}/app/." "$TMP_APP_DIR/"
+
+      find "$TMP_APP_DIR" -type f -name "*.sops.*" | while IFS= read -r encrypted_file; do
+        sops --decrypt "$encrypted_file" > "$encrypted_file.tmp"
+        mv "$encrypted_file.tmp" "$encrypted_file"
+      done
+
+      kustomize build "$TMP_APP_DIR" | envsubst | \
+      kubectl delete --kubeconfig {{.KUBECONFIG}} -f -
+    requires:
+      vars: ["path"]
+    vars:
+      ns: '{{.ns | default "flux-system"}}'
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+
+
 
   build:
     desc: build Resources at a given path using customize and test against kubeconform
@@ -54,8 +87,16 @@ tasks:
         path: Path under apps containing the Flux Kustomization resource (ks.yaml) (required)
 
     cmd: |
-      find "{{.KUBERNETES_DIR}}/apps/{{.path}}" -type f -name "*.sops.*" -exec sops --decrypt  {} \;
-      kustomize build {{.KUBERNETES_DIR}}/apps/{{.path}}/app  | envsubst
+      TMP_APP_DIR="$(mktemp -d)"
+      trap 'rm -rf "$TMP_APP_DIR"' EXIT
+      cp -R "{{.KUBERNETES_DIR}}/apps/{{.path}}/app/." "$TMP_APP_DIR/"
+
+      find "$TMP_APP_DIR" -type f -name "*.sops.*" | while IFS= read -r encrypted_file; do
+        sops --decrypt "$encrypted_file" > "$encrypted_file.tmp"
+        mv "$encrypted_file.tmp" "$encrypted_file"
+      done
+
+      kustomize build "$TMP_APP_DIR" | envsubst
 
     requires:
       vars: ["path"]
