@@ -61,6 +61,20 @@ spec:
     backend:
       replicas: 0
 
+    # Keep chunks cache lightweight but avoid OOM/restarts on small clusters.
+    chunksCache:
+      enabled: true
+      replicas: 1
+      allocatedMemory: 768
+      maxItemMemory: 5
+      resources:
+        requests:
+          cpu: 50m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+
     # Disable self-monitoring to reduce resource usage
     monitoring:
       selfMonitoring:
