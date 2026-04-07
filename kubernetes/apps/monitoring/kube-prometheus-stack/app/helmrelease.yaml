@@ -107,6 +107,8 @@ spec:
 
     prometheus-node-exporter:
       enabled: true
+      extraArgs:
+        - --no-collector.kernel_hung
       resources:
         requests:
           cpu: 10m
