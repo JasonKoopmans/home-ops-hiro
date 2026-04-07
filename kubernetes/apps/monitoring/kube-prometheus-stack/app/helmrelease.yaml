@@ -61,11 +61,11 @@ spec:
         storageSpec:
           volumeClaimTemplate:
             spec:
-              storageClassName: longhorn
+              storageClassName: longhorn-2-no-backup
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  storage: 20Gi
+                  storage: 45Gi
         additionalScrapeConfigs:
           - job_name: "opnsense-telegraf"
             scrape_interval: 30s

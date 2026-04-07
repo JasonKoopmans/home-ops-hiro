@@ -44,7 +44,7 @@ spec:
     singleBinary:
       replicas: 1
       persistence:
-        storageClass: longhorn
+        storageClass: longhorn-2-no-backup
         size: 10Gi
       resources:
         requests:
