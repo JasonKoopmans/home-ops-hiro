@@ -8,3 +8,4 @@ resources:
 - ./default-backup-target-secret.sops.yaml
 - ./default-backup-target.yaml
 - ./default-jobs.yaml
+- ./storageclasses.yaml
