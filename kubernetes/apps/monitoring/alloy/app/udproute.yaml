@@ -1,0 +1,15 @@
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: UDPRoute
+metadata:
+  name: alloy-syslog
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: envoy-internal
+      namespace: network
+      sectionName: syslog-5143
+  rules:
+    - backendRefs:
+        - name: alloy
+          port: 5143
