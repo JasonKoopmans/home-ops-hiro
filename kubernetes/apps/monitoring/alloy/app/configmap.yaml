@@ -24,7 +24,42 @@ data:
       forward_to = [loki.write.default.receiver]
     }
 
+    loki.relabel "syslog_labels" {
+      forward_to = [loki.write.default.receiver]
+
+      rule {
+        action        = "replace"
+        source_labels = ["__syslog_connection_ip_address"]
+        target_label  = "source_ip"
+      }
+
+      rule {
+        action        = "replace"
+        source_labels = ["__syslog_message_hostname"]
+        target_label  = "hostname"
+      }
+
+      rule {
+        action        = "replace"
+        source_labels = ["__syslog_message_app_name"]
+        target_label  = "app_name"
+      }
+
+      rule {
+        action        = "replace"
+        source_labels = ["__syslog_message_severity"]
+        target_label  = "severity"
+      }
+
+      rule {
+        action        = "replace"
+        source_labels = ["__syslog_message_facility"]
+        target_label  = "facility"
+      }
+    }
+
     loki.source.syslog "syslog" {
+      relabel_rules = loki.relabel.syslog_labels.rules
       listener {
         address  = "0.0.0.0:5143"
         protocol = "udp"
