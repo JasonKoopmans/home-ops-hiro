@@ -13,6 +13,10 @@ data:
 
     discovery.kubernetes "pods" {
       role = "pod"
+      selectors {
+        role  = "pod"
+        field = "spec.nodeName=" + sys.env("NODE_NAME")
+      }
     }
 
     loki.source.kubernetes "pods" {
@@ -25,7 +29,7 @@ data:
         address  = "0.0.0.0:5143"
         protocol = "udp"
         labels   = {
-          job = "syslog"
+          job = "syslog",
         }
       }
       forward_to = [loki.write.default.receiver]

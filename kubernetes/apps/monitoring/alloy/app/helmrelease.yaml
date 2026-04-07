@@ -28,6 +28,11 @@ spec:
         create: false
         name: alloy-config
         key: config.alloy
+      extraEnv:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
       extraPorts:
         - name: syslog-udp
           port: 5143
