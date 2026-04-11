@@ -5,3 +5,4 @@ resources:
   - ./helmrepository.yaml
   - ./helmrelease-crds.yaml
   - ./helmrelease.yaml
+  - ./rbac-default-events.yaml
