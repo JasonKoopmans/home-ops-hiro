@@ -1,0 +1,104 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-longhorn-overview
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  longhorn-overview.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Longhorn Targets Up",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "targets": [
+            {"expr": "sum(up{job=~\".*longhorn.*\"})", "legendFormat": "up"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Volume Capacity Used %",
+          "gridPos": {"h": 8, "w": 18, "x": 6, "y": 0},
+          "targets": [
+            {
+              "expr": "100 * sum by (volume) (longhorn_volume_actual_size_bytes) / clamp_min(sum by (volume) (longhorn_volume_capacity_bytes), 1)",
+              "legendFormat": "{{volume}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 70},
+                  {"color": "red", "value": 85}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Node Storage Used %",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "targets": [
+            {
+              "expr": "100 * sum by (node) (longhorn_node_storage_usage_bytes) / clamp_min(sum by (node) (longhorn_node_storage_capacity_bytes), 1)",
+              "legendFormat": "{{node}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 75},
+                  {"color": "red", "value": 90}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "type": "table",
+          "title": "Volume Robustness",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "targets": [
+            {
+              "expr": "max by (volume, robustness) (longhorn_volume_robustness)",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "options": {"showHeader": true}
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["longhorn", "storage"],
+      "templating": {"list": []},
+      "time": {"from": "now-6h", "to": "now"},
+      "title": "Longhorn Overview",
+      "version": 1
+    }

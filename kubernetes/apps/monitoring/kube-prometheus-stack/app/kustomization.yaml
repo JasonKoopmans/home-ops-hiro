@@ -6,6 +6,8 @@ resources:
   - ./helmrepository.yaml
   - ./helmrelease-crds.yaml
   - ./helmrelease.yaml
+  - ./grafana-dashboard-longhorn.yaml
+  - ./grafana-dashboard-hosts.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml

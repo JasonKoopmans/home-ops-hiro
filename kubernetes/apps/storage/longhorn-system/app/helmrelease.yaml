@@ -41,4 +41,5 @@ spec:
       enabled: false
     metrics:
       serviceMonitor:
-        enabled: true
+        # Managed explicitly via ./servicemonitor.yaml for deterministic behavior.
+        enabled: false
