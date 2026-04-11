@@ -44,7 +44,10 @@ spec:
     singleBinary:
       replicas: 1
       persistence:
-        storageClass: longhorn-2-no-backup
+        # StatefulSet volumeClaimTemplates are immutable; keep this stable after first deploy.
+        # To suppress Longhorn recurring backups/snapshots, disable the volume's default
+        # recurring-job label instead of changing storageClass in-place.
+        storageClass: longhorn
         size: 10Gi
       resources:
         requests:
