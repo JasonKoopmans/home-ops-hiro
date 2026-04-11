@@ -35,6 +35,39 @@ spec:
       enabled: false
 
     alertmanager:
+      # Keep current no-op receivers, but split routing by severity so notification
+      # endpoints can be added later without refactoring alert labels/routes.
+      config:
+        global:
+          resolve_timeout: 5m
+        inhibit_rules:
+          - equal: [namespace, alertname]
+            source_matchers: [severity = critical]
+            target_matchers: [severity =~ warning|info]
+          - equal: [namespace, alertname]
+            source_matchers: [severity = warning]
+            target_matchers: [severity = info]
+          - equal: [namespace]
+            source_matchers: [alertname = InfoInhibitor]
+            target_matchers: [severity = info]
+          - target_matchers: [alertname = InfoInhibitor]
+        receivers:
+          - name: "null"
+          - name: "warning"
+          - name: "critical"
+        route:
+          group_by: [namespace, alertname]
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 12h
+          receiver: "null"
+          routes:
+            - matchers: [alertname = "Watchdog"]
+              receiver: "null"
+            - matchers: [severity = "critical"]
+              receiver: "critical"
+            - matchers: [severity = "warning"]
+              receiver: "warning"
       alertmanagerSpec:
         replicas: 1
         resources:

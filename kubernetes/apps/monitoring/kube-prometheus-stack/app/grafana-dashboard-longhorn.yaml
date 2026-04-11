@@ -14,35 +14,81 @@ data:
       "graphTooltip": 1,
       "panels": [
         {
+          "id": 1,
           "type": "stat",
-          "title": "Longhorn Targets Up",
-          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "title": "Longhorn Managers Up",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
           "targets": [
-            {"expr": "sum(up{job=~\".*longhorn.*\"})", "legendFormat": "up"}
+            {"expr": "sum(up{job=\"longhorn-backend\"})", "legendFormat": ""}
           ],
           "fieldConfig": {
             "defaults": {
               "thresholds": {
                 "mode": "absolute",
                 "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]
-              }
+              },
+              "mappings": []
             },
             "overrides": []
-          }
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "orientation": "auto", "textMode": "auto", "colorMode": "background"}
         },
         {
-          "type": "timeseries",
-          "title": "Volume Capacity Used %",
-          "gridPos": {"h": 8, "w": 18, "x": 6, "y": 0},
+          "id": 2,
+          "type": "stat",
+          "title": "Total Volumes",
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "targets": [
+            {"expr": "count(max by (pvc, pvc_namespace) (longhorn_volume_state))", "legendFormat": ""}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Unhealthy Volumes",
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
           "targets": [
             {
-              "expr": "100 * sum by (volume) (longhorn_volume_actual_size_bytes) / clamp_min(sum by (volume) (longhorn_volume_capacity_bytes), 1)",
-              "legendFormat": "{{volume}}"
+              "expr": "count(max by (pvc, pvc_namespace) (longhorn_volume_robustness{state=\"healthy\"}) == 0) or vector(0)",
+              "legendFormat": ""
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]
+              },
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Volume Used % (actual / provisioned)",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "100 * max by (pvc, pvc_namespace) (longhorn_volume_actual_size_bytes) / clamp_min(max by (pvc, pvc_namespace) (longhorn_volume_capacity_bytes), 1)",
+              "legendFormat": "{{pvc}} ({{pvc_namespace}})"
             }
           ],
           "fieldConfig": {
             "defaults": {
               "unit": "percent",
+              "min": 0,
+              "max": 100,
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -50,24 +96,28 @@ data:
                   {"color": "yellow", "value": 70},
                   {"color": "red", "value": 85}
                 ]
-              }
+              },
+              "custom": {"lineWidth": 1, "fillOpacity": 10}
             },
             "overrides": []
           }
         },
         {
+          "id": 5,
           "type": "timeseries",
           "title": "Node Storage Used %",
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
           "targets": [
             {
-              "expr": "100 * sum by (node) (longhorn_node_storage_usage_bytes) / clamp_min(sum by (node) (longhorn_node_storage_capacity_bytes), 1)",
+              "expr": "100 * max by (node) (longhorn_node_storage_usage_bytes) / clamp_min(max by (node) (longhorn_node_storage_capacity_bytes), 1)",
               "legendFormat": "{{node}}"
             }
           ],
           "fieldConfig": {
             "defaults": {
               "unit": "percent",
+              "min": 0,
+              "max": 100,
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
@@ -75,23 +125,89 @@ data:
                   {"color": "yellow", "value": 75},
                   {"color": "red", "value": 90}
                 ]
-              }
+              },
+              "custom": {"lineWidth": 1, "fillOpacity": 10}
             },
             "overrides": []
           }
         },
         {
+          "id": 6,
           "type": "table",
-          "title": "Volume Robustness",
+          "title": "Volume Health (1 = active state)",
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
           "targets": [
             {
-              "expr": "max by (volume, robustness) (longhorn_volume_robustness)",
+              "expr": "max by (pvc, pvc_namespace, state) (longhorn_volume_robustness) == 1",
               "format": "table",
-              "instant": true
+              "instant": true,
+              "legendFormat": ""
             }
           ],
-          "options": {"showHeader": true}
+          "transformations": [
+            {"id": "filterFieldsByName", "options": {"include": {"names": ["pvc", "pvc_namespace", "state"]}}}
+          ],
+          "options": {"showHeader": true},
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "state"},
+                "properties": [
+                  {
+                    "id": "custom.displayMode",
+                    "value": "color-background"
+                  },
+                  {
+                    "id": "mappings",
+                    "value": [
+                      {"type": "value", "options": {"healthy": {"color": "green", "index": 0}}},
+                      {"type": "value", "options": {"degraded": {"color": "yellow", "index": 1}}},
+                      {"type": "value", "options": {"faulted": {"color": "red", "index": 2}}}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Volume Read IOPS",
+          "gridPos": {"h": 7, "w": 12, "x": 0, "y": 12},
+          "targets": [
+            {
+              "expr": "max by (pvc, pvc_namespace) (longhorn_volume_read_iops)",
+              "legendFormat": "{{pvc}} ({{pvc_namespace}})"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "iops",
+              "custom": {"lineWidth": 1, "fillOpacity": 5}
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Volume Write IOPS",
+          "gridPos": {"h": 7, "w": 12, "x": 12, "y": 12},
+          "targets": [
+            {
+              "expr": "max by (pvc, pvc_namespace) (longhorn_volume_write_iops)",
+              "legendFormat": "{{pvc}} ({{pvc_namespace}})"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "iops",
+              "custom": {"lineWidth": 1, "fillOpacity": 5}
+            },
+            "overrides": []
+          }
         }
       ],
       "schemaVersion": 39,
@@ -100,5 +216,5 @@ data:
       "templating": {"list": []},
       "time": {"from": "now-6h", "to": "now"},
       "title": "Longhorn Overview",
-      "version": 1
+      "version": 2
     }

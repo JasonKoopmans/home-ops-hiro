@@ -1,0 +1,166 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: storage-and-host-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: longhorn.rules
+      rules:
+        - alert: LonghornManagerDown
+          expr: up{job="longhorn-backend"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Longhorn manager target is down
+            description: Longhorn manager target {{ $labels.instance }} has been down for more than 10 minutes.
+
+        - alert: LonghornNodeNotReady
+          expr: max by (node) (longhorn_node_status{condition="ready"}) == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Longhorn node is not ready
+            description: Longhorn node {{ $labels.node }} has reported not ready for more than 10 minutes.
+
+        - alert: LonghornVolumeUnhealthy
+          expr: max by (pvc, pvc_namespace) (longhorn_volume_robustness{state="healthy"}) == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Longhorn volume is unhealthy
+            description: Longhorn volume {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} is not healthy.
+
+        - alert: LonghornVolumeUsageHigh
+          expr: 100 * max by (pvc, pvc_namespace) (longhorn_volume_actual_size_bytes) / clamp_min(max by (pvc, pvc_namespace) (longhorn_volume_capacity_bytes), 1) > 80
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: Longhorn volume usage is high
+            description: Longhorn volume {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} is above 80% used.
+
+        - alert: LonghornVolumeUsageCritical
+          expr: 100 * max by (pvc, pvc_namespace) (longhorn_volume_actual_size_bytes) / clamp_min(max by (pvc, pvc_namespace) (longhorn_volume_capacity_bytes), 1) > 92
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Longhorn volume usage is critically high
+            description: Longhorn volume {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} is above 92% used.
+
+        - alert: LonghornNodeStoragePressure
+          expr: 100 * max by (node) (longhorn_node_storage_usage_bytes) / clamp_min(max by (node) (longhorn_node_storage_capacity_bytes) - max by (node) (longhorn_node_storage_reservation_bytes), 1) > 80
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: Longhorn node storage pressure is high
+            description: Longhorn node {{ $labels.node }} is above 80% of usable storage capacity.
+
+        - alert: LonghornNodeStoragePressureCritical
+          expr: 100 * max by (node) (longhorn_node_storage_usage_bytes) / clamp_min(max by (node) (longhorn_node_storage_capacity_bytes) - max by (node) (longhorn_node_storage_reservation_bytes), 1) > 90
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Longhorn node storage pressure is critical
+            description: Longhorn node {{ $labels.node }} is above 90% of usable storage capacity.
+
+        - alert: LonghornBackupNeverCompleted
+          expr: max by (pvc, pvc_namespace) (longhorn_volume_last_backup_at) == 0
+          for: 6h
+          labels:
+            severity: warning
+          annotations:
+            summary: Longhorn volume has never completed a backup
+            description: Longhorn volume {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} has no completed backup timestamp.
+
+        - alert: LonghornBackupStale
+          expr: (time() - max by (pvc, pvc_namespace) (longhorn_volume_last_backup_at)) > 172800 and max by (pvc, pvc_namespace) (longhorn_volume_last_backup_at) > 0
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: Longhorn volume backup is stale
+            description: Longhorn volume {{ $labels.pvc }} in namespace {{ $labels.pvc_namespace }} has not had a successful backup in over 48 hours.
+
+        - alert: LonghornBackupFailedState
+          expr: max by (volume) (longhorn_backup_state) > 3
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: Longhorn backup entered a failed state
+            description: Longhorn backup state for volume {{ $labels.volume }} indicates failure (>3) for at least 30 minutes.
+
+    - name: node-exporter.rules
+      rules:
+        - alert: NodeExporterDown
+          expr: up{job="node-exporter"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Node exporter target is down
+            description: Node exporter target {{ $labels.instance }} has been down for more than 10 minutes.
+
+        - alert: HostHighCpuUsage
+          expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{job="node-exporter", mode="idle"}[5m]))) > 90
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Host CPU usage is high
+            description: Host {{ $labels.instance }} has sustained CPU usage above 90% for more than 15 minutes.
+
+        - alert: HostHighCpuUsageCritical
+          expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{job="node-exporter", mode="idle"}[5m]))) > 95
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Host CPU usage is critically high
+            description: Host {{ $labels.instance }} has sustained CPU usage above 95% for more than 10 minutes.
+
+        - alert: HostMemoryPressure
+          expr: 100 * (1 - (node_memory_MemAvailable_bytes{job="node-exporter"} / node_memory_MemTotal_bytes{job="node-exporter"})) > 90
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Host memory pressure is high
+            description: Host {{ $labels.instance }} has sustained memory usage above 90% for more than 15 minutes.
+
+        - alert: HostMemoryPressureCritical
+          expr: 100 * (1 - (node_memory_MemAvailable_bytes{job="node-exporter"} / node_memory_MemTotal_bytes{job="node-exporter"})) > 95
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Host memory pressure is critical
+            description: Host {{ $labels.instance }} has sustained memory usage above 95% for more than 10 minutes.
+
+        - alert: HostRootFilesystemPressure
+          expr: 100 * (1 - (node_filesystem_avail_bytes{job="node-exporter", mountpoint="/", fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{job="node-exporter", mountpoint="/", fstype!~"tmpfs|overlay"})) > 85
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            summary: Host root filesystem usage is high
+            description: Host {{ $labels.instance }} root filesystem has been above 85% used for more than 20 minutes.
+
+        - alert: HostRootFilesystemPressureCritical
+          expr: 100 * (1 - (node_filesystem_avail_bytes{job="node-exporter", mountpoint="/", fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{job="node-exporter", mountpoint="/", fstype!~"tmpfs|overlay"})) > 92
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Host root filesystem usage is critical
+            description: Host {{ $labels.instance }} root filesystem has been above 92% used for more than 10 minutes.
