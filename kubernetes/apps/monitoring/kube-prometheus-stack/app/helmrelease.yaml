@@ -48,6 +48,7 @@ spec:
       prometheusSpec:
         replicas: 1
         retention: 14d
+        enableRemoteWriteReceiver: true
         # Discover all ServiceMonitors and PodMonitors in the cluster
         serviceMonitorSelectorNilUsesHelmValues: false
         podMonitorSelectorNilUsesHelmValues: false

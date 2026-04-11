@@ -7,4 +7,5 @@ resources:
   - ./helmrelease-crds.yaml
   - ./helmrelease.yaml
   - ./httproute.yaml
+  - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml
