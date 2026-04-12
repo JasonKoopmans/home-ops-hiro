@@ -89,6 +89,12 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    - name: minecraft-bedrock
+      protocol: UDP
+      port: 19132
+      allowedRoutes:
+        namespaces:
+          from: All
     - name: minecraft
       protocol: TCP
       port: 25565

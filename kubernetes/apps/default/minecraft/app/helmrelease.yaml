@@ -53,4 +53,15 @@ spec:
       forceReDownload: true
       memory: ""
       jvmXXOpts: "-Ddisable.watchdog=true"
+      pluginUrls:
+        - https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot
+        - https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot
+    extraPorts:
+      - name: bedrock
+        containerPort: 19132
+        protocol: UDP
+        service:
+          enabled: true
+          embedded: true
+          port: 19132
 

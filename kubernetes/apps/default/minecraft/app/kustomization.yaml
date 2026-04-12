@@ -6,4 +6,5 @@ resources:
   - ./helmrelease.yaml
   - ./ocirepository.yaml
   - ./tcproute.yaml
+  - ./udproute.yaml
   - ./pvc.yaml
