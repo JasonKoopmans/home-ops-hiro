@@ -8,7 +8,9 @@ resources:
   - ./helmrelease.yaml
   - ./grafana-dashboard-longhorn.yaml
   - ./grafana-dashboard-hosts.yaml
+  - ./grafana-dashboard-opnsense.yaml
   - ./prometheusrule-storage-and-hosts.yaml
+  - ./prometheusrule-opnsense.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml

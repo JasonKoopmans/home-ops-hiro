@@ -1,0 +1,101 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: opnsense-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: opnsense.rules
+      rules:
+        - alert: OpnSenseTargetDown
+          expr: up{job="opnsense-telegraf"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            service: opnsense
+          annotations:
+            summary: OPNsense metrics target is down
+            description: OPNsense scrape target {{ $labels.instance }} has been down for more than 5 minutes.
+
+        - alert: OpnSenseScrapeSlow
+          expr: avg_over_time(scrape_duration_seconds{job="opnsense-telegraf"}[10m]) > 10
+          for: 15m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense scrape is slow
+            description: Prometheus scrape duration for {{ $labels.instance }} is above 10 seconds over the last 10 minutes.
+
+        - alert: OpnSenseHighCpuUsage
+          expr: 100 * (1 - avg by (instance) (rate(cpu_usage_idle{job="opnsense-telegraf", cpu=~"cpu[0-9]+"}[5m]))) > 90
+          for: 15m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense CPU usage is high
+            description: CPU usage on {{ $labels.instance }} has stayed above 90% for more than 15 minutes.
+
+        - alert: OpnSenseMemoryPressure
+          expr: mem_used_percent{job="opnsense-telegraf"} > 90
+          for: 15m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense memory pressure is high
+            description: Memory usage on {{ $labels.instance }} has stayed above 90% for more than 15 minutes.
+
+        - alert: OpnSenseDiskPressure
+          expr: max by (instance) (disk_used_percent{job="opnsense-telegraf", path="/"}) > 90
+          for: 15m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense root disk usage is high
+            description: Root filesystem usage on {{ $labels.instance }} has stayed above 90% for more than 15 minutes.
+
+        - alert: OpnSenseInterfaceErrorsHigh
+          expr: sum by (instance, interface) (rate(net_err_in{job="opnsense-telegraf"}[5m]) + rate(net_err_out{job="opnsense-telegraf"}[5m])) > 10
+          for: 10m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense interface errors are elevated
+            description: Interface {{ $labels.interface }} on {{ $labels.instance }} has sustained error activity above baseline.
+
+        - alert: OpnSenseStateTablePressure
+          expr: 100 * max by (instance) (pf_state_table_used{job="opnsense-telegraf"}) / clamp_min(max by (instance) (pf_state_table_limit{job="opnsense-telegraf"}), 1) > 85
+          for: 15m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense firewall state table usage is high
+            description: Firewall state table usage on {{ $labels.instance }} is above 85% for more than 15 minutes.
+
+        - alert: OpnSenseGatewayPacketLossHigh
+          expr: avg_over_time(ping_loss_percent{job="opnsense-telegraf"}[10m]) > 5
+          for: 10m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense gateway packet loss is high
+            description: Packet loss observed by {{ $labels.instance }} for target {{ $labels.target }} is above 5%.
+
+        - alert: OpnSenseGatewayLatencyHigh
+          expr: avg_over_time(ping_response_time_ms{job="opnsense-telegraf"}[10m]) > 150
+          for: 10m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense gateway latency is high
+            description: Gateway latency observed by {{ $labels.instance }} for target {{ $labels.target }} is above 150ms.

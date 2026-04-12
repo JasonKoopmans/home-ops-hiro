@@ -1,0 +1,230 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-opnsense-overview
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  opnsense-overview.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "OPNsense Target Up",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "targets": [
+            {"expr": "sum(up{job=\"opnsense-telegraf\"})", "legendFormat": "up"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Telegraf Scrape Duration",
+          "gridPos": {"h": 4, "w": 18, "x": 6, "y": 0},
+          "targets": [
+            {"expr": "scrape_duration_seconds{job=\"opnsense-telegraf\"}", "legendFormat": "{{instance}}"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "CPU Used %",
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 4},
+          "targets": [
+            {"expr": "100 * (1 - avg by (instance) (rate(cpu_usage_idle{job=\"opnsense-telegraf\", cpu=~\"cpu[0-9]+\"}[5m])))", "legendFormat": "{{instance}}"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 75},
+                  {"color": "red", "value": 90}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Memory Used %",
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 4},
+          "targets": [
+            {"expr": "mem_used_percent{job=\"opnsense-telegraf\"}", "legendFormat": "{{instance}}"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 80},
+                  {"color": "red", "value": 90}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Root Disk Used %",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 4},
+          "targets": [
+            {"expr": "max by (instance) (disk_used_percent{job=\"opnsense-telegraf\", path=\"/\"})", "legendFormat": "{{instance}}"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 80},
+                  {"color": "red", "value": 90}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Interface Throughput (bits/s)",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "targets": [
+            {"expr": "sum by (interface) (rate(net_bytes_recv{job=\"opnsense-telegraf\", interface=~\"$interface\"}[5m])) * 8", "legendFormat": "{{interface}} in"},
+            {"expr": "sum by (interface) (rate(net_bytes_sent{job=\"opnsense-telegraf\", interface=~\"$interface\"}[5m])) * 8", "legendFormat": "{{interface}} out"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Interface Errors/s",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "targets": [
+            {"expr": "sum by (interface) (rate(net_err_in{job=\"opnsense-telegraf\", interface=~\"$interface\"}[5m]) + rate(net_err_out{job=\"opnsense-telegraf\", interface=~\"$interface\"}[5m]))", "legendFormat": "{{interface}}"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "eps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Firewall State Table Used %",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+          "targets": [
+            {"expr": "100 * max by (instance) (pf_state_table_used{job=\"opnsense-telegraf\"}) / clamp_min(max by (instance) (pf_state_table_limit{job=\"opnsense-telegraf\"}), 1)", "legendFormat": "{{instance}}"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 80},
+                  {"color": "red", "value": 90}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "WAN Gateway Packet Loss %",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+          "targets": [
+            {"expr": "avg by (target) (ping_loss_percent{job=\"opnsense-telegraf\"})", "legendFormat": "{{target}}"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 2},
+                  {"color": "red", "value": 5}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["opnsense", "network", "firewall"],
+      "templating": {
+        "list": [
+          {
+            "name": "interface",
+            "label": "Interface",
+            "type": "query",
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "query": "label_values(net_bytes_recv{job=\"opnsense-telegraf\"}, interface)",
+            "refresh": 2,
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*"
+          }
+        ]
+      },
+      "time": {"from": "now-6h", "to": "now"},
+      "title": "OPNsense Overview",
+      "version": 1
+    }
