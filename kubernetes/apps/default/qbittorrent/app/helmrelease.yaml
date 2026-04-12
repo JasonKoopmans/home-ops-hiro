@@ -66,6 +66,8 @@ spec:
                   - NET_ADMIN
 
             env:
+              LOG_LEVEL: warning
+              OPENVPN_VERBOSITY: "1"
               TZ: ${TIMEZONE}
             envFrom:
               - secretRef:
