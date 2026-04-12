@@ -44,7 +44,7 @@ spec:
       version: 1.21.10
       type: PAPER
       difficulty: normal
-      whitelist: "GachouGoose,movi,MicroGachou"
+      whitelist: "GachouGoose,movi"
       ops: "movi,GachouGoose"
       pvp: true
       motd: Meh
