@@ -1,0 +1,128 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app readarr
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: app-template
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      main:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: lscr.io/linuxserver/readarr
+              tag: nightly-0.4.19.2811-ls400
+            env:
+              PGID: "1001"
+              PUID: "1001"
+              TZ: ${TIMEZONE}
+              UMASK: "002"
+            resources:
+              requests:
+                cpu: 25m
+                memory: 256Mi
+              limits:
+                memory: 2Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: false
+              runAsGroup: 1001
+              runAsNonRoot: true
+              runAsUser: 1001
+        initContainers:
+          init-paths:
+            image:
+              repository: docker.io/library/busybox
+              tag: 1.37.0
+            command:
+              - /bin/sh
+              - -c
+            args:
+              - mkdir -p /downloads/media/books
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: true
+              runAsGroup: 1001
+              runAsNonRoot: true
+              runAsUser: 1001
+        pod:
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/instance
+                        operator: In
+                        values:
+                          - qbittorrent
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values:
+                          - qbittorrent
+                  topologyKey: kubernetes.io/hostname
+
+    defaultPodOptions:
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+        supplementalGroups: [1001]
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: &port 8787
+
+    route:
+      main:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: readarr
+          gethomepage.dev/title: Readarr
+          gethomepage.dev/description: "Book Acquisition and Organization"
+          gethomepage.dev/group: "Downloads"
+        hostnames:
+          - readarr.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: main
+                port: *port
+
+    persistence:
+      config:
+        existingClaim: readarr-config
+        globalMounts:
+          - path: /config
+
+      media:
+        existingClaim: qbittorrent-downloads
+        globalMounts:
+          - path: /downloads
+
+      tmp:
+        type: emptyDir
