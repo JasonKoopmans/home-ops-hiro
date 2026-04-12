@@ -37,15 +37,6 @@ spec:
                 memory: 256Mi
               limits:
                 memory: 2Gi
-            securityContext:
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop:
-                  - ALL
-              readOnlyRootFilesystem: false
-              runAsGroup: 1001
-              runAsNonRoot: true
-              runAsUser: 1001
         initContainers:
           init-paths:
             image:
