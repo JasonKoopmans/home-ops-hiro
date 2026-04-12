@@ -66,6 +66,7 @@ spec:
                   - NET_ADMIN
 
             env:
+              FIREWALL_INPUT_PORTS: "8080,8081"
               LOG_LEVEL: warn
               OPENVPN_VERBOSITY: "1"
               TZ: ${TIMEZONE}
