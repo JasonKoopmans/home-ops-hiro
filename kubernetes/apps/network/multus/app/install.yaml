@@ -114,7 +114,7 @@ data:
     {
         "chrootDir": "/hostroot",
         "cniVersion": "0.3.1",
-        "logLevel": "verbose",
+      "logLevel": "warn",
         "logToStderr": true,
         "cniConfigDir": "/host/etc/cni/net.d",
         "multusAutoconfigDir": "/host/etc/cni/net.d",
@@ -159,10 +159,10 @@ spec:
           resources:
             requests:
               cpu: "100m"
-              memory: "50Mi"
+              memory: "128Mi"
             limits:
               cpu: "100m"
-              memory: "50Mi"
+              memory: "256Mi"
           securityContext:
             privileged: true
           terminationMessagePolicy: FallbackToLogsOnError
