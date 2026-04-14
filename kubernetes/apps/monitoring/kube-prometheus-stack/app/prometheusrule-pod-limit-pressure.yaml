@@ -1,0 +1,75 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pod-limit-pressure-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: kubernetes.pod-limit-pressure.rules
+      rules:
+        - alert: PodCpuLimitPressureHigh
+          expr: |
+            (
+              sum by (namespace, pod, container) (
+                rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])
+              )
+              /
+              on (namespace, pod, container)
+              kube_pod_container_resource_limits{resource="cpu", unit="core", container!=""}
+            ) > 0.85
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Pod container CPU usage is near its configured limit
+            description: Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used more than 85% of its CPU limit for 15 minutes.
+
+        - alert: PodCpuLimitPressureCritical
+          expr: |
+            (
+              sum by (namespace, pod, container) (
+                rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])
+              )
+              /
+              on (namespace, pod, container)
+              kube_pod_container_resource_limits{resource="cpu", unit="core", container!=""}
+            ) > 0.95
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Pod container CPU usage is critically close to its configured limit
+            description: Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used more than 95% of its CPU limit for 10 minutes.
+
+        - alert: PodMemoryLimitPressureHigh
+          expr: |
+            (
+              container_memory_working_set_bytes{container!="", image!=""}
+              /
+              on (namespace, pod, container)
+              kube_pod_container_resource_limits{resource="memory", unit="byte", container!=""}
+            ) > 0.90
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Pod container memory usage is near its configured limit
+            description: Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used more than 90% of its memory limit for 15 minutes.
+
+        - alert: PodMemoryLimitPressureCritical
+          expr: |
+            (
+              container_memory_working_set_bytes{container!="", image!=""}
+              /
+              on (namespace, pod, container)
+              kube_pod_container_resource_limits{resource="memory", unit="byte", container!=""}
+            ) > 0.98
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Pod container memory usage is critically close to its configured limit
+            description: Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used more than 98% of its memory limit for 10 minutes.

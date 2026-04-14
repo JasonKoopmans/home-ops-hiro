@@ -11,6 +11,7 @@ resources:
   - ./grafana-dashboard-opnsense.yaml
   - ./prometheusrule-storage-and-hosts.yaml
   - ./prometheusrule-opnsense.yaml
+  - ./prometheusrule-pod-limit-pressure.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml
