@@ -114,7 +114,7 @@ data:
     {
         "chrootDir": "/hostroot",
         "cniVersion": "0.3.1",
-      "logLevel": "error",
+      "logLevel": "warn",
         "logToStderr": true,
         "cniConfigDir": "/host/etc/cni/net.d",
         "multusAutoconfigDir": "/host/etc/cni/net.d",
