@@ -7,7 +7,7 @@ spec:
   config: '{
       "cniVersion": "0.3.1",
       "type": "macvlan",
-      "master": "eth1",
+      "master": "ens19",
       "ipam": {
         "type": "static",
         "routes": [
@@ -27,7 +27,7 @@ spec:
   config: '{
       "cniVersion": "0.3.1",
       "type": "macvlan",
-      "master": "eth2",
+      "master": "ens20",
       "ipam": {
         "type": "static",
         "routes": [
