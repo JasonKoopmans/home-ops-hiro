@@ -32,20 +32,21 @@ spec:
             env:
               DB_SQLITE_VACUUM_ON_STARTUP: true
               EXECUTIONS_DATA_PRUNE: true
-              EXECUTIONS_DATA_MAX_AGE: 14
-              EXECUTIONS_DATA_PRUNE_MAX_COUNT: 50000
+              EXECUTIONS_DATA_MAX_AGE: 336
+              EXECUTIONS_DATA_PRUNE_MAX_COUNT: 10000
               GENERIC_TIMEZONE: ${TIMEZONE}
               N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: false
               N8N_PROTOCOL: "https"
               N8N_PORT: &port 443
               N8N_HOST: &hostName n8n.${SECRET_DOMAIN}
-              N8N_LOG_LEVEL: info
+              N8N_LOG_LEVEL: warn
               N8N_LOG_OUTPUT: console
             resources:
               requests:
-                cpu: 5m
-                memory: 128Mi
+                cpu: 250m
+                memory: 512Mi
               limits:
+                cpu: 2000m
                 memory: 2Gi
         pod:
           securityContext:
