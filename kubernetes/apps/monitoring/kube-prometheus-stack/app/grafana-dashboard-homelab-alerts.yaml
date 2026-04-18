@@ -1,0 +1,253 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-homelab-alert-ops
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  homelab-alert-ops.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Firing Alerts",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "targets": [
+            {"expr": "count(ALERTS{alertstate=\"firing\"})", "legendFormat": "firing"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 3}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Critical Firing",
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "targets": [
+            {"expr": "count(ALERTS{alertstate=\"firing\", severity=\"critical\"})", "legendFormat": "critical"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Warning Firing",
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+          "targets": [
+            {"expr": "count(ALERTS{alertstate=\"firing\", severity=\"warning\"})", "legendFormat": "warning"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "orange", "value": 3}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Pending Alerts",
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+          "targets": [
+            {"expr": "count(ALERTS{alertstate=\"pending\"})", "legendFormat": "pending"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "blue", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Longhorn Failed Backups (Current)",
+          "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
+          "targets": [
+            {"expr": "sum(longhorn_backup_state == 4)", "legendFormat": "failed"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 5}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Firing Alerts By Severity",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "targets": [
+            {"expr": "sum by (severity) (ALERTS{alertstate=\"firing\"})", "legendFormat": "{{severity}}"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "unit": "none",
+              "custom": {"lineWidth": 2, "fillOpacity": 12}
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Node CPU Requests % (Scheduler Pressure)",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "targets": [
+            {
+              "expr": "100 * sum by (node) (kube_pod_container_resource_requests{resource=\"cpu\", unit=\"core\"} * on(namespace,pod) group_left(node) kube_pod_info) / clamp_min(max by (node) (kube_node_status_allocatable{resource=\"cpu\", unit=\"core\"}), 1)",
+              "legendFormat": "{{node}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 80},
+                  {"color": "orange", "value": 85},
+                  {"color": "red", "value": 95}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Node Memory Requests % (Scheduler Pressure)",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "targets": [
+            {
+              "expr": "100 * sum by (node) (kube_pod_container_resource_requests{resource=\"memory\", unit=\"byte\"} * on(namespace,pod) group_left(node) kube_pod_info) / clamp_min(max by (node) (kube_node_status_allocatable{resource=\"memory\", unit=\"byte\"}), 1)",
+              "legendFormat": "{{node}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 80},
+                  {"color": "orange", "value": 85},
+                  {"color": "red", "value": 95}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "OPNsense Interface Drops/s",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "targets": [
+            {
+              "expr": "sum by (interface) (rate(net_drop_in{job=\"opnsense-telegraf\"}[5m]) + rate(net_drop_out{job=\"opnsense-telegraf\"}[5m]))",
+              "legendFormat": "{{interface}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "pps",
+              "min": 0,
+              "custom": {"lineWidth": 1, "fillOpacity": 10}
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Active Alert Instances",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 20},
+          "targets": [
+            {
+              "expr": "ALERTS{alertstate=\"firing\"}",
+              "format": "table",
+              "instant": true,
+              "legendFormat": ""
+            }
+          ],
+          "options": {"showHeader": true},
+          "fieldConfig": {"defaults": {}, "overrides": []}
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["alerts", "homelab", "operations"],
+      "templating": {"list": []},
+      "time": {"from": "now-24h", "to": "now"},
+      "title": "Homelab Alert Operations",
+      "version": 1
+    }

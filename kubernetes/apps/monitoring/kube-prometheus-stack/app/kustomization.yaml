@@ -9,6 +9,7 @@ resources:
   - ./grafana-dashboard-longhorn.yaml
   - ./grafana-dashboard-hosts.yaml
   - ./grafana-dashboard-opnsense.yaml
+  - ./grafana-dashboard-homelab-alerts.yaml
   - ./prometheusrule-storage-and-hosts.yaml
   - ./prometheusrule-opnsense.yaml
   - ./prometheusrule-pod-limit-pressure.yaml
