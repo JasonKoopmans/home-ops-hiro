@@ -30,6 +30,7 @@ spec:
       defaultDataPath: /var/mnt/longhorn
       defaultLonghornStaticStorageClass: longhorn
       defaultReplicaCount: "3"
+      guaranteedInstanceManagerCPU: "10"
       guaranteedEngineManagerCPU: "20"
       guaranteedReplicaManagerCPU: "20"
       nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
