@@ -55,6 +55,103 @@ spec:
             summary: Longhorn node storage pressure is high
             description: Longhorn node {{ $labels.node }} is above 85% of usable storage capacity.
 
+        - alert: LonghornInstanceManagerUnschedulable
+          expr: max_over_time(kube_pod_status_unschedulable{namespace="storage", pod=~"instance-manager-.*"}[10m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Longhorn instance manager is unschedulable
+            description: Longhorn instance-manager pod {{ $labels.pod }} in {{ $labels.namespace }} has been unschedulable for at least 10 minutes.
+
+        - alert: NodeCpuRequestsHigh
+          expr: |
+            100 *
+            (
+              sum by (node) (
+                kube_pod_container_resource_requests{resource="cpu", unit="core"}
+                * on (namespace, pod) group_left(node)
+                kube_pod_info
+              )
+              /
+              clamp_min(max by (node) (kube_node_status_allocatable{resource="cpu", unit="core"}), 1)
+            ) > 85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Node CPU requests are high
+            description: Node {{ $labels.node }} has CPU requests above 85% of allocatable for more than 10 minutes, which can block scheduling for critical pods.
+
+        - alert: NodeCpuRequestsCritical
+          expr: |
+            100 *
+            (
+              sum by (node) (
+                kube_pod_container_resource_requests{resource="cpu", unit="core"}
+                * on (namespace, pod) group_left(node)
+                kube_pod_info
+              )
+              /
+              clamp_min(max by (node) (kube_node_status_allocatable{resource="cpu", unit="core"}), 1)
+            ) > 95
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Node CPU requests are critically high
+            description: Node {{ $labels.node }} has CPU requests above 95% of allocatable for more than 5 minutes. Critical pods like Longhorn instance-manager will fail to schedule.
+
+        - alert: NodeMemoryRequestsHigh
+          expr: |
+            100 *
+            (
+              sum by (node) (
+                kube_pod_container_resource_requests{resource="memory", unit="byte"}
+                * on (namespace, pod) group_left(node)
+                kube_pod_info
+              )
+              /
+              clamp_min(max by (node) (kube_node_status_allocatable{resource="memory", unit="byte"}), 1)
+            ) > 85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Node memory requests are high
+            description: Node {{ $labels.node }} has memory requests above 85% of allocatable for more than 10 minutes, reducing scheduling headroom for new workloads.
+
+        - alert: NodeMemoryRequestsCritical
+          expr: |
+            100 *
+            (
+              sum by (node) (
+                kube_pod_container_resource_requests{resource="memory", unit="byte"}
+                * on (namespace, pod) group_left(node)
+                kube_pod_info
+              )
+              /
+              clamp_min(max by (node) (kube_node_status_allocatable{resource="memory", unit="byte"}), 1)
+            ) > 95
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Node memory requests are critically high
+            description: Node {{ $labels.node }} has memory requests above 95% of allocatable for more than 5 minutes. New pods requiring memory guarantees will fail to schedule.
+
+        - alert: LonghornBackupFailuresDetected
+          # Fires only when the count of failed backups is actively increasing,
+          # i.e. new failures have appeared in the last 20 minutes.
+          # Old stuck-failed backups that are no longer growing do not retrigger this alert.
+          expr: increase(sum by (volume) (longhorn_backup_state == 4)[20m:]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: Longhorn backup failures detected
+            description: New backup failures have appeared for Longhorn volume {{ $labels.volume }} in the last 20 minutes.
+
     - name: node-exporter.rules
       rules:
         - alert: NodeExporterDown
