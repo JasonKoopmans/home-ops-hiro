@@ -40,6 +40,16 @@ spec:
             summary: OPNsense CPU usage is high
             description: CPU usage on {{ $labels.instance }} has stayed above 90% for more than 15 minutes.
 
+        - alert: OpnSenseHighCpuUsageCritical
+          expr: 100 * (1 - avg by (instance) (rate(cpu_usage_idle{job="opnsense-telegraf", cpu=~"cpu[0-9]+"}[5m]))) > 95
+          for: 10m
+          labels:
+            severity: critical
+            service: opnsense
+          annotations:
+            summary: OPNsense CPU usage is critically high
+            description: CPU usage on {{ $labels.instance }} has stayed above 95% for more than 10 minutes.
+
         - alert: OpnSenseMemoryPressure
           expr: mem_used_percent{job="opnsense-telegraf"} > 90
           for: 15m
@@ -49,6 +59,16 @@ spec:
           annotations:
             summary: OPNsense memory pressure is high
             description: Memory usage on {{ $labels.instance }} has stayed above 90% for more than 15 minutes.
+
+        - alert: OpnSenseMemoryPressureCritical
+          expr: mem_used_percent{job="opnsense-telegraf"} > 95
+          for: 10m
+          labels:
+            severity: critical
+            service: opnsense
+          annotations:
+            summary: OPNsense memory pressure is critically high
+            description: Memory usage on {{ $labels.instance }} has stayed above 95% for more than 10 minutes.
 
         - alert: OpnSenseDiskPressure
           expr: max by (instance) (disk_used_percent{job="opnsense-telegraf", path="/"}) > 90
@@ -60,6 +80,16 @@ spec:
             summary: OPNsense root disk usage is high
             description: Root filesystem usage on {{ $labels.instance }} has stayed above 90% for more than 15 minutes.
 
+        - alert: OpnSenseDiskPressureCritical
+          expr: max by (instance) (disk_used_percent{job="opnsense-telegraf", path="/"}) > 95
+          for: 10m
+          labels:
+            severity: critical
+            service: opnsense
+          annotations:
+            summary: OPNsense root disk usage is critically high
+            description: Root filesystem usage on {{ $labels.instance }} has stayed above 95% for more than 10 minutes.
+
         - alert: OpnSenseInterfaceErrorsHigh
           expr: sum by (instance, interface) (rate(net_err_in{job="opnsense-telegraf"}[5m]) + rate(net_err_out{job="opnsense-telegraf"}[5m])) > 10
           for: 10m
@@ -69,6 +99,46 @@ spec:
           annotations:
             summary: OPNsense interface errors are elevated
             description: Interface {{ $labels.interface }} on {{ $labels.instance }} has sustained error activity above baseline.
+
+        - alert: OpnSenseInterfaceDropsHigh
+          expr: sum by (instance, interface) (rate(net_drop_in{job="opnsense-telegraf"}[5m]) + rate(net_drop_out{job="opnsense-telegraf"}[5m])) > 5
+          for: 10m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense interface packet drops are elevated
+            description: Interface {{ $labels.interface }} on {{ $labels.instance }} has sustained packet drops above baseline.
+
+        - alert: OpnSenseInterfaceThroughputNearPeak
+          expr: |
+            (
+              sum by (instance, interface) (
+                (rate(net_bytes_recv{job="opnsense-telegraf", interface!~"lo|wg0|zt.*"}[5m]) + rate(net_bytes_sent{job="opnsense-telegraf", interface!~"lo|wg0|zt.*"}[5m])) * 8
+              )
+              /
+              clamp_min(
+                max_over_time(
+                  (
+                    sum by (instance, interface) (
+                      (rate(net_bytes_recv{job="opnsense-telegraf", interface!~"lo|wg0|zt.*"}[5m]) + rate(net_bytes_sent{job="opnsense-telegraf", interface!~"lo|wg0|zt.*"}[5m])) * 8
+                    )
+                  )[7d:5m]
+                ),
+                1
+              )
+            ) > 0.90
+            and
+            sum by (instance, interface) (
+              (rate(net_bytes_recv{job="opnsense-telegraf", interface!~"lo|wg0|zt.*"}[5m]) + rate(net_bytes_sent{job="opnsense-telegraf", interface!~"lo|wg0|zt.*"}[5m])) * 8
+            ) > 50000000
+          for: 15m
+          labels:
+            severity: warning
+            service: opnsense
+          annotations:
+            summary: OPNsense interface throughput is near peak baseline
+            description: Interface {{ $labels.interface }} on {{ $labels.instance }} is above 90% of its 7-day peak throughput for more than 15 minutes.
 
         - alert: OpnSenseStateTablePressure
           expr: 100 * max by (instance) (pf_state_table_used{job="opnsense-telegraf"}) / clamp_min(max by (instance) (pf_state_table_limit{job="opnsense-telegraf"}), 1) > 85
