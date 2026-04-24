@@ -1,0 +1,182 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app autensa
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: app-template
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      openclaw:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/openclaw/openclaw
+              tag: 2026.4.21
+            env:
+              TZ: ${TIMEZONE}
+              OPENCLAW_CONFIG_PATH: /etc/openclaw/openclaw.json
+            envFrom:
+              - secretRef:
+                  name: autensa-secret
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: &gatewayPort 18789
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /readyz
+                    port: *gatewayPort
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: *gatewayPort
+                  initialDelaySeconds: 5
+                  periodSeconds: 5
+                  failureThreshold: 30
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                memory: 4Gi
+        pod:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+
+      mission-control:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/crshdn/mission-control
+              tag: sha-6a64407
+            env:
+              NODE_ENV: production
+              TZ: ${TIMEZONE}
+              OPENCLAW_GATEWAY_URL: ws://autensa-gateway.default.svc.cluster.local:18789
+              DATABASE_PATH: /app/data/mission-control.db
+              WORKSPACE_BASE_PATH: /app/workspace
+              PROJECTS_PATH: /app/workspace/projects
+            envFrom:
+              - secretRef:
+                  name: autensa-secret
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                memory: 2Gi
+        pod:
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+
+    service:
+      gateway:
+        controller: openclaw
+        ports:
+          ws:
+            port: *gatewayPort
+      app:
+        controller: mission-control
+        ports:
+          http:
+            port: &mcPort 4000
+
+    route:
+      app:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi:rocket-launch
+          gethomepage.dev/title: Autensa
+          gethomepage.dev/description: "Autonomous Product Engine"
+          gethomepage.dev/group: "Automation"
+        hostnames:
+          - autensa.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *mcPort
+
+    persistence:
+      openclaw-config:
+        type: configMap
+        name: autensa-openclaw-config
+        advancedMounts:
+          openclaw:
+            app:
+              - path: /etc/openclaw
+                readOnly: true
+
+      openclaw-data:
+        existingClaim: autensa-openclaw-data
+        advancedMounts:
+          openclaw:
+            app:
+              - path: /home/node/.openclaw
+
+      mc-data:
+        existingClaim: autensa-mc-data
+        advancedMounts:
+          mission-control:
+            app:
+              - path: /app/data
+
+      mc-workspace:
+        existingClaim: autensa-mc-workspace
+        advancedMounts:
+          mission-control:
+            app:
+              - path: /app/workspace
+
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          openclaw:
+            app:
+              - path: /tmp
+          mission-control:
+            app:
+              - path: /tmp

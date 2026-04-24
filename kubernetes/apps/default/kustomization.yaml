@@ -17,3 +17,5 @@ resources:
   - ./homepage/ks.yaml
   - ./minecraft/ks.yaml
   - ./qbittorrent/ks.yaml
+  - ./rsvp-reader/ks.yaml
+  - ./autensa/ks.yaml

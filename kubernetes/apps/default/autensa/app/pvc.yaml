@@ -1,0 +1,35 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: autensa-mc-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: longhorn
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: autensa-mc-workspace
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: longhorn
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: autensa-openclaw-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: longhorn
