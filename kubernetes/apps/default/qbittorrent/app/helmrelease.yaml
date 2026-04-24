@@ -129,10 +129,10 @@ spec:
       main:
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/icon: mdi:qbittorrent
+          gethomepage.dev/icon: https://qbittorrent.${SECRET_DOMAIN}/favicon.ico
           gethomepage.dev/title: qBittorrent
           gethomepage.dev/description: "qBittorrent Download Manager"
-          gethomepage.dev/group: "Downloaders"
+          gethomepage.dev/group: "Downloads"
         hostnames: ["qbittorrent.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
@@ -146,10 +146,10 @@ spec:
       browser:
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/icon: mdi:folder
+          gethomepage.dev/icon: https://downloads.${SECRET_DOMAIN}/favicon.ico
           gethomepage.dev/title: Download Files
           gethomepage.dev/description: "Download File Browser"
-          gethomepage.dev/group: "Downloaders"
+          gethomepage.dev/group: "Downloads"
         hostnames: ["downloads.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal

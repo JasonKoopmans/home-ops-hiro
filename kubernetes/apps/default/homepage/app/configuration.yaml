@@ -29,10 +29,16 @@ data:
       hideInternetSearch: true
       showSearchSuggestions: true
       hideVisitURL: true
+    providers:
+      longhorn:
+        url: http://longhorn-frontend.storage.svc.cluster.local
     layout:
       Home Automation:
         style: column
         icon: home-assistant
+      Networking:
+        style: column
+        icon: opnsense
       LLM/Ai:
         style: column
         icon: open-webui
@@ -51,6 +57,12 @@ data:
       Downloads:
         style: column
         icon: sonarr
+      Monitoring:
+        style: column
+        icon: grafana
+      Storage:
+        style: column
+        icon: longhorn
       Kubernetes:
         style: column
         icon: kubernetes
@@ -64,12 +76,47 @@ data:
           showLabel: true
           label: "cluster"
         nodes:
-          show: false
-    - search:
-        provider: duckduckgo
-        focus: false
-        target: _blank
+          show: true
+          cpu: true
+          memory: true
+          showLabel: true
 
   bookmarks.yaml: ""
 
-  services.yaml: ""
+  services.yaml: |
+    - Home:
+        - Home Assistant:
+            icon: home-assistant
+            href: https://ha.koopmans.co
+            description: Smart Home Hub
+        - Printer:
+            icon: hp
+            href: https://hp476.koopmans.co
+            description: HP Printer Configuration
+    - Networking:
+        - OPNsense:
+            icon: opnsense
+            href: https://192.168.1.1:8443
+            description: Router & Firewall
+        - Proxmox:
+            icon: proxmox
+            href: https://vm01.koopmans.co:8006
+            description: Virtualization Management
+        - Omada:
+            icon: tp-link
+            href: https://docker01:8043
+            description: Wireless Controller
+        - Portainer:
+            icon: portainer
+            href: https://docker01:9443
+            description: Container and Controller Management
+    - Media:
+        - Plex:
+            icon: plex
+            href: https://app.plex.tv/desktop
+            description: Streaming Media Server
+    - Storage:
+        - Longhorn:
+            icon: longhorn
+            href: https://longhorn.koopmans.co
+            description: Distributed Block Storage

@@ -20,7 +20,7 @@ spec:
               repository: ghcr.io/gethomepage/homepage
               tag: v1.12.3
             env:
-              HOMEPAGE_ALLOWED_HOSTS: &host "home.${SECRET_DOMAIN}"
+              HOMEPAGE_ALLOWED_HOSTS: "home.${SECRET_DOMAIN},grafana.koopmans.co,longhorn.koopmans.co"
             # envFrom:
             #   - secretRef:
             #       name: homepage-secret
@@ -42,7 +42,7 @@ spec:
 
     route:
       main:
-        hostnames: [*host]
+        hostnames: [&host "home.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
             namespace: network

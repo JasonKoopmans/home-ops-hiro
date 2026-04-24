@@ -125,7 +125,7 @@ spec:
       app:
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/icon: mdi:rocket-launch
+          gethomepage.dev/icon: https://autensa.${SECRET_DOMAIN}/favicon.ico
           gethomepage.dev/title: Autensa
           gethomepage.dev/description: "Autonomous Product Engine"
           gethomepage.dev/group: "Automation"

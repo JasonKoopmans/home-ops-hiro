@@ -49,10 +49,10 @@ spec:
       main:
         annotations:
           gethomepage.dev/enabled: "true"
-          gethomepage.dev/icon: mdi:book-open-page-variant
+          gethomepage.dev/icon: https://rsvp-reader.${SECRET_DOMAIN}/favicon.ico
           gethomepage.dev/title: RSVP Reader
           gethomepage.dev/description: "Speed reading with multi-device sync"
-          gethomepage.dev/group: "Home Services"
+          gethomepage.dev/group: "Knowledge Systems"
         hostnames:
           - &hostName rsvp-reader.${SECRET_DOMAIN}
         parentRefs:
