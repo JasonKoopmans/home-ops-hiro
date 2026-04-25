@@ -3,7 +3,7 @@
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: &app readarr
+  name: &app bookshelf
 spec:
   interval: 1h
   chartRef:
@@ -24,13 +24,10 @@ spec:
         containers:
           app:
             image:
-              repository: lscr.io/linuxserver/readarr
-              tag: nightly-0.4.19.2811-ls400
+              repository: ghcr.io/pennydreadful/bookshelf
+              tag: hardcover-v0.4.20.129
             env:
-              PGID: "1001"
-              PUID: "1001"
               TZ: ${TIMEZONE}
-              UMASK: "002"
             resources:
               requests:
                 cpu: 25m
@@ -90,11 +87,11 @@ spec:
         annotations:
           gethomepage.dev/enabled: "true"
           gethomepage.dev/icon: readarr
-          gethomepage.dev/title: Readarr
+          gethomepage.dev/title: Bookshelf
           gethomepage.dev/description: "Book Acquisition and Organization"
           gethomepage.dev/group: "Downloads"
         hostnames:
-          - readarr.${SECRET_DOMAIN}
+          - bookshelf.${SECRET_DOMAIN}
         parentRefs:
           - name: envoy-internal
             namespace: network
@@ -106,7 +103,7 @@ spec:
 
     persistence:
       config:
-        existingClaim: readarr-config
+        existingClaim: bookshelf-config
         globalMounts:
           - path: /config
 

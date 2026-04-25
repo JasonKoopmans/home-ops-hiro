@@ -12,7 +12,7 @@ resources:
   - ./test/ks.yaml
   - ./n8n/ks.yaml
   - ./prowlarr/ks.yaml
-  - ./readarr/ks.yaml
+  - ./bookshelf/ks.yaml
   - ./scanner-files/ks.yaml
   - ./homepage/ks.yaml
   - ./minecraft/ks.yaml

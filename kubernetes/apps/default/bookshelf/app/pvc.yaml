@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: readarr-config
+  name: bookshelf-config
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
