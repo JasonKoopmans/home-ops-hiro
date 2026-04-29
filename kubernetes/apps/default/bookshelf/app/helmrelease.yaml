@@ -28,6 +28,8 @@ spec:
               tag: hardcover-v0.4.20.129
             env:
               TZ: ${TIMEZONE}
+              PUID: "1001"
+              PGID: "1001"
             resources:
               requests:
                 cpu: 25m
