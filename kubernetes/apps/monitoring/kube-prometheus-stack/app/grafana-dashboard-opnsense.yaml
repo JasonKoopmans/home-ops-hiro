@@ -105,7 +105,7 @@ data:
           "title": "Root Disk Used %",
           "gridPos": {"h": 8, "w": 8, "x": 16, "y": 4},
           "targets": [
-            {"expr": "max by (instance) (disk_used_percent{job=\"opnsense-telegraf\", path=\"/\"})", "legendFormat": "{{instance}}"}
+            {"expr": "100 - max by (instance) (disk_used_percent{job=\"opnsense-telegraf\", path=\"/\"})", "legendFormat": "{{instance}}"}
           ],
           "fieldConfig": {
             "defaults": {
