@@ -7,9 +7,16 @@ metadata:
 spec:
   # Keep control-plane and APIs on the latest 1.21 patch stream.
   version: "1.21"
+  ingress:
+    istio:
+      enabled: false
   additionalManifests:
     - URL: https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v1.21.0/release.yaml
   config:
+    domain:
+      # Register koopmans.co as the default domain for Knative Services.
+      # KServices will get URLs like <name>.<namespace>.koopmans.co via the external gateway.
+      koopmans.co: ""
     network:
       ingress-class: gateway-api.ingress.networking.knative.dev
     gateway:

@@ -1,17 +1,32 @@
 ---
+# Route external traffic for knative-smoke.koopmans.co through the internal Envoy Gateway.
+# We route directly to the revision service (knative-smoke-00001) rather than the
+# knative-smoke ExternalName Service, because Envoy Gateway cannot resolve ExternalName
+# backends. Knative automatically swaps revision service endpoints between the
+# activator (scale=0) and the actual pod (scale>0), so cold-start buffering still works.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: knative-smoke
   namespace: default
+  labels:
+    app.kubernetes.io/name: knative-smoke
 spec:
   parentRefs:
     - name: envoy-internal
       namespace: network
       sectionName: https
   hostnames:
-    - knative-smoke.${SECRET_DOMAIN}
+    - "knative-smoke.${SECRET_DOMAIN}"
   rules:
     - backendRefs:
-        - name: knative-smoke
+        - name: knative-smoke-00001
           port: 80
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: Knative-Serving-Namespace
+                value: default
+              - name: Knative-Serving-Revision
+                value: knative-smoke-00001
