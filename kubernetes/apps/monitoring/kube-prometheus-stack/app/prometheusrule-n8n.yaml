@@ -1,0 +1,75 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: n8n-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: n8n.rules
+      rules:
+        - alert: N8nPodNotReady
+          expr: |
+            sum(kube_pod_status_ready{namespace="default", condition="true", pod=~"n8n-.*"}) < 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: n8n pod is not ready
+            description: n8n has had no ready pods in the default namespace for more than 10 minutes.
+
+        - alert: N8nContainerRestartsHigh
+          expr: |
+            sum(increase(kube_pod_container_status_restarts_total{namespace="default", container="app", pod=~"n8n-.*"}[15m])) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: n8n container is restarting frequently
+            description: n8n app container has restarted more than 2 times in the last 15 minutes.
+
+        - alert: N8nWorkflowErrorRateHigh
+          expr: |
+            (
+              sum(rate(n8n_workflow_error_total[10m]))
+              /
+              clamp_min(sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_error_total[10m])), 0.001)
+            ) > 0.05
+            and
+            (sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_error_total[10m]))) > 0.01
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: n8n workflow error ratio is elevated
+            description: n8n workflow errors are above 5% over the last 10 minutes.
+
+        - alert: N8nWorkflowErrorRateCritical
+          expr: |
+            (
+              sum(rate(n8n_workflow_error_total[10m]))
+              /
+              clamp_min(sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_error_total[10m])), 0.001)
+            ) > 0.20
+            and
+            (sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_error_total[10m]))) > 0.01
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: n8n workflow error ratio is critical
+            description: n8n workflow errors are above 20% over the last 10 minutes.
+
+        - alert: N8nNoRecentWorkflowExecutions
+          expr: |
+            sum(n8n_active_workflows) > 0
+            and
+            sum(increase(n8n_workflow_success_total[2h]) + increase(n8n_workflow_error_total[2h])) == 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: n8n has active workflows but no recent executions
+            description: n8n reports active workflows, but no workflow executions were observed in the past 2 hours. Tune this alert window for low-frequency jobs.

@@ -1,0 +1,175 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-n8n
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  n8n-overview.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "n8n Ready Pods",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "targets": [
+            {"expr": "sum(kube_pod_status_ready{namespace=\"default\",condition=\"true\",pod=~\"n8n-.*\"})", "legendFormat": "ready"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Execution Success Ratio (15m)",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(rate(n8n_workflow_success_total[15m])) / clamp_min(sum(rate(n8n_workflow_success_total[15m])) + sum(rate(n8n_workflow_error_total[15m])), 0.001)",
+              "legendFormat": "success"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "yellow", "value": 0.90},
+                  {"color": "green", "value": 0.95}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Execution Throughput/s (15m)",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(rate(n8n_workflow_success_total[15m])) + sum(rate(n8n_workflow_error_total[15m]))",
+              "legendFormat": "exec/s"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "ops", "min": 0}, "overrides": []},
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Container Restarts (15m)",
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "targets": [
+            {
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"default\",container=\"app\",pod=~\"n8n-.*\"}[15m]))",
+              "legendFormat": "restarts"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 3}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Workflow Success/Error Rate",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+          "targets": [
+            {"expr": "sum(rate(n8n_workflow_success_total[5m]))", "legendFormat": "success"},
+            {"expr": "sum(rate(n8n_workflow_error_total[5m]))", "legendFormat": "error"}
+          ],
+          "fieldConfig": {
+            "defaults": {"min": 0, "unit": "ops", "custom": {"lineWidth": 2, "fillOpacity": 10}},
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Workflow Success Ratio",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+          "targets": [
+            {
+              "expr": "sum(rate(n8n_workflow_success_total[5m])) / clamp_min(sum(rate(n8n_workflow_success_total[5m])) + sum(rate(n8n_workflow_error_total[5m])), 0.001)",
+              "legendFormat": "ratio"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 1,
+              "unit": "percentunit",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "yellow", "value": 0.90},
+                  {"color": "green", "value": 0.95}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "Top Erroring Workflows (1h)",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+          "targets": [
+            {
+              "expr": "topk(10, sum by (workflow_name) (increase(n8n_workflow_error_total[1h])))",
+              "format": "table",
+              "instant": true,
+              "legendFormat": ""
+            }
+          ],
+          "options": {"showHeader": true},
+          "fieldConfig": {"defaults": {}, "overrides": []}
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["n8n", "automation", "workflows"],
+      "templating": {"list": []},
+      "time": {"from": "now-24h", "to": "now"},
+      "title": "n8n Workflow Health",
+      "version": 1
+    }

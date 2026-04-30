@@ -6,11 +6,13 @@ resources:
   - ./helmrepository.yaml
   - ./helmrelease-crds.yaml
   - ./helmrelease.yaml
+  - ./grafana-dashboard-n8n.yaml
   - ./grafana-dashboard-longhorn.yaml
   - ./grafana-dashboard-hosts.yaml
   - ./grafana-dashboard-opnsense.yaml
   - ./grafana-dashboard-homelab-alerts.yaml
   - ./grafana-dashboard-proxmox-compute.yaml
+  - ./prometheusrule-n8n.yaml
   - ./prometheusrule-storage-and-hosts.yaml
   - ./prometheusrule-opnsense.yaml
   - ./prometheusrule-pod-limit-pressure.yaml

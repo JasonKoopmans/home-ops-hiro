@@ -35,6 +35,7 @@ spec:
               EXECUTIONS_DATA_MAX_AGE: 336
               EXECUTIONS_DATA_PRUNE_MAX_COUNT: 10000
               GENERIC_TIMEZONE: ${TIMEZONE}
+              N8N_METRICS: "true"
               N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: false
               N8N_PROTOCOL: "https"
               N8N_PORT: &port 443
