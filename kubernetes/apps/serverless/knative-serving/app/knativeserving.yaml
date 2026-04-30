@@ -1,0 +1,23 @@
+---
+apiVersion: operator.knative.dev/v1beta1
+kind: KnativeServing
+metadata:
+  name: knative-serving
+  namespace: knative-serving
+spec:
+  # Keep control-plane and APIs on the latest 1.21 patch stream.
+  version: "1.21"
+  additionalManifests:
+    - URL: https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v1.21.0/release.yaml
+  config:
+    network:
+      ingress-class: gateway-api.ingress.networking.knative.dev
+    gateway:
+      external-gateways: |
+        - class: envoy
+          gateway: network/envoy-external
+          service: network/envoy-external
+      local-gateways: |
+        - class: envoy
+          gateway: network/envoy-internal
+          service: network/envoy-internal
