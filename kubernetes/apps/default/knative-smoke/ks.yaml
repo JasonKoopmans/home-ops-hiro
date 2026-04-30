@@ -6,6 +6,7 @@ metadata:
 spec:
   dependsOn:
     - name: knative-serving
+      namespace: flux-system
   interval: 1h
   path: ./kubernetes/apps/default/knative-smoke/app
   postBuild:
