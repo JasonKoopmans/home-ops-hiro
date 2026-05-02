@@ -24,3 +24,25 @@ spec:
     force: true
     remediation:
       retries: 3
+  # Strip `_example` keys from config-logging and config-observability before
+  # Helm applies them. The Knative serving webhook denies any update that
+  # modifies an `_example` key, but these ConfigMaps are already managed by
+  # the KnativeServing operator. Removing the key here means Helm never diffs
+  # it, so the webhook is never triggered on future upgrades.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: ConfigMap
+              name: config-logging
+              namespace: knative-serving
+            patch: |
+              - op: remove
+                path: /data/_example
+          - target:
+              kind: ConfigMap
+              name: config-observability
+              namespace: knative-serving
+            patch: |
+              - op: remove
+                path: /data/_example
