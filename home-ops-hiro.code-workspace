@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../home-ops-private"
+		},
+		{
+			"name": "home-ops-hiro: claude/distracted-herschel-688cdb",
+			"path": "../../Users/jake/Documents/code/home-ops-hiro/.claude/worktrees/distracted-herschel-688cdb"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"**/*.json5": "json5"
+		},
+		"yaml.schemaStore.enable": true,
+		"yaml.schemas": {
+			"kubernetes": "./kubernetes/**/*.yaml"
+		}
+	}
+}
