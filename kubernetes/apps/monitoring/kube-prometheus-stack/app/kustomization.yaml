@@ -9,6 +9,7 @@ resources:
   - ./grafana-dashboard-n8n.yaml
   - ./grafana-dashboard-longhorn.yaml
   - ./grafana-dashboard-hosts.yaml
+  - ./grafana-dashboard-apiserver-watch-cache.yaml
   - ./grafana-dashboard-opnsense.yaml
   - ./grafana-dashboard-homelab-alerts.yaml
   - ./grafana-dashboard-proxmox-compute.yaml

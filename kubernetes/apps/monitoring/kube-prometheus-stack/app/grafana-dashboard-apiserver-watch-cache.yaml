@@ -1,0 +1,212 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-apiserver-watch-cache
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  apiserver-watch-cache.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "type": "row",
+          "title": "Memory",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "collapsed": false
+        },
+        {
+          "type": "timeseries",
+          "title": "API Server Process RSS",
+          "description": "Resident set size per apiserver pod. Primary signal — expect this to drop as --default-watch-cache-size is lowered.",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+          "targets": [
+            {"expr": "process_resident_memory_bytes{job=\"apiserver\"}", "legendFormat": "{{pod}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
+        },
+        {
+          "type": "timeseries",
+          "title": "API Server Go Heap Allocated",
+          "description": "Go runtime heap in use. Drops after GC cycles as watch-cache objects are released.",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+          "targets": [
+            {"expr": "go_memstats_heap_alloc_bytes{job=\"apiserver\"}", "legendFormat": "{{pod}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
+        },
+        {
+          "type": "row",
+          "title": "API Latency",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+          "collapsed": false
+        },
+        {
+          "type": "timeseries",
+          "title": "LIST Request Latency p99 (by resource)",
+          "description": "Primary cache-miss indicator — rises when requests bypass the watch cache and fall through to etcd. Rollback if >25% above baseline.",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum by (le, resource) (rate(apiserver_request_duration_seconds_bucket{job=\"apiserver\",verb=\"LIST\"}[5m])))",
+              "legendFormat": "{{resource}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+        },
+        {
+          "type": "timeseries",
+          "title": "WATCH Request Latency p99 (by resource)",
+          "description": "Elevated WATCH latency indicates cache churn or cache too small causing relists.",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum by (le, resource) (rate(apiserver_request_duration_seconds_bucket{job=\"apiserver\",verb=\"WATCH\"}[5m])))",
+              "legendFormat": "{{resource}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+        },
+        {
+          "type": "row",
+          "title": "API Errors & APF",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+          "collapsed": false
+        },
+        {
+          "type": "timeseries",
+          "title": "LIST/WATCH Error Rate (4xx + 5xx)",
+          "description": "Hard rollback trigger — any sustained rise in 429s or 5xxs for LIST/WATCH verbs means the cache is too small.",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 19},
+          "targets": [
+            {
+              "expr": "sum by (pod, code) (rate(apiserver_request_total{job=\"apiserver\",verb=~\"LIST|WATCH\",code=~\"4..|5..\"}[5m]))",
+              "legendFormat": "{{pod}} HTTP {{code}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+        },
+        {
+          "type": "timeseries",
+          "title": "APF — Rejected & Queued Requests",
+          "description": "API Priority & Fairness: rejected requests indicate apiserver overload. Queue depth spikes signal backpressure from cache misses.",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 19},
+          "targets": [
+            {
+              "expr": "sum by (priority_level) (rate(apiserver_flowcontrol_rejected_requests_total{job=\"apiserver\"}[5m]))",
+              "legendFormat": "rejected / {{priority_level}}"
+            },
+            {
+              "expr": "sum by (priority_level) (apiserver_flowcontrol_current_inqueue_requests{job=\"apiserver\"})",
+              "legendFormat": "queued / {{priority_level}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+        },
+        {
+          "type": "row",
+          "title": "etcd",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 27},
+          "collapsed": false
+        },
+        {
+          "type": "timeseries",
+          "title": "etcd Range (Read) Latency p99",
+          "description": "Increases when apiserver cache misses force range reads against etcd. Rollback if >20% above baseline.",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(etcd_request_duration_seconds_bucket{job=~\".*etcd.*\",operation=\"range\"}[5m])))",
+              "legendFormat": "range p99"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(etcd_request_duration_seconds_bucket{job=~\".*etcd.*\",operation=\"range\"}[5m])))",
+              "legendFormat": "range p95"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+        },
+        {
+          "type": "timeseries",
+          "title": "etcd Backend Commit Latency p99",
+          "description": "Write latency — can degrade if excessive cache-miss read load causes IO contention on etcd nodes.",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(etcd_disk_backend_commit_duration_seconds_bucket{job=~\".*etcd.*\"}[5m])))",
+              "legendFormat": "commit p99"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+        },
+        {
+          "type": "row",
+          "title": "Logs",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 36},
+          "collapsed": false
+        },
+        {
+          "type": "logs",
+          "title": "API Server — Watch Cache Churn Logs",
+          "description": "Frequent 'too old resource version' or 'relist' messages after a cache size reduction are a rollback signal.",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 37},
+          "datasource": {"type": "loki", "uid": "${lokiDatasource}"},
+          "targets": [
+            {
+              "datasource": {"type": "loki", "uid": "${lokiDatasource}"},
+              "expr": "{namespace=\"kube-system\",pod=~\"kube-apiserver.*\"} |~ `watch.cache|too old resource version|cache size|relist|event queue`",
+              "legendFormat": ""
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "showLabels": true,
+            "showCommonLabels": false,
+            "wrapLogMessage": true,
+            "prettifyLogMessage": false,
+            "enableLogDetails": true,
+            "dedupStrategy": "none",
+            "sortOrder": "Descending"
+          }
+        },
+        {
+          "type": "row",
+          "title": "Tuning Reference",
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 47},
+          "collapsed": false
+        },
+        {
+          "type": "text",
+          "title": "PromQL Checklist & Rollback Criteria",
+          "gridPos": {"h": 18, "w": 24, "x": 0, "y": 48},
+          "options": {
+            "mode": "markdown",
+            "content": "## Rollback Criteria\n\n| Signal | Direction | Rollback Trigger |\n|--------|-----------|------------------|\n| API Server RSS | decreases | good — no rollback |\n| API Server Heap | decreases | good — no rollback |\n| LIST p99 latency | flat or better | >25% above baseline |\n| WATCH p99 latency | flat or better | >25% above baseline |\n| LIST/WATCH 4xx+5xx | stays near zero | any sustained rise |\n| APF rejected requests | stays near zero | any sustained rise |\n| etcd range read latency | flat | >20% above baseline |\n\n## Experiment Schedule\n\n| Step | Value | Duration | Decision |\n|------|-------|----------|-----------|\n| Baseline | 100 (current) | 24h | Record RSS + p99 baselines |\n| Step 1 | 75 | 24h | Proceed if all signals flat |\n| Step 2 | 50 | 24h | Proceed if all signals flat |\n| Step 3 | 25 | 24h | Only if Step 2 was clean |\n\n## Log Signals (check Logs panel above)\n\n- `too old resource version` — watch clients disconnecting; cache too small\n- `relist` — forced full re-sync from etcd; severe cache pressure\n- `event queue` — event processing backlog in watch cache\n\n## Implementation Note\n\nTalos apiserver flags live in `talos/patches/`. Add `--default-watch-cache-size=N` as an apiserver extra args patch in `talos/patches/controller/`. Apply with `task talos:apply-node IP=<ip>`."
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["kube-system", "apiserver", "memory", "tuning"],
+      "templating": {
+        "list": [
+          {
+            "name": "lokiDatasource",
+            "type": "datasource",
+            "query": "loki",
+            "current": {"selected": false, "text": "Loki", "value": "loki"},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Loki",
+            "multi": false
+          }
+        ]
+      },
+      "time": {"from": "now-24h", "to": "now"},
+      "title": "API Server Watch Cache Tuning",
+      "version": 1
+    }
