@@ -5,6 +5,8 @@ metadata:
   name: &app knative-operator
   namespace: flux-system
 spec:
+  # Temporary: suspend while upstream chart/webhook conflict is unresolved.
+  suspend: true
   dependsOn:
     - name: envoy-gateway
       namespace: network
