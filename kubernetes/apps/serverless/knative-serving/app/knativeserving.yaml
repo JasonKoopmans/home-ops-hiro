@@ -5,13 +5,13 @@ metadata:
   name: knative-serving
   namespace: knative-serving
 spec:
-  # Keep control-plane and APIs on the latest 1.22 patch stream.
-  version: "1.22"
+  # Keep control-plane and APIs on the latest 1.21 patch stream.
+  version: "1.21"
   ingress:
     istio:
       enabled: false
   additionalManifests:
-    - URL: https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v1.22.0/release.yaml
+    - URL: https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v1.21.0/release.yaml
   config:
     domain:
       # Register koopmans.co as the default domain for Knative Services.
