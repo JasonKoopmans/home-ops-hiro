@@ -111,6 +111,8 @@ spec:
       enabled: true
       extraArgs:
         - --no-collector.kernel_hung
+        # Exclude highly dynamic pod volume mounts that can emit duplicate filesystem series.
+        - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/kubelet/pods/.+/volumes/.+|var/lib/kubelet/pods/.+/volume-subpaths/.+)($|/)
       resources:
         requests:
           cpu: 10m
