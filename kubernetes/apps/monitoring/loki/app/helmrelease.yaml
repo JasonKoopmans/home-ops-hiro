@@ -78,6 +78,18 @@ spec:
           cpu: 500m
           memory: 1Gi
 
+    # Conservative right-sizing: results cache defaults to 500m CPU request,
+    # which is high for this cluster's observed usage.
+    resultsCache:
+      enabled: true
+      replicas: 1
+      allocatedCPU: 100m
+      resources:
+        requests:
+          cpu: 100m
+        limits:
+          cpu: 500m
+
     # Disable self-monitoring to reduce resource usage
     monitoring:
       selfMonitoring:
