@@ -42,6 +42,7 @@ spec:
               N8N_HOST: &hostName n8n.${SECRET_DOMAIN}
               N8N_LOG_LEVEL: warn
               N8N_LOG_OUTPUT: console
+              N8N_EXPRESS_TRUST_PROXY: true
             resources:
               requests:
                 cpu: 250m
@@ -94,6 +95,14 @@ spec:
           n8n:
             app:
               - path: /home/node/.n8n
+
+      obsidian-vault:
+        existingClaim: obsidian-vault
+        advancedMounts:
+          n8n:
+            app:
+              - path: /data/obsidian-ro
+                readOnly: true
 
       tmp:
         type: emptyDir
