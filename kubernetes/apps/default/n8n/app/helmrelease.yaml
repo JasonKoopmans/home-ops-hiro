@@ -97,14 +97,6 @@ spec:
             app:
               - path: /home/node/.n8n
 
-      obsidian-vault:
-        existingClaim: obsidian-vault
-        advancedMounts:
-          n8n:
-            app:
-              - path: /data/obsidian-ro
-                readOnly: true
-
       tmp:
         type: emptyDir
         advancedMounts:
