@@ -11,6 +11,7 @@ resources:
   - ./echo/ks.yaml
   - ./test/ks.yaml
   - ./n8n/ks.yaml
+  - ./obsidian-sync/ks.yaml
   - ./prowlarr/ks.yaml
   - ./bookshelf/ks.yaml
   - ./scanner-files/ks.yaml
