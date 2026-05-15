@@ -3,7 +3,7 @@
 {
 	"name": "Mise",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "jdxcode/mise"
+	"image": "jdxcode/mise",
 
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
