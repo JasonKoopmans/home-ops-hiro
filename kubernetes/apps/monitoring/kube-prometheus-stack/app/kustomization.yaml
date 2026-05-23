@@ -12,10 +12,12 @@ resources:
   - ./grafana-dashboard-apiserver-watch-cache.yaml
   - ./grafana-dashboard-opnsense.yaml
   - ./grafana-dashboard-homelab-alerts.yaml
+  - ./grafana-dashboard-homelab-overview.yaml
   - ./grafana-dashboard-proxmox-compute.yaml
   - ./prometheusrule-n8n.yaml
   - ./prometheusrule-storage-and-hosts.yaml
   - ./prometheusrule-opnsense.yaml
+  - ./prometheusrule-envoy.yaml
   - ./prometheusrule-pod-limit-pressure.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml

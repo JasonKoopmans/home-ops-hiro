@@ -1,0 +1,492 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-homelab-overview
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  homelab-overview.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Firing Alerts",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+          "targets": [
+            {"expr": "count(ALERTS{alertstate=\"firing\"})", "legendFormat": "firing"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 3}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Cluster Nodes Ready",
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+          "targets": [
+            {"expr": "count(kube_node_status_condition{condition=\"Ready\",status=\"true\"})", "legendFormat": "ready"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Host Exporters Up",
+          "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+          "targets": [
+            {"expr": "sum(up{job=\"node-exporter\"})", "legendFormat": "up"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Envoy Pods Up",
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+          "targets": [
+            {"expr": "sum(up{job=\"envoy-proxy\"})", "legendFormat": "up"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Longhorn Managers Up",
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+          "targets": [
+            {"expr": "sum(up{job=\"longhorn-backend\"})", "legendFormat": "up"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "OPNsense Up",
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+          "targets": [
+            {"expr": "sum(up{job=\"opnsense-telegraf\"})", "legendFormat": "up"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "n8n Ready Pods",
+          "gridPos": {"h": 4, "w": 4, "x": 0, "y": 4},
+          "targets": [
+            {"expr": "sum(kube_pod_status_ready{namespace=\"default\",condition=\"true\",pod=~\"n8n-.*\"})", "legendFormat": "ready"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Homepage Ready Pods",
+          "gridPos": {"h": 4, "w": 4, "x": 4, "y": 4},
+          "targets": [
+            {"expr": "sum(kube_pod_status_ready{namespace=\"default\",condition=\"true\",pod=~\"homepage-.*\"})", "legendFormat": "ready"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Host CPU Busy %",
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+          "targets": [
+            {
+              "expr": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])))",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 70},
+                  {"color": "orange", "value": 85},
+                  {"color": "red", "value": 95}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Host Memory Used %",
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+          "targets": [
+            {
+              "expr": "100 * (1 - (node_memory_MemAvailable_bytes{job=\"node-exporter\"} / node_memory_MemTotal_bytes{job=\"node-exporter\"}))",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 75},
+                  {"color": "orange", "value": 85},
+                  {"color": "red", "value": 95}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Host Root FS Used %",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+          "targets": [
+            {
+              "expr": "100 * (1 - (node_filesystem_avail_bytes{job=\"node-exporter\",mountpoint=\"/\",fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"node-exporter\",mountpoint=\"/\",fstype!~\"tmpfs|overlay|squashfs\"}))",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 75},
+                  {"color": "orange", "value": 85},
+                  {"color": "red", "value": 95}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Envoy Pod Restarts (30m)",
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+          "targets": [
+            {
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"network\",container=\"envoy\"}[30m]))",
+              "legendFormat": "restarts"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 3}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "Longhorn Node Storage Used %",
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
+          "targets": [
+            {
+              "expr": "100 * max by (node) (longhorn_node_storage_usage_bytes) / clamp_min(max by (node) (longhorn_node_storage_capacity_bytes), 1)",
+              "legendFormat": "{{node}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "custom": {"lineWidth": 1, "fillOpacity": 10},
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 75},
+                  {"color": "orange", "value": 85},
+                  {"color": "red", "value": 95}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "OPNsense Health",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+          "targets": [
+            {
+              "expr": "100 * (1 - avg by (instance) (rate(cpu_usage_idle{job=\"opnsense-telegraf\", cpu=~\"cpu[0-9]+\"}[5m])))",
+              "legendFormat": "CPU {{instance}}"
+            },
+            {
+              "expr": "mem_used_percent{job=\"opnsense-telegraf\"}",
+              "legendFormat": "MEM {{instance}}"
+            },
+            {
+              "expr": "avg by (target) (ping_loss_percent{job=\"opnsense-telegraf\"})",
+              "legendFormat": "LOSS {{target}}"
+            },
+            {
+              "expr": "avg by (target) (ping_response_time_ms{job=\"opnsense-telegraf\"})",
+              "legendFormat": "LAT {{target}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "custom": {"lineWidth": 1, "fillOpacity": 8}
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "n8n Workflow Success Ratio",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+          "targets": [
+            {
+              "expr": "sum(rate(n8n_workflow_success_total[5m])) / clamp_min(sum(rate(n8n_workflow_success_total[5m])) + sum(rate(n8n_workflow_error_total[5m])), 0.001)",
+              "legendFormat": "ratio"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "yellow", "value": 0.9},
+                  {"color": "green", "value": 0.95}
+                ]
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 16,
+          "type": "stat",
+          "title": "Longhorn Unhealthy Volumes",
+          "gridPos": {"h": 4, "w": 4, "x": 12, "y": 24},
+          "targets": [
+            {
+              "expr": "count(max by (pvc, pvc_namespace) (longhorn_volume_robustness{state=\"healthy\"}) == 0) or vector(0)",
+              "legendFormat": "unhealthy"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 3}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 17,
+          "type": "stat",
+          "title": "Longhorn Backup Failures",
+          "gridPos": {"h": 4, "w": 4, "x": 16, "y": 24},
+          "targets": [
+            {
+              "expr": "sum(longhorn_backup_state == 4)",
+              "legendFormat": "failed"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 1},
+                  {"color": "red", "value": 3}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 18,
+          "type": "stat",
+          "title": "Scanner Files Ready Pods",
+          "gridPos": {"h": 4, "w": 4, "x": 20, "y": 24},
+          "targets": [
+            {"expr": "sum(kube_pod_status_ready{namespace=\"default\",condition=\"true\",pod=~\"scanner-files-.*\"})", "legendFormat": "ready"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "red", "value": null},
+                  {"color": "green", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["homelab", "overview", "operations"],
+      "templating": {"list": []},
+      "time": {"from": "now-24h", "to": "now"},
+      "title": "Homelab Overview",
+      "version": 1
+    }
