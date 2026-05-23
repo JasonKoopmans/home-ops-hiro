@@ -71,8 +71,7 @@ spec:
             description: Memory usage on {{ $labels.instance }} has stayed above 95% for more than 10 minutes.
 
         - alert: OpnSenseDiskPressure
-          # disk_used_percent from OPNsense Telegraf reports available %, so invert to get used %
-          expr: (100 - max by (instance) (disk_used_percent{job="opnsense-telegraf", path="/"})) > 90
+          expr: max by (instance) (disk_used_percent{job="opnsense-telegraf", path="/"}) > 90
           for: 15m
           labels:
             severity: warning
@@ -82,8 +81,7 @@ spec:
             description: Root filesystem usage on {{ $labels.instance }} has stayed above 90% for more than 15 minutes.
 
         - alert: OpnSenseDiskPressureCritical
-          # disk_used_percent from OPNsense Telegraf reports available %, so invert to get used %
-          expr: (100 - max by (instance) (disk_used_percent{job="opnsense-telegraf", path="/"})) > 95
+          expr: max by (instance) (disk_used_percent{job="opnsense-telegraf", path="/"}) > 95
           for: 10m
           labels:
             severity: critical
