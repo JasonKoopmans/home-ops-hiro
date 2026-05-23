@@ -1,0 +1,81 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app audacity
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: app-template
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      main:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: lscr.io/linuxserver/audacity
+              tag: latest@sha256:96d893786e030c9c4b869b17110abef3fd8f17e602136995e42af020168998d8
+            env:
+              DOCKER_MODS: linuxserver/mods:universal-package-install
+              INSTALL_PACKAGES: ffmpeg
+              PGID: "1001"
+              PUID: "1001"
+              TZ: ${TIMEZONE}
+            resources:
+              requests:
+                cpu: 25m
+                memory: 256Mi
+              limits:
+                memory: 2Gi
+
+    defaultPodOptions:
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+        supplementalGroups: [1001]
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: &port 3000
+
+    route:
+      main:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: https://audacityteam.org/favicon.ico
+          gethomepage.dev/title: Audacity
+          gethomepage.dev/description: "Audio editor"
+          gethomepage.dev/group: "Media"
+        hostnames:
+          - audacity.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: main
+                port: *port
+
+    persistence:
+      config:
+        existingClaim: audacity-config
+        globalMounts:
+          - path: /config
+
+      tmp:
+        type: emptyDir

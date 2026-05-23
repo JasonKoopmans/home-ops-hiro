@@ -20,3 +20,4 @@ resources:
   - ./qbittorrent/ks.yaml
   - ./rsvp-reader/ks.yaml
   - ./autensa/ks.yaml
+  - ./audacity/ks.yaml
