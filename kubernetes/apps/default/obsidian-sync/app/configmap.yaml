@@ -10,3 +10,5 @@ data:
   VAULT_PATH: /vault
   OBSIDIAN_CONFIG_DIR: /config
   OBSIDIAN_SYNC_MODE: pull-only
+  OBSIDIAN_SYNC_VAULT: ""
+  OBSIDIAN_SYNC_DEVICE_NAME: homelab-obsidian-sync
