@@ -49,7 +49,7 @@ spec:
           app:
             image:
               repository: docker.io/nginxinc/nginx-unprivileged
-              tag: 1.27.5-alpine
+              tag: 1.31.1-alpine
             env:
               TZ: ${TIMEZONE}
             probes:
