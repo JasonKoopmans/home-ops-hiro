@@ -22,3 +22,4 @@ resources:
   - ./rsvp-reader/ks.yaml
   - ./autensa/ks.yaml
   - ./openreel/ks.yaml
+  - ./obsidian/ks.yaml
