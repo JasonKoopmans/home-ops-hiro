@@ -31,6 +31,11 @@ spec:
         replication_factor: 1
       storage:
         type: filesystem
+      limits_config:
+        retention_period: 14d
+      compactor:
+        retention_enabled: true
+        delete_request_store: filesystem
       schemaConfig:
         configs:
           - from: "2024-01-01"
