@@ -52,12 +52,7 @@ spec:
           # are kept as they back the default API Server and SLI dashboards.
           - action: drop
             sourceLabels: [__name__]
-            regex: >-
-              apiserver_request_body_size_bytes_bucket|
-              apiserver_watch_list_duration_seconds_bucket|
-              apiserver_watch_cache_read_wait_seconds_bucket|
-              apiserver_response_sizes_bucket|
-              apiserver_watch_events_sizes_bucket
+            regex: apiserver_request_body_size_bytes_bucket|apiserver_watch_list_duration_seconds_bucket|apiserver_watch_cache_read_wait_seconds_bucket|apiserver_response_sizes_bucket|apiserver_watch_events_sizes_bucket
 
     alertmanager:
       alertmanagerSpec:
