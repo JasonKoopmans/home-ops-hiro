@@ -27,7 +27,7 @@ spec:
               repository: docker.io/yuzutech/kroki
               tag: 0.28.0
             env:
-              KROKI_PORT: &port "8000"
+              KROKI_PORT: "8000"
             resources:
               requests:
                 cpu: 25m
@@ -40,7 +40,7 @@ spec:
         controller: main
         ports:
           http:
-            port: *port
+            port: 8000
 
     route:
       main:
@@ -59,4 +59,4 @@ spec:
         rules:
           - backendRefs:
               - identifier: main
-                port: *port
+                port: 8000
