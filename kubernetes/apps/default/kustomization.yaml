@@ -23,3 +23,4 @@ resources:
   - ./autensa/ks.yaml
   - ./openreel/ks.yaml
   - ./obsidian/ks.yaml
+  - ./kroki/ks.yaml
