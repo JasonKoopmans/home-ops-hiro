@@ -26,7 +26,7 @@ spec:
           app:
             image:
               repository: docker.io/linuxserver/obsidian
-              tag: 1.9.12
+              tag: 1.12.7
             env:
               TZ: ${TIMEZONE}
               PUID: "1000"
