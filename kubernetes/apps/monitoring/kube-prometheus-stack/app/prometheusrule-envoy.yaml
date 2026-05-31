@@ -1,0 +1,31 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: envoy-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: envoy.rules
+      rules:
+        - alert: EnvoyProxyDown
+          expr: sum(up{job="envoy-proxy"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            service: envoy
+          annotations:
+            summary: Envoy data plane is down
+            description: No Envoy pods are scraping successfully for more than 5 minutes.
+
+        - alert: EnvoyPodRestartsDetected
+          expr: sum(increase(kube_pod_container_status_restarts_total{namespace="network",container="envoy"}[30m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            service: envoy
+          annotations:
+            summary: Envoy pod restarts detected
+            description: One or more Envoy pods in the network namespace have restarted within the last 30 minutes.

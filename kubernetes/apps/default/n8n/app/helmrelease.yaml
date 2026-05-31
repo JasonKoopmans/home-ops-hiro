@@ -25,7 +25,7 @@ spec:
           app:
             image:
               repository: ghcr.io/n8n-io/n8n
-              tag: 2.20.6
+              tag: 2.23.1
             envFrom:
               - secretRef:
                   name: n8n-smtp-secret
@@ -96,6 +96,14 @@ spec:
           n8n:
             app:
               - path: /home/node/.n8n
+
+      obsidian-vault:
+        existingClaim: obsidian-vault
+        advancedMounts:
+          n8n:
+            app:
+              - path: /data/obsidian-ro
+                readOnly: true
 
       tmp:
         type: emptyDir

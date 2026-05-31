@@ -122,3 +122,31 @@ tasks:
     preconditions:
       - test -f {{.KUBECONFIG}}
       - which flux
+
+  envoy:probe:
+    desc: Probe internal Envoy-backed apps and report pod/node drift
+    cmd: bash {{.SCRIPTS_DIR}}/envoy-healthcheck.sh
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing envoy healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/envoy-healthcheck.sh" }
+
+  envoy:repair:
+    desc: Probe and delete the most suspicious envoy-internal pod
+    cmd: bash {{.SCRIPTS_DIR}}/envoy-healthcheck.sh --repair
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing envoy healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/envoy-healthcheck.sh" }
+
+  envoy:cordon-node:
+    desc: Probe and cordon the node hosting the suspicious envoy-internal pod
+    cmd: bash {{.SCRIPTS_DIR}}/envoy-healthcheck.sh --cordon-node
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing envoy healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/envoy-healthcheck.sh" }
+
+  envoy:drain-node:
+    desc: Probe and drain the node hosting the suspicious envoy-internal pod
+    cmd: bash {{.SCRIPTS_DIR}}/envoy-healthcheck.sh --drain-node
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing envoy healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/envoy-healthcheck.sh" }

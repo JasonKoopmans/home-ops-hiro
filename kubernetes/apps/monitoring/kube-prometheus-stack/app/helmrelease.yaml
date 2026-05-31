@@ -35,6 +35,25 @@ spec:
     kubeProxy:
       enabled: false
 
+    kubeEtcd:
+      serviceMonitor:
+        metricRelabelings:
+          # etcd request histograms are extremely high-cardinality for a homelab.
+          # The _count and _sum variants are retained for rate/avg queries.
+          - action: drop
+            sourceLabels: [__name__]
+            regex: etcd_request_duration_seconds_bucket
+
+    kubeApiServer:
+      serviceMonitor:
+        metricRelabelings:
+          # Drop high-cardinality apiserver histograms not needed for basic homelab dashboards.
+          # apiserver_request_duration_seconds_bucket and apiserver_request_sli_duration_seconds_bucket
+          # are kept as they back the default API Server and SLI dashboards.
+          - action: drop
+            sourceLabels: [__name__]
+            regex: apiserver_request_body_size_bytes_bucket|apiserver_watch_list_duration_seconds_bucket|apiserver_watch_cache_read_wait_seconds_bucket|apiserver_response_sizes_bucket|apiserver_watch_events_sizes_bucket
+
     alertmanager:
       alertmanagerSpec:
         replicas: 1
@@ -49,6 +68,7 @@ spec:
       prometheusSpec:
         replicas: 1
         retention: 14d
+        retentionSize: 38GB
         enableRemoteWriteReceiver: true
         # Discover all ServiceMonitors and PodMonitors in the cluster
         serviceMonitorSelectorNilUsesHelmValues: false

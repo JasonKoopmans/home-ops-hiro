@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: obsidian-sync-config
+  labels:
+    app.kubernetes.io/name: obsidian-sync
+data:
+  SYNC_INTERVAL_SECONDS: "300"
+  VAULT_PATH: /vault/PKS
+  OBSIDIAN_CONFIG_DIR: /config
+  OBSIDIAN_SYNC_MODE: pull-only
+  OBSIDIAN_SYNC_VAULT: "PKS"
+  OBSIDIAN_SYNC_DEVICE_NAME: hiro-obsidian-sync
