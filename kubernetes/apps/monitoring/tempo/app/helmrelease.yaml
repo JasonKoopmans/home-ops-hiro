@@ -9,14 +9,16 @@ spec:
   interval: 1h
   chart:
     spec:
+      # renovate: datasource=helm registryUrl=https://grafana.github.io/helm-charts depName=tempo
       chart: tempo
+      version: "1.24.4"
       sourceRef:
         kind: HelmRepository
         name: grafana-tempo
         namespace: monitoring
   install:
     remediation:
-      retries: -1
+      retries: 3
   upgrade:
     cleanupOnFail: true
     remediation:
