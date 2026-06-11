@@ -25,7 +25,7 @@ spec:
           build-openreel:
             image:
               repository: docker.io/library/node
-              tag: 22.11.0-alpine
+              tag: 22.22.3-alpine
             command:
               - /bin/sh
               - -c
