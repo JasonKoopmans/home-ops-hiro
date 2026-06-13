@@ -119,7 +119,7 @@ spec:
               TZ: ${TIMEZONE}
             probes:
               liveness: &syncProbe
-                enabled: true
+                enabled: false
                 custom: true
                 spec:
                   exec:
