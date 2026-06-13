@@ -150,3 +150,91 @@ tasks:
     preconditions:
       - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
       - { msg: "Missing envoy healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/envoy-healthcheck.sh" }
+
+  # Pre-flight gate for higher-risk operations: fail fast if core controllers,
+  # workloads, storage, jobs, or key infra namespaces show unhealthy signals.
+  cluster:health:
+    desc: Run a full cluster healthcheck before/after risky operations
+    summary: |
+      Args:
+        args: Optional flags for cluster-healthcheck.sh (example: --show-logs)
+    cmd: bash {{.SCRIPTS_DIR}}/cluster-healthcheck.sh {{.args | default ""}}
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing cluster healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/cluster-healthcheck.sh" }
+
+  # Continuous watch mode for maintenance windows; useful while applying staged
+  # changes so regressions are caught between steps.
+  cluster:health:watch:
+    desc: Periodically run cluster health checks (default every 300s)
+    summary: |
+      Args:
+        interval: Seconds between checks (optional, default: 300)
+        args: Optional flags for cluster-healthcheck.sh (example: --show-logs)
+    cmd: bash {{.SCRIPTS_DIR}}/cluster-healthcheck.sh --watch {{.interval | default "300"}} {{.args | default ""}}
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing cluster healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/cluster-healthcheck.sh" }
+
+  # Sensitivity presets for restart-signal detection to avoid long arg strings.
+  cluster:health:strict:
+    desc: Run health checks with stricter restart-signal thresholds
+    cmds:
+      - task: cluster:health
+        vars:
+          args: >-
+            --restart-fast-events 2
+            --restart-fast-logs 3
+            --restart-fast-combined-events 1
+            --restart-fast-combined-logs 1
+            --restart-slow-events 4
+            --restart-slow-logs 6
+
+  cluster:health:relaxed:
+    desc: Run health checks with more tolerant restart-signal thresholds
+    cmds:
+      - task: cluster:health
+        vars:
+          args: >-
+            --restart-fast-events 4
+            --restart-fast-logs 6
+            --restart-fast-combined-events 3
+            --restart-fast-combined-logs 3
+            --restart-slow-events 8
+            --restart-slow-logs 10
+            --restart-namespace-pods 3
+
+  cluster:health:strict:watch:
+    desc: Watch mode with strict restart-signal thresholds
+    summary: |
+      Args:
+        interval: Seconds between checks (optional, default: 300)
+    cmds:
+      - task: cluster:health:watch
+        vars:
+          interval: '{{.interval | default "300"}}'
+          args: >-
+            --restart-fast-events 2
+            --restart-fast-logs 3
+            --restart-fast-combined-events 1
+            --restart-fast-combined-logs 1
+            --restart-slow-events 4
+            --restart-slow-logs 6
+
+  cluster:health:relaxed:watch:
+    desc: Watch mode with tolerant restart-signal thresholds
+    summary: |
+      Args:
+        interval: Seconds between checks (optional, default: 300)
+    cmds:
+      - task: cluster:health:watch
+        vars:
+          interval: '{{.interval | default "300"}}'
+          args: >-
+            --restart-fast-events 4
+            --restart-fast-logs 6
+            --restart-fast-combined-events 3
+            --restart-fast-combined-logs 3
+            --restart-slow-events 8
+            --restart-slow-logs 10
+            --restart-namespace-pods 3
