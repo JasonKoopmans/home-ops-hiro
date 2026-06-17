@@ -21,6 +21,7 @@ resources:
   - ./qbittorrent/ks.yaml
   - ./rsvp-reader/ks.yaml
   - ./autensa/ks.yaml
+  - ./audacity/ks.yaml
   - ./openreel/ks.yaml
   - ./obsidian/ks.yaml
   - ./kroki/ks.yaml
