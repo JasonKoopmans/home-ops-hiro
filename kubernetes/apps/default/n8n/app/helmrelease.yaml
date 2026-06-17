@@ -40,6 +40,7 @@ spec:
               N8N_PROTOCOL: "https"
               N8N_PORT: &port 443
               N8N_HOST: &hostName workflow.${SECRET_DOMAIN}
+              N8N_EDITOR_BASE_URL: https://workflow.${SECRET_DOMAIN}
               WEBHOOK_URL: https://workflow-hook.${SECRET_DOMAIN}/
               N8N_PROXY_HOPS: 1
               N8N_LOG_LEVEL: warn
