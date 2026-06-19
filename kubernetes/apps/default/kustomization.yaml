@@ -8,6 +8,7 @@ components:
 
 resources:
   - ./namespace.yaml
+  - ./hermes-ai-agent/ks.yaml
   - ./echo/ks.yaml
   - ./test/ks.yaml
   - ./n8n/ks.yaml

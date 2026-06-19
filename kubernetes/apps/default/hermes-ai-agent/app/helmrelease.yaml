@@ -1,0 +1,119 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app hermes-ai-agent
+spec:
+  interval: 1h
+  timeout: 15m
+  chartRef:
+    kind: OCIRepository
+    name: app-template
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      hermes:
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: docker.io/nousresearch/hermes-agent
+              tag: v2026.6.5
+            tty: true
+            stdin: true
+            args:
+              - gateway
+              - run
+            envFrom:
+              - secretRef:
+                  name: hermes-ai-agent-secret
+            env:
+              TZ: ${TIMEZONE}
+              API_SERVER_ENABLED: true
+              API_SERVER_HOST: 0.0.0.0
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: &healthPath /health
+                    port: &apiPort 8642
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: *healthPath
+                    port: *apiPort
+                  initialDelaySeconds: 15
+                  periodSeconds: 15
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: *healthPath
+                    port: *apiPort
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 60
+            resources:
+              requests:
+                cpu: 250m
+                memory: 512Mi
+              limits:
+                cpu: 2000m
+                memory: 4Gi
+    service:
+      app:
+        controller: hermes
+        ports:
+          http:
+            port: *apiPort
+
+    route:
+      app:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi-robot-outline
+          gethomepage.dev/title: Hermes
+          gethomepage.dev/description: "Hermes AI Agent Gateway"
+          gethomepage.dev/group: "Automation"
+        hostnames:
+          - hermes.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+
+    persistence:
+      data:
+        existingClaim: hermes-ai-agent-data
+        advancedMounts:
+          hermes:
+            app:
+              - path: /opt/data
+
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          hermes:
+            app:
+              - path: /tmp
