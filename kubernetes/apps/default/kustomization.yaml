@@ -25,3 +25,4 @@ resources:
   - ./openreel/ks.yaml
   - ./obsidian/ks.yaml
   - ./kroki/ks.yaml
+  - ./tika-ner/ks.yaml
