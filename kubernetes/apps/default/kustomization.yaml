@@ -26,4 +26,5 @@ resources:
   - ./obsidian/ks.yaml
   - ./kroki/ks.yaml
   - ./spacy-ner/ks.yaml
+  - ./email-reply-api/ks.yaml
   - ./tika-ner/ks.yaml

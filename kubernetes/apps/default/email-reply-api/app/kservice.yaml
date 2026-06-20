@@ -1,0 +1,24 @@
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: email-reply-api
+  namespace: default
+  labels:
+    app.kubernetes.io/name: email-reply-api
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/min-scale: "0"
+        autoscaling.knative.dev/max-scale: "3"
+    spec:
+      containers:
+        - image: ghcr.io/jasonkoopmans/email-reply-api:0.1.0
+          env:
+            - name: PORT
+              value: "8080"
+            - name: TZ
+              value: ${TIMEZONE}
+          ports:
+            - containerPort: 8080

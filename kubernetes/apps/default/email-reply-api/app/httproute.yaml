@@ -1,0 +1,31 @@
+---
+# Route internal traffic for email-reply-api through the internal Envoy Gateway.
+# We route directly to the revision service (email-reply-api-00001) rather than the
+# email-reply-api ExternalName Service, because Envoy Gateway cannot resolve
+# ExternalName backends.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: email-reply-api
+  namespace: default
+  labels:
+    app.kubernetes.io/name: email-reply-api
+spec:
+  parentRefs:
+    - name: envoy-internal
+      namespace: network
+      sectionName: https
+  hostnames:
+    - "email-reply-api.${SECRET_DOMAIN}"
+  rules:
+    - backendRefs:
+        - name: email-reply-api-00001
+          port: 80
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: Knative-Serving-Namespace
+                value: default
+              - name: Knative-Serving-Revision
+                value: email-reply-api-00001
