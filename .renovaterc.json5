@@ -80,6 +80,12 @@
       commitMessageExtra: "( {{currentVersion}} ➔ {{newVersion}} )",
     },
     {
+      description: "Auto-merge minor and patch updates",
+      matchUpdateTypes: ["minor", "patch"],
+      automerge: true,
+      automergeType: "branch",
+    },
+    {
       matchUpdateTypes: ["digest"],
       semanticCommitType: "chore",
       commitMessageExtra: "( {{currentDigestShort}} ➔ {{newDigestShort}} )",
