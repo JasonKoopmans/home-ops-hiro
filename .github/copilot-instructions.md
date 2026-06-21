@@ -229,6 +229,57 @@ Follow this checklist when deploying a new app:
 
 ---
 
+## Removing an Application
+
+> **Use the two-phase GitOps pattern below — never use `kubectl delete` directly.** Direct deletions bypass Flux's inventory tracking and will be re-applied on the next reconciliation.
+
+### How Flux Cleanup Works in This Repo
+
+This repo is configured for safe, declarative teardown:
+
+- `cluster-apps` Kustomization has `prune: true` and `deletionPolicy: WaitForTermination`, and patches this onto every child Kustomization.
+- App Kustomizations (`ks.yaml`) have `prune: true`: Flux tracks every resource it applies and deletes resources that disappear from source.
+- When a Flux **Kustomization CR is deleted**, Flux finalizes it by pruning its full inventory — HelmReleases, PVCs, ConfigMaps, Secrets, etc.
+- When a **HelmRelease is deleted**, the Helm controller runs `helm uninstall`, removing all Helm-managed resources (Deployments, Services, HTTPRoutes).
+
+### Two-Phase Removal
+
+Use the Taskfile tasks:
+
+```sh
+# Phase 1: remove the HelmRelease → Flux triggers helm uninstall (pods, services, routes)
+task app:decommission:phase1 path=<namespace>/<app-name>
+
+# Verify the HelmRelease and all pods are gone before continuing
+kubectl get helmrelease,pods -n <namespace> | grep <app-name>
+
+# Phase 2: remove the Kustomization entry and all app files → Flux prunes remaining resources
+task app:decommission:phase2 path=<namespace>/<app-name>
+```
+
+Or manually:
+
+**Phase 1** — Edit `kubernetes/apps/<namespace>/<app>/app/kustomization.yaml` and remove `./helmrelease.yaml` from the resources list. Commit and push. The app's Kustomization remains alive so Flux prunes only the HelmRelease, triggering `helm uninstall`.
+
+**Phase 2** — Remove `<app>/ks.yaml` from `kubernetes/apps/<namespace>/kustomization.yaml`, then delete the entire `kubernetes/apps/<namespace>/<app>/` directory. Commit and push. Flux prunes the Kustomization and all remaining tracked resources (PVCs, OCIRepository, ConfigMaps, Secrets).
+
+### Watchouts
+
+**Shared OCIRepository names:** Some apps define an `OCIRepository` with a common name (e.g. `app-template`) in the namespace. If another app in the same namespace uses the same OCIRepository name, Flux will delete that shared resource when the departing app's inventory is pruned. The other app will briefly fail reconciliation but self-heals on its next cycle. Check before Phase 2:
+
+```sh
+# Check whether other apps in the same namespace define an OCIRepository with the same name
+grep -r "kind: OCIRepository" kubernetes/apps/<namespace>/
+```
+
+If there are other consumers, remove only `./ocirepository.yaml` from the departing app's `app/kustomization.yaml` during Phase 1 so ownership transfers gracefully before Phase 2.
+
+**PVC data:** Phase 2 deletes PVCs and, with Longhorn's default `Delete` reclaim policy, the underlying volumes. Take a Longhorn snapshot before Phase 2 if the data needs to be preserved.
+
+**Apps without a HelmRelease:** If the app uses only raw manifests (no `helmrelease.yaml`), skip Phase 1 and go directly to Phase 2 — the Kustomization prune handles full cleanup.
+
+---
+
 ## Renovate & Dependency Updates
 
 - Renovate is configured via `.renovaterc.json5` and runs on a weekend schedule by default.
@@ -253,6 +304,9 @@ Follow this checklist when deploying a new app:
 - A `.devcontainer/` config is provided for VS Code / Codespaces / devcontainer CLI.
 - **Task** (`Taskfile.yaml` + `.taskfiles/`) provides common workflows. Key tasks:
   - `task reconcile` — force Flux to sync
+  - `task apply path=<namespace>/<app>` — imperatively apply an app's manifests (for testing)
+  - `task app:decommission:phase1 path=<namespace>/<app>` — GitOps removal phase 1 (unlink HelmRelease)
+  - `task app:decommission:phase2 path=<namespace>/<app>` — GitOps removal phase 2 (remove Kustomization + files)
   - `task talos:generate-config` — regenerate Talos configs
   - `task talos:apply-node IP=<ip>` — apply config to a node
 

@@ -39,7 +39,12 @@ tasks:
       trap 'rm -rf "$TMP_APP_DIR"' EXIT
       cp -R "{{.KUBERNETES_DIR}}/apps/{{.path}}/app/." "$TMP_APP_DIR/"
 
-      find "$TMP_APP_DIR" -type f -name "*.sops.*" | while IFS= read -r encrypted_file; do
+      if find "$TMP_APP_DIR" -type f -name ".decrypted~*.sops.*" | grep -q .; then
+        echo "Found decrypted SOPS artifact(s) (.decrypted~*.sops.*) under app path. Remove them and retry." >&2
+        exit 1
+      fi
+
+      find "$TMP_APP_DIR" -type f \( -name "*.sops.yaml" -o -name "*.sops.yml" \) | while IFS= read -r encrypted_file; do
         sops --decrypt "$encrypted_file" > "$encrypted_file.tmp"
         mv "$encrypted_file.tmp" "$encrypted_file"
       done
@@ -64,7 +69,12 @@ tasks:
       trap 'rm -rf "$TMP_APP_DIR"' EXIT
       cp -R "{{.KUBERNETES_DIR}}/apps/{{.path}}/app/." "$TMP_APP_DIR/"
 
-      find "$TMP_APP_DIR" -type f -name "*.sops.*" | while IFS= read -r encrypted_file; do
+      if find "$TMP_APP_DIR" -type f -name ".decrypted~*.sops.*" | grep -q .; then
+        echo "Found decrypted SOPS artifact(s) (.decrypted~*.sops.*) under app path. Remove them and retry." >&2
+        exit 1
+      fi
+
+      find "$TMP_APP_DIR" -type f \( -name "*.sops.yaml" -o -name "*.sops.yml" \) | while IFS= read -r encrypted_file; do
         sops --decrypt "$encrypted_file" > "$encrypted_file.tmp"
         mv "$encrypted_file.tmp" "$encrypted_file"
       done
@@ -80,6 +90,92 @@ tasks:
 
 
 
+  app:decommission:phase1:
+    desc: "GitOps app removal phase 1 — remove HelmRelease to trigger helm uninstall"
+    summary: |
+      Args:
+        path: namespace/appname path under kubernetes/apps (e.g. default/myapp)
+
+      Removes helmrelease.yaml from the app's kustomization resources, commits,
+      pushes, and triggers a Flux reconcile. Wait for the HelmRelease and pods
+      to terminate before running app:decommission:phase2.
+    cmd: |
+      APP_NAME="$(basename "{{.path}}")"
+      APP_KS="{{.KUBERNETES_DIR}}/apps/{{.path}}/app/kustomization.yaml"
+
+      if [ ! -f "$APP_KS" ]; then
+        echo "ERROR: App kustomization not found at $APP_KS" >&2
+        exit 1
+      fi
+
+      if ! grep -q "helmrelease.yaml" "$APP_KS"; then
+        echo "No helmrelease.yaml in $APP_KS — skipping phase 1 (no HelmRelease to remove)."
+        echo "Proceed directly with: task app:decommission:phase2 path={{.path}}"
+        exit 0
+      fi
+
+      yq -i 'del(.resources[] | select(. == "./helmrelease.yaml"))' "$APP_KS"
+      git add "$APP_KS"
+      git commit -m "feat(${APP_NAME}): remove HelmRelease (phase 1 of removal)"
+      git pull --rebase --autostash
+      git push
+      flux --namespace flux-system reconcile kustomization "${APP_NAME}" --with-source
+      echo ""
+      echo "Phase 1 complete. Verify with:"
+      echo "  kubectl get helmrelease,pods -n $(dirname "{{.path}}") | grep ${APP_NAME}"
+      echo "Then run: task app:decommission:phase2 path={{.path}}"
+    requires:
+      vars: ["path"]
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "flux not found", sh: "which flux" }
+      - { msg: "yq not found", sh: "which yq" }
+
+  app:decommission:phase2:
+    desc: "GitOps app removal phase 2 — remove Kustomization entry and all app files"
+    summary: |
+      Args:
+        path: namespace/appname path under kubernetes/apps (e.g. default/myapp)
+
+      Removes the app's ks.yaml from the parent namespace kustomization.yaml,
+      deletes the app directory, commits, pushes, and triggers a Flux reconcile
+      of cluster-apps. Run only after phase 1 has completed and pods have terminated.
+    cmd: |
+      APP_NAME="$(basename "{{.path}}")"
+      NAMESPACE="$(dirname "{{.path}}")"
+      APP_DIR="{{.KUBERNETES_DIR}}/apps/{{.path}}"
+      PARENT_KS="{{.KUBERNETES_DIR}}/apps/${NAMESPACE}/kustomization.yaml"
+      KS_ENTRY="./${APP_NAME}/ks.yaml"
+
+      if [ ! -d "$APP_DIR" ]; then
+        echo "ERROR: App directory not found at $APP_DIR" >&2
+        exit 1
+      fi
+
+      if [ ! -f "$PARENT_KS" ]; then
+        echo "ERROR: Parent kustomization not found at $PARENT_KS" >&2
+        exit 1
+      fi
+
+      yq -i "del(.resources[] | select(. == \"${KS_ENTRY}\"))" "$PARENT_KS"
+      rm -rf "$APP_DIR"
+      git add "$PARENT_KS" "$APP_DIR"
+      git commit -m "feat(${APP_NAME}): remove application (phase 2 of removal)"
+      git pull --rebase --autostash
+      git push
+      flux --namespace flux-system reconcile kustomization cluster-apps --with-source
+      echo ""
+      echo "Phase 2 complete. Verify with:"
+      echo "  kubectl get kustomization ${APP_NAME} -n flux-system"
+      echo "  kubectl get pvc,configmap,secret -n ${NAMESPACE} | grep ${APP_NAME}"
+    requires:
+      vars: ["path"]
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "flux not found", sh: "which flux" }
+      - { msg: "yq not found", sh: "which yq" }
+
+
   build:
     desc: build Resources at a given path using customize and test against kubeconform
     summary: |
@@ -91,7 +187,12 @@ tasks:
       trap 'rm -rf "$TMP_APP_DIR"' EXIT
       cp -R "{{.KUBERNETES_DIR}}/apps/{{.path}}/app/." "$TMP_APP_DIR/"
 
-      find "$TMP_APP_DIR" -type f -name "*.sops.*" | while IFS= read -r encrypted_file; do
+      if find "$TMP_APP_DIR" -type f -name ".decrypted~*.sops.*" | grep -q .; then
+        echo "Found decrypted SOPS artifact(s) (.decrypted~*.sops.*) under app path. Remove them and retry." >&2
+        exit 1
+      fi
+
+      find "$TMP_APP_DIR" -type f \( -name "*.sops.yaml" -o -name "*.sops.yml" \) | while IFS= read -r encrypted_file; do
         sops --decrypt "$encrypted_file" > "$encrypted_file.tmp"
         mv "$encrypted_file.tmp" "$encrypted_file"
       done
