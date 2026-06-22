@@ -9,8 +9,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install --yes --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+COPY requirements.txt /tmp/requirements.txt
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    python -m pip install --no-cache-dir "email-reply-parser==0.5.12"
+    python -m pip install --no-cache-dir -r /tmp/requirements.txt
 
 RUN groupadd --gid 1000 app && useradd --uid 1000 --gid 1000 --create-home app
 

@@ -144,6 +144,13 @@
       matchDatasources: ["github-releases"],
       addLabels: ["renovate/github-release"],
     },
+    {
+      description: "Pip packages",
+      matchManagers: ["pip_requirements"],
+      semanticCommitScope: "pip",
+      commitMessageTopic: "package {{depName}}",
+      addLabels: ["renovate/pip"],
+    },
   ],
   customManagers: [
     {

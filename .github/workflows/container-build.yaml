@@ -1,0 +1,129 @@
+---
+name: "Container Build"
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "containers/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "containers/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    name: Detect changed containers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed container directories
+        id: set
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+
+          if [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            dirs=$(find containers -maxdepth 1 -mindepth 1 -type d -exec basename {} \;)
+          else
+            dirs=$(git diff --name-only "$base" "$head" -- containers/ \
+              | grep -oP '^containers/\K[^/]+' | sort -u \
+              | while read -r d; do [ -f "containers/$d/Dockerfile" ] && echo "$d"; done)
+          fi
+
+          if [ -z "$dirs" ]; then
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+          else
+            matrix=$(echo "$dirs" | jq -R . | jq -sc .)
+            echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build ${{ matrix.container }}
+    needs: detect
+    if: needs.detect.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        container: ${{ fromJson(needs.detect.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.container }}
+          tags: |
+            type=sha
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build (load locally for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: containers/${{ matrix.container }}
+          load: true
+          tags: ${{ matrix.container }}:scan
+          cache-from: type=gha,scope=${{ matrix.container }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.container }}
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: ${{ matrix.container }}:scan
+          format: sarif
+          output: trivy-${{ matrix.container }}.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.container }}.sarif
+          category: trivy-${{ matrix.container }}
+
+      - name: Push to GHCR
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: containers/${{ matrix.container }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.container }}
