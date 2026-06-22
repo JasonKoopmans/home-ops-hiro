@@ -27,7 +27,7 @@ spec:
           build-opennlp-models:
             image:
               repository: docker.io/library/eclipse-temurin
-              tag: 21-jdk-alpine
+              tag: 26-jdk-alpine
             command:
               - /bin/sh
               - -c
