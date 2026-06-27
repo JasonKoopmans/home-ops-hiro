@@ -31,3 +31,21 @@ spec:
 #  labels:
 #    label/1: a
 #    label/2: b
+
+---
+
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: longhorn-snapshot-only-job
+  namespace: storage
+spec:
+  cron: "15 * * * *" # every hour at minute 15
+  task: "snapshot"
+  groups:
+  - snapshot-only
+  retain: 3
+  concurrency: 2
+#  labels:
+#    label/1: a
+#    label/2: b
