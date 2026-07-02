@@ -1,0 +1,88 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app changedetection
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: app-template
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      main:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/dgtlmoon/changedetection.io
+              tag: 0.55.7
+            env:
+              TZ: ${TIMEZONE}
+              BASE_URL: https://changedetection.${SECRET_DOMAIN}
+              PLAYWRIGHT_DRIVER_URL: ws://127.0.0.1:3000
+            resources:
+              requests:
+                cpu: 25m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+
+          playwright:
+            image:
+              repository: dgtlmoon/sockpuppetbrowser
+              tag: 0.0.3
+            securityContext:
+              capabilities:
+                add:
+                  - SYS_ADMIN
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: &port 5000
+
+    route:
+      main:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: https://changedetection.io/favicon.ico
+          gethomepage.dev/title: changedetection
+          gethomepage.dev/description: "Website change detection"
+          gethomepage.dev/group: "Automation"
+        hostnames:
+          - changedetection.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: main
+                port: *port
+
+    persistence:
+      data:
+        existingClaim: changedetection-data
+        globalMounts:
+          - path: /datastore
+
+      tmp:
+        type: emptyDir
