@@ -40,6 +40,10 @@ spec:
               TZ: ${TIMEZONE}
               API_SERVER_ENABLED: true
               API_SERVER_HOST: 0.0.0.0
+              HERMES_DASHBOARD: true
+              HERMES_DASHBOARD_HOST: 0.0.0.0
+              HERMES_DASHBOARD_PORT: &dashboardPort 9119
+              HERMES_DASHBOARD_PUBLIC_URL: https://hermes-dashboard.${SECRET_DOMAIN}
             probes:
               liveness:
                 enabled: true
@@ -87,6 +91,8 @@ spec:
         ports:
           http:
             port: *apiPort
+          dashboard:
+            port: *dashboardPort
 
     route:
       app:
@@ -106,6 +112,24 @@ spec:
           - backendRefs:
               - identifier: app
                 port: *apiPort
+
+      dashboard:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi-view-dashboard-outline
+          gethomepage.dev/title: Hermes Dashboard
+          gethomepage.dev/description: "Hermes AI Agent Dashboard"
+          gethomepage.dev/group: "Automation"
+        hostnames:
+          - hermes-dashboard.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *dashboardPort
 
     persistence:
       data:

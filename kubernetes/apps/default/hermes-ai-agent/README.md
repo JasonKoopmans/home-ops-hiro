@@ -8,7 +8,21 @@ This app runs Hermes gateway mode in the `default` namespace.
 - Secret (SOPS): `kubernetes/apps/default/hermes-ai-agent/app/secret.sops.yaml`
 - Persistent data path in pod: `/opt/data`
 - Service/API port: `8642`
-- Dashboard exposure is disabled in-cluster until auth-backed Hermes dashboard settings are added
+- Web dashboard: enabled at `https://hermes-dashboard.${SECRET_DOMAIN}` (port `9119`), gated by the bundled username/password provider (`HERMES_DASHBOARD_BASIC_AUTH_*`)
+
+## Set dashboard credentials
+
+The dashboard refuses to bind on a non-loopback address without an auth provider configured, so `HERMES_DASHBOARD_BASIC_AUTH_USERNAME`/`_PASSWORD` must be set before the pod comes up healthy.
+
+1. Decrypt and edit the secret:
+
+   ```bash
+   sops kubernetes/apps/default/hermes-ai-agent/app/secret.sops.yaml
+   ```
+
+2. Fill in `HERMES_DASHBOARD_BASIC_AUTH_USERNAME`, `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD`, and `HERMES_DASHBOARD_BASIC_AUTH_SECRET` (32+ random bytes — keeps dashboard sessions alive across pod restarts).
+
+3. Save and re-apply as below.
 
 ## Rotate API key
 
