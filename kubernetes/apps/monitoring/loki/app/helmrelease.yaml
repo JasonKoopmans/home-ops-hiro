@@ -22,6 +22,15 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
+  valuesFrom:
+    - name: loki-objstore-config
+      kind: Secret
+      valuesKey: accessKey
+      targetPath: loki.storage.s3.accessKeyId
+    - name: loki-objstore-config
+      kind: Secret
+      valuesKey: secretKey
+      targetPath: loki.storage.s3.secretAccessKey
   values:
     deploymentMode: SingleBinary
 
@@ -29,18 +38,68 @@ spec:
       auth_enabled: false
       commonConfig:
         replication_factor: 1
+      # Long-term storage: Minio (observability-loki bucket), via a dedicated
+      # bucket-scoped IAM user (kubernetes/apps/storage/minio/app/loki-user-bootstrap-job.yaml),
+      # not Minio root credentials. accessKeyId/secretAccessKey come from
+      # loki-objstore-config via valuesFrom above.
       storage:
-        type: filesystem
+        type: s3
+        bucketNames:
+          chunks: observability-loki
+          ruler: observability-loki
+        s3:
+          endpoint: minio.storage.svc.cluster.local:9000
+          region: us-east-1
+          # Minio requires path-style bucket addressing, not virtual-hosted-style.
+          s3ForcePathStyle: true
+          insecure: true
+      # loki.storage.filesystem (chart's own toggle) is dead once storage.type: s3
+      # is set — the chart's common-storage template is an if/else and only
+      # renders one backend. storage_config (snake_case, distinct from `storage`
+      # above) is a raw passthrough straight into the rendered storage_config:
+      # section, which is how the pre-cutover schemaConfig period below (still
+      # object_store: filesystem) gets a real backend to read existing logs from,
+      # alongside the s3 backend the new period uses via common.storage.s3.
+      storage_config:
+        filesystem:
+          chunks_directory: /var/loki/chunks
+          rules_directory: /var/loki/rules
       limits_config:
         retention_period: 14d
       compactor:
         retention_enabled: true
-        delete_request_store: filesystem
+        # Matches the active (latest) schemaConfig period's object_store, since
+        # that's where the compactor's delete-request markers should live going
+        # forward. The old filesystem-period logs age out under the same
+        # retention_period and get cleaned up from the local volume as usual.
+        delete_request_store: s3
       schemaConfig:
         configs:
+          # Pre-cutover: existing logs already written to the local filesystem
+          # volume. Left unchanged so they remain queryable — do not edit
+          # object_store here, only add new periods for storage changes.
           - from: "2024-01-01"
             store: tsdb
             object_store: filesystem
+            schema: v13
+            index:
+              prefix: loki_index_
+              period: 24h
+          # Phase 6 cutover: new logs from this date land in Minio (observability-loki)
+          # instead of the local filesystem volume. Deliberately set to the day
+          # AFTER merge/deploy (not the deploy day itself): Loki resolves a
+          # period's `from` at UTC day granularity, so if this were set to
+          # today, logs already ingested earlier today under the filesystem
+          # period would have their queries incorrectly routed to the s3
+          # period for the rest of today — a partial-day query gap where
+          # chunks exist on disk but Loki looks for them in Minio instead.
+          # A future UTC day boundary keeps the cutover clean: everything
+          # before this date reads from filesystem, everything from this date
+          # forward reads from S3, with no overlap or gap. Update this date if
+          # merge/deploy slips past 2026-07-04.
+          - from: "2026-07-04"
+            store: tsdb
+            object_store: s3
             schema: v13
             index:
               prefix: loki_index_

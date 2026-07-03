@@ -4,6 +4,13 @@ kind: Kustomization
 metadata:
   name: loki
 spec:
+  # minio owns the loki-user-bootstrap Job that provisions the Minio IAM user
+  # loki-objstore-config authenticates as. minio's Kustomization healthChecks
+  # gate its own Ready condition on that Job completing, so this dependsOn
+  # actually waits for the user to exist, not just for apply to succeed.
+  dependsOn:
+    - name: minio
+      namespace: storage
   interval: 1h
   path: ./kubernetes/apps/monitoring/loki/app
   postBuild:

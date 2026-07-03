@@ -1,0 +1,110 @@
+---
+# Loki IAM user bootstrap Job — runs once after Minio is healthy.
+# Creates a Minio user scoped to only the observability-loki bucket (not the
+# root credentials) and attaches it to the credentials already generated and
+# SOPS-encrypted in loki-user-credentials.sops.yaml. Loki authenticates as
+# this user via
+# kubernetes/apps/monitoring/loki/app/loki-objstore-config.sops.yaml,
+# which holds the same accessKey/secretKey pair.
+#
+# Manual equivalent:
+#   mc alias set local http://minio.storage.svc.cluster.local:9000 <root user> <root password>
+#   mc admin policy create local loki-observability-rw /tmp/policy.json
+#   mc admin user add local <loki accessKey> <loki secretKey>
+#   mc admin policy attach local loki-observability-rw --user <loki accessKey>
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: loki-user-bootstrap
+  namespace: storage
+  annotations:
+    # prune: false prevents Flux from deleting this Job when it is removed from the
+    # Kustomization's resources list. To decommission it, remove it from
+    # storage/minio/app/kustomization.yaml and then delete the Job manually.
+    # Deleting the Job while it is still listed will cause Flux to recreate it
+    # on the next reconcile.
+    kustomize.toolkit.fluxcd.io/prune: "false"
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              RETRIES=0; MAX_RETRIES=180
+              until mc alias set local http://minio.storage.svc.cluster.local:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                RETRIES=$((RETRIES + 1))
+                if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
+                  echo "ERROR: minio did not become ready after $((MAX_RETRIES * 5))s, giving up"
+                  exit 1
+                fi
+                echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
+              done
+
+              cat > /tmp/loki-policy.json <<POLICY
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+                    "Resource": ["arn:aws:s3:::observability-loki"]
+                  },
+                  {
+                    "Effect": "Allow",
+                    "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+                    "Resource": ["arn:aws:s3:::observability-loki/*"]
+                  }
+                ]
+              }
+              POLICY
+
+              # Idempotent: create policy only if it does not already exist
+              if ! mc admin policy info local loki-observability-rw > /dev/null 2>&1; then
+                mc admin policy create local loki-observability-rw /tmp/loki-policy.json
+              else
+                echo "policy loki-observability-rw already exists, skipping"
+              fi
+
+              # Idempotent: create user only if it does not already exist
+              if ! mc admin user info local "$LOKI_ACCESS_KEY" > /dev/null 2>&1; then
+                mc admin user add local "$LOKI_ACCESS_KEY" "$LOKI_SECRET_KEY"
+              else
+                echo "user $LOKI_ACCESS_KEY already exists, skipping"
+              fi
+
+              mc admin policy attach local loki-observability-rw --user "$LOKI_ACCESS_KEY"
+              echo "loki minio user ready"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root-credentials
+                  key: rootUser
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root-credentials
+                  key: rootPassword
+            - name: LOKI_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: loki-user-credentials
+                  key: accessKey
+            - name: LOKI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: loki-user-credentials
+                  key: secretKey
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

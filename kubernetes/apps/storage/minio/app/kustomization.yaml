@@ -8,3 +8,5 @@ resources:
   - ./bucket-bootstrap-job.yaml
   - ./thanos-user-credentials.sops.yaml
   - ./thanos-user-bootstrap-job.yaml
+  - ./loki-user-credentials.sops.yaml
+  - ./loki-user-bootstrap-job.yaml
