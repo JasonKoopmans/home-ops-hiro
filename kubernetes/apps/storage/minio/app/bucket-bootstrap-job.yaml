@@ -28,9 +28,15 @@ spec:
             - /bin/sh
             - -c
             - |
+              RETRIES=0; MAX_RETRIES=60
               until mc alias set local http://minio.storage.svc.cluster.local:9000 \
                 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
-                echo "waiting for minio..."; sleep 5
+                RETRIES=$((RETRIES + 1))
+                if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
+                  echo "ERROR: minio did not become ready after $((MAX_RETRIES * 5))s, giving up"
+                  exit 1
+                fi
+                echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
               done
               mc mb --ignore-existing local/observability-thanos
               mc mb --ignore-existing local/observability-loki
