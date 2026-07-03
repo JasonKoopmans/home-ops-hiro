@@ -33,17 +33,13 @@ spec:
             args:
               - gateway
               - run
-              - --no-supervise
               - --replace
             envFrom:
               - secretRef:
                   name: hermes-ai-agent-secret
             env:
               TZ: ${TIMEZONE}
-              HERMES_DASHBOARD: true
-              HERMES_DASHBOARD_HOST: 0.0.0.0
-              HERMES_DASHBOARD_PORT: "9119"
-              HERMES_DASHBOARD_INSECURE: true
+              HERMES_GATEWAY_BOOTSTRAP_STATE: running
               API_SERVER_ENABLED: true
               API_SERVER_HOST: 0.0.0.0
             probes:
@@ -93,28 +89,8 @@ spec:
         ports:
           api:
             port: *apiPort
-          dashboard:
-            port: 9119
 
     route:
-      app:
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/icon: mdi-robot-outline
-          gethomepage.dev/title: Hermes
-          gethomepage.dev/description: "Hermes AI Agent Dashboard"
-          gethomepage.dev/group: "Automation"
-        hostnames:
-          - hermes.${SECRET_DOMAIN}
-        parentRefs:
-          - name: envoy-internal
-            namespace: network
-            sectionName: https
-        rules:
-          - backendRefs:
-              - identifier: app
-                port: 9119
-
       api:
         hostnames:
           - hermes-api.${SECRET_DOMAIN}
