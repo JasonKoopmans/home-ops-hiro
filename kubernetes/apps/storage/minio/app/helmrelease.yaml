@@ -9,10 +9,11 @@ spec:
   chart:
     spec:
       chart: minio
-      version: "17.0.21"
+      # renovate: registryUrl=https://charts.min.io/
+      version: "5.4.0"
       sourceRef:
         kind: HelmRepository
-        name: bitnami
+        name: minio
         namespace: storage
   install:
     remediation:
@@ -21,26 +22,30 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 3
-  valuesFrom:
-    - name: minio-root-credentials
-      kind: Secret
-      valuesKey: rootUser
-      targetPath: auth.rootUser
-    - name: minio-root-credentials
-      kind: Secret
-      valuesKey: rootPassword
-      targetPath: auth.rootPassword
   values:
     # Single-node deployment suitable for homelab; no distributed mode overhead
     mode: standalone
 
-    defaultBuckets: "observability-thanos,observability-loki"
+    # Read rootUser and rootPassword from the existing SOPS-encrypted secret
+    existingSecret: minio-root-credentials
+
+    # Disable the default console user created by chart post-install jobs
+    users: []
+
+    # Pre-create buckets on first deploy
+    buckets:
+      - name: observability-thanos
+        policy: none
+        purge: false
+      - name: observability-loki
+        policy: none
+        purge: false
 
     service:
       type: ClusterIP
-      ports:
-        api: 9000
-        console: 9001
+
+    consoleService:
+      type: ClusterIP
 
     persistence:
       enabled: true
