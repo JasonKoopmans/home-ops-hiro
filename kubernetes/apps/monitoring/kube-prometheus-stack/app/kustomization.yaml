@@ -15,6 +15,7 @@ resources:
   - ./grafana-dashboard-homelab-overview.yaml
   - ./grafana-dashboard-proxmox-compute.yaml
   - ./prometheusrule-n8n.yaml
+  - ./prometheusrule-minio.yaml
   - ./prometheusrule-storage-and-hosts.yaml
   - ./prometheusrule-opnsense.yaml
   - ./prometheusrule-envoy.yaml
