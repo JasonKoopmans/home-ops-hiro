@@ -4,15 +4,12 @@ metadata:
   name: longhorn-default-snapshot-job
   namespace: storage
 spec:
-  cron: "15 * * * *" # every hour at minute 15
+  cron: "15 */6 * * *" # every 6 hours at minute 15
   task: "snapshot"
   groups:
   - default
   retain: 3
   concurrency: 2
-#  labels:
-#    label/1: a
-#    label/2: b
 
 ---
 
@@ -28,9 +25,6 @@ spec:
   - default
   retain: 3
   concurrency: 2
-#  labels:
-#    label/1: a
-#    label/2: b
 
 ---
 
@@ -40,12 +34,26 @@ metadata:
   name: longhorn-snapshot-only-job
   namespace: storage
 spec:
-  cron: "15 * * * *" # every hour at minute 15
+  cron: "15 */6 * * *" # every 6 hours at minute 15
   task: "snapshot"
   groups:
   - snapshot-only
   retain: 3
   concurrency: 2
-#  labels:
-#    label/1: a
-#    label/2: b
+
+---
+
+# Prometheus TSDB continuous writes cause hourly snapshot chains to exceed retain: 3 faster than cleanup runs.
+# This daily job targets the tsdb group — opt volumes in via the longhorn-tsdb StorageClass.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: longhorn-tsdb-snapshot-job
+  namespace: storage
+spec:
+  cron: "15 4 * * *" # every day at 4:15 AM
+  task: "snapshot"
+  groups:
+  - tsdb
+  retain: 2
+  concurrency: 1
