@@ -3,9 +3,9 @@
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
-  name: bitnami
+  name: minio
   namespace: storage
 spec:
   interval: 1h
-  url: https://charts.bitnami.com/bitnami
+  url: https://charts.min.io/
   timeout: 3m
