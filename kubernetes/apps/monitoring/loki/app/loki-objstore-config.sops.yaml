@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: loki-objstore-config
+  namespace: monitoring
+stringData:
+  accessKey: ENC[AES256_GCM,data:oLGab4XL0vbgOahJ34EIuu2U22Zc,iv:10cRW1+DpHZy5LW8cvIynvPJ6W+RncGnWfovgBb3Tw8=,tag:pLVAD2ilnSylxf5AxTqJJg==,type:str]
+  secretKey: ENC[AES256_GCM,data:wqhkFmh2MgYWRZEmoI+suyvlCKRRTRMZKawXaewF2yh36pHYJyj1EQ==,iv:bqU4zaLEJJYrtai+XXd472o3OvYfYq8EajjnHwk642U=,tag:n21rG1PTNbgUGjY7sSE6wg==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBRaUJoTjg5d0lsdzNkNUdO
+        ZkpuWUoxai85THhhbTBRdzFneDBXSlhJM2gwClFydHNEb05lZjV6b0lrSmg0NFRN
+        QUh3TmxpT2lhQ081TG5VNytDeExOQkUKLS0tIDZQYmN4R2JDZmpHaFNBVjZRRk5v
+        MEhidHdkQnNzczRBSTFQYTRObU02aUUKZYM10wOlf7/fnFcLDBU0/TalcKyX1omu
+        RJGIQ9jYSJXWIJoUbunJ7HHXT734oCm1wMGvF6Vxy+LDoBafPVQMUA==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1gekuxnpd95l5j8gsvmpsn2mewnevd0c5y5v66p4trzcqhmpn0svqkmnyy7
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-07-03T16:01:59Z"
+  mac: ENC[AES256_GCM,data:a3ZA1ZEaIUqatfvKk9YioH5L6ygUqFSX3hMtbC3GdopbuHOBI0GjvMt8T7IMwscYpXQNzp6Px5owmRBMwZw+zNHDKi74P4/+IIvWo4MznrR5sdoI9tEHWBKVTOsU6+4EeuF+kJwO9QrD0RNYlRZhuugdOtv4nolihDB5CJG4PhA=,iv:uFV9ouiUfW1ZOj3e1HKUdJS+j8MOsnRwZ/Txa4bZHKE=,tag:NmPaUuMN+pyV3Ymc8bhvCQ==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.2
