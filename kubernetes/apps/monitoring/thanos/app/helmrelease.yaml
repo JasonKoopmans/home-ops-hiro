@@ -36,9 +36,9 @@ spec:
               # Sidecar (recent data): discovered via the "prometheus-operated" headless
               # Service that Prometheus Operator creates automatically once the sidecar
               # is configured on the Prometheus CR (see kube-prometheus-stack HelmRelease).
-              - --store=dnssrv+_grpc._tcp.prometheus-operated.monitoring.svc.cluster.local
+              - --endpoint=dnssrv+_grpc._tcp.prometheus-operated.monitoring.svc.cluster.local
               # Store Gateway (historical blocks from Minio) — single replica, direct address.
-              - --store=thanos-storegateway.monitoring.svc.cluster.local:10901
+              - --endpoint=thanos-storegateway.monitoring.svc.cluster.local:10901
             probes:
               liveness: &probes
                 enabled: true
@@ -98,6 +98,15 @@ spec:
                 memory: 128Mi
               limits:
                 memory: 512Mi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: false
+              runAsGroup: 1001
+              runAsNonRoot: true
+              runAsUser: 1001
 
       compactor:
         # Compactor must run as a singleton against a given bucket path — never scale replicas.
@@ -125,6 +134,20 @@ spec:
                 memory: 128Mi
               limits:
                 memory: 1Gi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                  - ALL
+              readOnlyRootFilesystem: false
+              runAsGroup: 1001
+              runAsNonRoot: true
+              runAsUser: 1001
+
+    defaultPodOptions:
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
 
     service:
       query:
