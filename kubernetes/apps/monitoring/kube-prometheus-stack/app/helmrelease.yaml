@@ -129,7 +129,20 @@ spec:
           memory: 128Mi
         limits:
           memory: 512Mi
+      # Rename the chart's auto-provisioned Prometheus datasource and demote it from
+      # default now that Thanos Query (below) provides the unified short+long-term view.
+      # Kept as a secondary datasource for debugging sidecar/upload issues directly
+      # against local Prometheus, bypassing Thanos Query's fan-out.
+      sidecar:
+        datasources:
+          name: "Prometheus Local"
+          isDefaultDatasource: false
       additionalDataSources:
+        - name: Thanos
+          type: prometheus
+          url: http://thanos-query.monitoring.svc.cluster.local:10902
+          access: proxy
+          isDefault: true
         - name: Loki
           type: loki
           url: http://loki.monitoring.svc.cluster.local:3100
