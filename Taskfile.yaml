@@ -102,11 +102,11 @@ tasks:
     cmd: |
       APP_NAME="$(basename "{{.path}}")"
       APP_KS="{{.KUBERNETES_DIR}}/apps/{{.path}}/app/kustomization.yaml"
+      GROUP_DIR="$(dirname "{{.path}}")"
       # App Kustomization CRs live in the group namespace (set by the namespace
       # transformer in the group kustomization.yaml), which may differ from the
       # directory name (e.g. serverless/ -> knative-serving).
-      NS="$(yq '.namespace' "{{.KUBERNETES_DIR}}/apps/$(dirname "{{.path}}")/kustomization.yaml")"
-
+      NS="$(yq -r '.namespace' "{{.KUBERNETES_DIR}}/apps/${GROUP_DIR}/kustomization.yaml")"
       if [ ! -f "$APP_KS" ]; then
         echo "ERROR: App kustomization not found at $APP_KS" >&2
         exit 1
