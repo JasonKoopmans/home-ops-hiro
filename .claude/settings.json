@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(kubectl get:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl top:*)",
+      "Bash(kubectl events:*)",
+      "Bash(kubectl api-resources:*)",
+      "Bash(kubectl explain:*)",
+      "Bash(kubectl version:*)",
+      "Bash(kubectl diff:*)",
+      "Bash(flux get:*)",
+      "Bash(flux logs:*)",
+      "Bash(flux tree:*)",
+      "Bash(flux stats:*)",
+      "Bash(flux events:*)",
+      "Bash(flux version:*)",
+      "Bash(flux check:*)",
+      "Bash(task --list:*)",
+      "Bash(task build:*)",
+      "Bash(task validate:*)",
+      "Bash(task cluster:health:*)",
+      "Bash(task envoy:probe:*)",
+      "Bash(kustomize build:*)",
+      "Bash(kubeconform:*)",
+      "Bash(helm template:*)",
+      "Bash(helm show:*)",
+      "Bash(helm search:*)",
+      "Bash(talosctl version:*)",
+      "Bash(talosctl health:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(yq eval:*)",
+      "Bash(jq:*)"
+    ]
+  }
+}
