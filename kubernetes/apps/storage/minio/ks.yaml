@@ -4,6 +4,14 @@ kind: Kustomization
 metadata:
   name: minio
 spec:
+  # Gate this Kustomization's Ready condition on the Thanos IAM bootstrap Job
+  # completing, so thanos's `dependsOn: minio` actually waits for the scoped
+  # Minio user to exist instead of only waiting for apply to succeed.
+  healthChecks:
+    - apiVersion: batch/v1
+      kind: Job
+      name: thanos-user-bootstrap
+      namespace: storage
   interval: 1h
   path: ./kubernetes/apps/storage/minio/app
   postBuild:
