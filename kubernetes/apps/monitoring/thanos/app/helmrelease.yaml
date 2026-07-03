@@ -1,0 +1,197 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app thanos
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: app-template
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # bitnami/thanos was dropped: as of the Bitnami Aug 2025 catalog change,
+    # docker.io/bitnami/thanos is no longer published for free (manifest pulls 404).
+    # Deployed here directly against the upstream quay.io/thanos/thanos image instead.
+    controllers:
+      query:
+        containers:
+          app:
+            image:
+              repository: quay.io/thanos/thanos
+              tag: v0.39.2
+            args:
+              - query
+              - --http-address=0.0.0.0:10902
+              - --grpc-address=0.0.0.0:10901
+              # Matches the external_labels Prometheus Operator sets when replicas > 1.
+              - --query.replica-label=prometheus_replica
+              # Sidecar (recent data): discovered via the "prometheus-operated" headless
+              # Service that Prometheus Operator creates automatically once the sidecar
+              # is configured on the Prometheus CR (see kube-prometheus-stack HelmRelease).
+              - --store=dnssrv+_grpc._tcp.prometheus-operated.monitoring.svc.cluster.local
+              # Store Gateway (historical blocks from Minio) — single replica, direct address.
+              - --store=thanos-storegateway.monitoring.svc.cluster.local:10901
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /-/healthy
+                    port: 10902
+                  initialDelaySeconds: 10
+                  periodSeconds: 15
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                <<: *probes
+                spec:
+                  httpGet:
+                    path: /-/ready
+                    port: 10902
+                  initialDelaySeconds: 10
+                  periodSeconds: 15
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+
+      storegateway:
+        containers:
+          app:
+            image:
+              repository: quay.io/thanos/thanos
+              tag: v0.39.2
+            args:
+              - store
+              - --data-dir=/data
+              - --objstore.config-file=/etc/thanos/objstore.yml
+              - --http-address=0.0.0.0:10902
+              - --grpc-address=0.0.0.0:10901
+            probes:
+              liveness: *probes
+              readiness:
+                <<: *probes
+                spec:
+                  httpGet:
+                    path: /-/ready
+                    port: 10902
+                  initialDelaySeconds: 10
+                  periodSeconds: 15
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+
+      compactor:
+        # Compactor must run as a singleton against a given bucket path — never scale replicas.
+        containers:
+          app:
+            image:
+              repository: quay.io/thanos/thanos
+              tag: v0.39.2
+            args:
+              - compact
+              - --data-dir=/data
+              - --objstore.config-file=/etc/thanos/objstore.yml
+              - --http-address=0.0.0.0:10902
+              - --wait
+              - --retention.resolution-raw=30d
+              - --retention.resolution-5m=90d
+              - --retention.resolution-1h=1y
+            probes:
+              liveness: *probes
+              readiness:
+                enabled: false
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 1Gi
+
+    service:
+      query:
+        controller: query
+        ports:
+          http:
+            port: &queryPort 10902
+          grpc:
+            port: 10901
+      storegateway:
+        controller: storegateway
+        ports:
+          http:
+            port: 10902
+          grpc:
+            port: 10901
+
+    route:
+      query:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: thanos
+          gethomepage.dev/title: Thanos Query
+          gethomepage.dev/description: "Long-term Prometheus metrics"
+          gethomepage.dev/group: "Monitoring"
+        hostnames:
+          - thanos.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: query
+                port: *queryPort
+
+    persistence:
+      storegateway-data:
+        existingClaim: thanos-storegateway-data
+        advancedMounts:
+          storegateway:
+            app:
+              - path: /data
+
+      storegateway-objstore-config:
+        type: secret
+        name: thanos-objstore-config
+        advancedMounts:
+          storegateway:
+            app:
+              - path: /etc/thanos/objstore.yml
+                subPath: objstore.yml
+                readOnly: true
+
+      compactor-data:
+        existingClaim: thanos-compactor-data
+        advancedMounts:
+          compactor:
+            app:
+              - path: /data
+
+      compactor-objstore-config:
+        type: secret
+        name: thanos-objstore-config
+        advancedMounts:
+          compactor:
+            app:
+              - path: /etc/thanos/objstore.yml
+                subPath: objstore.yml
+                readOnly: true

@@ -1,0 +1,29 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: thanos
+spec:
+  # kube-prometheus-stack owns the Prometheus sidecar (write path) and the
+  # thanos-objstore-config secret this release's Store Gateway/Compactor read from.
+  # minio owns the thanos-user-bootstrap Job that provisions the Minio IAM user
+  # thanos-objstore-config authenticates as. minio's Kustomization defines a
+  # healthCheck on that Job, so this dependsOn waits until the IAM bootstrap has
+  # completed successfully before Thanos is applied.
+  dependsOn:
+    - name: kube-prometheus-stack
+    - name: minio
+      namespace: storage
+  interval: 1h
+  path: ./kubernetes/apps/monitoring/thanos/app
+  postBuild:
+    substituteFrom:
+      - name: cluster-secrets
+        kind: Secret
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: monitoring
+  wait: false
