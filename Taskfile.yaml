@@ -102,6 +102,10 @@ tasks:
     cmd: |
       APP_NAME="$(basename "{{.path}}")"
       APP_KS="{{.KUBERNETES_DIR}}/apps/{{.path}}/app/kustomization.yaml"
+      # App Kustomization CRs live in the group namespace (set by the namespace
+      # transformer in the group kustomization.yaml), which may differ from the
+      # directory name (e.g. serverless/ -> knative-serving).
+      NS="$(yq '.namespace' "{{.KUBERNETES_DIR}}/apps/$(dirname "{{.path}}")/kustomization.yaml")"
 
       if [ ! -f "$APP_KS" ]; then
         echo "ERROR: App kustomization not found at $APP_KS" >&2
@@ -119,10 +123,10 @@ tasks:
       git commit -m "feat(${APP_NAME}): remove HelmRelease (phase 1 of removal)"
       git pull --rebase --autostash
       git push
-      flux --namespace flux-system reconcile kustomization "${APP_NAME}" --with-source
+      flux --namespace "${NS}" reconcile kustomization "${APP_NAME}" --with-source
       echo ""
       echo "Phase 1 complete. Verify with:"
-      echo "  kubectl get helmrelease,pods -n $(dirname "{{.path}}") | grep ${APP_NAME}"
+      echo "  kubectl get helmrelease,pods -n ${NS} | grep ${APP_NAME}"
       echo "Then run: task app:decommission:phase2 path={{.path}}"
     requires:
       vars: ["path"]
@@ -142,10 +146,12 @@ tasks:
       of cluster-apps. Run only after phase 1 has completed and pods have terminated.
     cmd: |
       APP_NAME="$(basename "{{.path}}")"
-      NAMESPACE="$(dirname "{{.path}}")"
+      GROUP_DIR="$(dirname "{{.path}}")"
       APP_DIR="{{.KUBERNETES_DIR}}/apps/{{.path}}"
-      PARENT_KS="{{.KUBERNETES_DIR}}/apps/${NAMESPACE}/kustomization.yaml"
+      PARENT_KS="{{.KUBERNETES_DIR}}/apps/${GROUP_DIR}/kustomization.yaml"
       KS_ENTRY="./${APP_NAME}/ks.yaml"
+      # Group namespace may differ from the directory name (e.g. serverless/ -> knative-serving)
+      NS="$(yq '.namespace' "$PARENT_KS")"
 
       if [ ! -d "$APP_DIR" ]; then
         echo "ERROR: App directory not found at $APP_DIR" >&2
@@ -166,8 +172,8 @@ tasks:
       flux --namespace flux-system reconcile kustomization cluster-apps --with-source
       echo ""
       echo "Phase 2 complete. Verify with:"
-      echo "  kubectl get kustomization ${APP_NAME} -n flux-system"
-      echo "  kubectl get pvc,configmap,secret -n ${NAMESPACE} | grep ${APP_NAME}"
+      echo "  kubectl get kustomization ${APP_NAME} -n ${NS}"
+      echo "  kubectl get pvc,configmap,secret -n ${NS} | grep ${APP_NAME}"
     requires:
       vars: ["path"]
     preconditions:
