@@ -140,6 +140,15 @@ spec:
       additionalDataSources:
         - name: Thanos
           type: prometheus
+          # Explicit uid required: without one, this collided with Loki's own
+          # auto-assigned uid at provisioning time (Grafana crash-looped with
+          # "Datasource provisioning error: data source with the same uid
+          # already exists" once a second uid-less additionalDataSources entry
+          # was introduced). Loki is deliberately left without an explicit uid
+          # since it's worked unmodified for months; changing it risks
+          # orphaning any dashboard panel that already references its current
+          # auto-assigned uid.
+          uid: thanos
           url: http://thanos-query.monitoring.svc.cluster.local:10902
           access: proxy
           isDefault: true
