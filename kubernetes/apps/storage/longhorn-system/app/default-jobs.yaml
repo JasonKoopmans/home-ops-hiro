@@ -43,7 +43,7 @@ spec:
 
 ---
 
-# Prometheus TSDB continuous writes cause hourly snapshot chains to exceed retain: 3 faster than cleanup runs.
+# Prometheus TSDB continuous writes cause frequent snapshot chains to exceed retain: 3 faster than cleanup runs.
 # This daily job targets the tsdb group — opt volumes in via the longhorn-tsdb StorageClass.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob

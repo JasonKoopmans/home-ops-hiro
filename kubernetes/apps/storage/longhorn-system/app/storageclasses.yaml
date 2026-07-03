@@ -88,7 +88,7 @@ parameters:
 
 ---
 # TSDB/write-heavy volumes (e.g., Prometheus) — daily snapshot only via longhorn-tsdb-snapshot-job.
-# Operator: reprovision or relabel Prometheus PVCs to use this class to stop hourly snapshot amplification.
+# Operator: reprovision or relabel Prometheus PVCs to use this class to stop 6-hourly snapshot amplification.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
