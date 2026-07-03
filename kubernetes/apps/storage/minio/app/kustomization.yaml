@@ -6,5 +6,7 @@ resources:
   - ./helmrelease.yaml
   - ./minio-root-credentials.sops.yaml
   - ./bucket-bootstrap-job.yaml
+  - ./bucket-quota-bootstrap-job.yaml
+  - ./probe-bucket-metrics.yaml
   - ./thanos-user-credentials.sops.yaml
   - ./thanos-user-bootstrap-job.yaml

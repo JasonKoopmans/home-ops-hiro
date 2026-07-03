@@ -1,0 +1,70 @@
+---
+# Bucket quota bootstrap Job — runs once after Minio is healthy.
+# Sets a hard quota per bucket so a runaway write pattern (e.g. a cardinality
+# explosion in Thanos) fails writes instead of filling the shared 50Gi PVC and
+# taking the whole node down.
+#
+# These are backstop values, not a capacity plan: the Thanos compactor's own
+# retention (30d raw + 90d/5m + 1y/1h — see monitoring/thanos/app/helmrelease.yaml)
+# can plausibly need more than 50Gi total under normal operation, so a tightly
+# tuned quota risks rejecting legitimate writes. Revisit both the quota and the
+# PVC size once minio_bucket_usage_total_bytes (scraped via probe-bucket-metrics.yaml)
+# has a few weeks of real data.
+#
+# observability-loki is currently unused (Loki runs with storage.type: filesystem,
+# see monitoring/loki/app/helmrelease.yaml) — its quota here is just a guard
+# against silent growth if that ever changes, not a tuned value.
+#
+# Manual equivalent:
+#   mc admin bucket quota local/observability-thanos --size 45GiB
+#   mc admin bucket quota local/observability-loki --size 2GiB
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-quota-bootstrap
+  namespace: storage
+  annotations:
+    # Remove this job from Flux management after first successful run
+    # by deleting it: kubectl -n storage delete job minio-bucket-quota-bootstrap
+    kustomize.toolkit.fluxcd.io/prune: "false"
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              RETRIES=0; MAX_RETRIES=180
+              until mc alias set local http://minio.storage.svc.cluster.local:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                RETRIES=$((RETRIES + 1))
+                if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
+                  echo "ERROR: minio did not become ready after $((MAX_RETRIES * 5))s, giving up"
+                  exit 1
+                fi
+                echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
+              done
+              mc admin bucket quota local/observability-thanos --size 45GiB
+              mc admin bucket quota local/observability-loki --size 2GiB
+              echo "bucket quotas set"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root-credentials
+                  key: rootUser
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root-credentials
+                  key: rootPassword
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

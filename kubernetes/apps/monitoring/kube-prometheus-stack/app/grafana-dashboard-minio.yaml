@@ -1,0 +1,155 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-minio
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  minio-overview.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Thanos Bucket Quota Used",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "minio_bucket_usage_total_bytes{bucket=\"observability-thanos\"} / minio_bucket_quota_total_bytes{bucket=\"observability-thanos\"}",
+              "legendFormat": "used"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.70},
+                  {"color": "red", "value": 0.90}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Loki Bucket Quota Used",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "targets": [
+            {
+              "expr": "minio_bucket_usage_total_bytes{bucket=\"observability-loki\"} / minio_bucket_quota_total_bytes{bucket=\"observability-loki\"}",
+              "legendFormat": "used"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.70},
+                  {"color": "red", "value": 0.90}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Cluster Capacity Used",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "1 - (minio_cluster_capacity_usable_free_bytes / minio_cluster_capacity_usable_total_bytes)",
+              "legendFormat": "used"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.70},
+                  {"color": "red", "value": 0.85}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Drives Offline",
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "targets": [
+            {"expr": "minio_cluster_drive_offline_total", "legendFormat": "offline"}
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Bucket Usage vs Quota",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
+          "targets": [
+            {"expr": "minio_bucket_usage_total_bytes{bucket=\"observability-thanos\"}", "legendFormat": "thanos used"},
+            {"expr": "minio_bucket_quota_total_bytes{bucket=\"observability-thanos\"}", "legendFormat": "thanos quota"},
+            {"expr": "minio_bucket_usage_total_bytes{bucket=\"observability-loki\"}", "legendFormat": "loki used"},
+            {"expr": "minio_bucket_quota_total_bytes{bucket=\"observability-loki\"}", "legendFormat": "loki quota"}
+          ],
+          "fieldConfig": {
+            "defaults": {"min": 0, "unit": "bytes", "custom": {"lineWidth": 2, "fillOpacity": 10}},
+            "overrides": [
+              {
+                "matcher": {"id": "byRegexp", "options": "/quota/"},
+                "properties": [{"id": "custom.lineStyle", "value": {"dash": [10, 10]}}]
+              }
+            ]
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["minio", "storage", "thanos", "loki"],
+      "templating": {"list": []},
+      "time": {"from": "now-30d", "to": "now"},
+      "title": "Minio Overview",
+      "version": 1
+    }

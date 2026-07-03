@@ -66,3 +66,27 @@ spec:
           annotations:
             summary: Minio is returning S3 server errors
             description: Minio has served 5xx errors to S3 clients (Thanos sidecar/compactor/store-gateway) over the last 10 minutes.
+
+        - alert: MinioBucketQuotaApproaching
+          # `and minio_bucket_quota_total_bytes > 0` guards against divide-by-zero
+          # for any bucket that never gets a quota set.
+          expr: |
+            (minio_bucket_usage_total_bytes / minio_bucket_quota_total_bytes) > 0.70
+            and minio_bucket_quota_total_bytes > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Minio bucket is approaching its quota
+            description: Bucket {{ $labels.bucket }} has been above 70% of its configured quota for 30 minutes. Growing the PVC or raising the quota is worth planning now, before writes start failing.
+
+        - alert: MinioBucketQuotaCritical
+          expr: |
+            (minio_bucket_usage_total_bytes / minio_bucket_quota_total_bytes) > 0.90
+            and minio_bucket_quota_total_bytes > 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: Minio bucket is nearly at its quota
+            description: Bucket {{ $labels.bucket }} has been above 90% of its configured quota for 15 minutes. Writes to this bucket (Thanos block uploads or Loki chunks) will start failing once the quota is hit.
