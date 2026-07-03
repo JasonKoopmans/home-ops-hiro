@@ -24,8 +24,11 @@ metadata:
   name: minio-bucket-quota-bootstrap
   namespace: storage
   annotations:
-    # Remove this job from Flux management after first successful run
-    # by deleting it: kubectl -n storage delete job minio-bucket-quota-bootstrap
+    # prune: false prevents Flux from auto-deleting this Job if it is ever
+    # removed from kustomization.yaml (completed Job acts as an audit record).
+    # To fully remove: first delete this resource from kustomization.yaml and
+    # push to Git, then manually clean up the completed Job:
+    #   kubectl -n storage delete job minio-bucket-quota-bootstrap
     kustomize.toolkit.fluxcd.io/prune: "false"
 spec:
   template:
@@ -38,6 +41,7 @@ spec:
             - /bin/sh
             - -c
             - |
+              set -e
               RETRIES=0; MAX_RETRIES=180
               until mc alias set local http://minio.storage.svc.cluster.local:9000 \
                 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
