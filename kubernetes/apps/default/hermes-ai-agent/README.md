@@ -60,5 +60,5 @@ This app runs Hermes gateway mode in the `default` namespace.
 ```bash
 kubectl -n default get pod -l app.kubernetes.io/instance=hermes-ai-agent
 kubectl -n default describe pod -l app.kubernetes.io/instance=hermes-ai-agent | rg -n "Ready|Liveness|Readiness|Startup|Warning|BackOff"
-kubectl -n default get httproute | rg hermes-api
+kubectl -n default get httproute | rg "hermes|hermes-ai-agent"
 ```

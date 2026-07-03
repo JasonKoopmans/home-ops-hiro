@@ -33,13 +33,11 @@ spec:
             args:
               - gateway
               - run
-              - --replace
             envFrom:
               - secretRef:
                   name: hermes-ai-agent-secret
             env:
               TZ: ${TIMEZONE}
-              HERMES_GATEWAY_BOOTSTRAP_STATE: running
               API_SERVER_ENABLED: true
               API_SERVER_HOST: 0.0.0.0
             probes:
@@ -87,13 +85,19 @@ spec:
       app:
         controller: hermes
         ports:
-          api:
+          http:
             port: *apiPort
 
     route:
-      api:
+      app:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: mdi-robot-outline
+          gethomepage.dev/title: Hermes
+          gethomepage.dev/description: "Hermes AI Agent Gateway"
+          gethomepage.dev/group: "Automation"
         hostnames:
-          - hermes-api.${SECRET_DOMAIN}
+          - hermes.${SECRET_DOMAIN}
         parentRefs:
           - name: envoy-internal
             namespace: network
