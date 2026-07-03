@@ -1,0 +1,54 @@
+---
+# Bucket bootstrap Job — runs once after Minio is healthy.
+# The HelmRelease defaultBuckets value handles bucket creation on first deploy;
+# this Job is a one-shot fallback if the provisioning init container was skipped
+# or needs to be re-run. Delete the Job after successful completion.
+#
+# Manual equivalent:
+#   kubectl -n storage exec deploy/minio -- mc mb --ignore-existing \
+#     local/observability-thanos local/observability-loki
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-bootstrap
+  namespace: storage
+  annotations:
+    # Remove this job from Flux management after first successful run
+    # by deleting it: kubectl -n storage delete job minio-bucket-bootstrap
+    kustomize.toolkit.fluxcd.io/prune: "false"
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until mc alias set local http://minio.storage.svc.cluster.local:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "waiting for minio..."; sleep 5
+              done
+              mc mb --ignore-existing local/observability-thanos
+              mc mb --ignore-existing local/observability-loki
+              echo "buckets ready"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root-credentials
+                  key: rootUser
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root-credentials
+                  key: rootPassword
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
