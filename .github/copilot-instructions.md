@@ -40,9 +40,9 @@ Flux is managed by the **flux-operator** + **flux-instance** (in `kubernetes/app
 The `cluster-apps` Kustomization also patches defaults onto everything it applies:
 
 - Every child **Kustomization** gets `decryption: sops` and `deletionPolicy: WaitForTermination`.
-- Every **HelmRelease** gets install/upgrade/rollback remediation and `crds: CreateReplace`.
+- Every **HelmRelease** gets install/upgrade/rollback defaults (e.g., `crds: CreateReplace`, upgrade remediation, rollback cleanup/recreate).
 
-**Do not repeat these blocks in app manifests** — new `ks.yaml` files don't need a `decryption` section, and new HelmReleases don't need `install:`/`upgrade:`/`rollback:` remediation blocks.
+**Do not repeat blocks that are already provided by these patches** — new `ks.yaml` files don't need a `decryption` section. Only add HelmRelease remediation overrides when you need behavior different from the cluster defaults.
 
 ### Variable Substitution (important)
 
