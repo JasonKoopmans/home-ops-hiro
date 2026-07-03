@@ -184,20 +184,20 @@ Template source:
 ### Step 5A: Paste this in the Worker window (after implementation is done)
 
 ```text
-Prepare the PR body for this phase using docs/agent-pr-templates-observability.md.
+    Prepare the PR body for this phase using docs/agent-pr-templates-observability.md.
 
-Instructions:
-1. Use the correct phase template.
-2. Fill every section with concrete values from this branch.
-3. Include exact files changed.
-4. Include exact validation commands and summarized results.
-5. Include risks, assumptions, and rollback steps.
-6. Do not omit manual steps.
+    Instructions:
+    1. Use the correct phase template.
+    2. Fill every section with concrete values from this branch.
+    3. Include exact files changed.
+    4. Include exact validation commands and summarized results.
+    5. Include risks, assumptions, and rollback steps.
+    6. Do not omit manual steps.
 
-Return:
-1. PR title
-2. Final PR body markdown
-3. Short merge-risk summary
+    Return:
+    1. PR title
+    2. Final PR body markdown
+    3. Short merge-risk summary
 ```
 
 ### Step 5B: Paste this in the Coordinator window (before opening PR)
