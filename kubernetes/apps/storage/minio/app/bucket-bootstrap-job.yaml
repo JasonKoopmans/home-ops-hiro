@@ -17,7 +17,6 @@ metadata:
     # by deleting it: kubectl -n storage delete job minio-bucket-bootstrap
     kustomize.toolkit.fluxcd.io/prune: "false"
 spec:
-  ttlSecondsAfterFinished: 300
   template:
     spec:
       restartPolicy: OnFailure
