@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: thanos-objstore-config
+  namespace: monitoring
+stringData:
+  objstore.yml: ENC[AES256_GCM,data:m0HXPaUK34mL+s1wDgZJ+KLYcvlXqzU3BOo8gCcFRGOZhc+iiwPk9BVTRCyxwOU5WXaqe45R//qX7QOkRoKbOnBojThrGlfcAFbP71u8scogNqc4SbvpQk60+otE0uU2pD2epPEBZrDTBm6B/zS1EAM+NeG56Eq0962LOuCcNDoTXzjtT/spG+U6ZBPIf+KyEbzRK4gcKEoGm0qK5PpOUf87OmFGWGRWRIBEQug+3TgIH1CCuGzwj+xOJohbdQ2pOGWe7vg7yZ6xhqrrBF1q,iv:wrQpIxMcirjvg3RzsDd+FHeUTDwLNEXay8daV4tsOOI=,tag:esfe9mXbgcO7d6JBcMdOTQ==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBFdEoveWZqcGltYXZEVm9Z
+        VHdnaEJpWlJYcVVmeklHZDBxT3pGKzB1S3dZCm1pWHRISDQrZzR0UFBydXFsT3Bm
+        TGljZjNkREI3ZUpvU3lJSmxhZTJjRUUKLS0tIENRRU0vRlViZm9yM0t2VkVXT0pQ
+        M1IvSUJtb1JQWGZoeTVVZG1lY09BbFkKeyEIYCWnHy34wQUqhSMo36jTVDnhPC77
+        1ggt79EkhIANV3K21waDbComJmRoi/7pp1LbItQTfxbNc0CgKHeMJA==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1gekuxnpd95l5j8gsvmpsn2mewnevd0c5y5v66p4trzcqhmpn0svqkmnyy7
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-07-03T02:26:55Z"
+  mac: ENC[AES256_GCM,data:d8yyj6rVzMlv9Ad1GAIADC1wCYkpBVibKXG4X+DddLAkSjJ0lV0tFyXOTsIlgmrsfaSth3liK8MY9MZXjtM1+2Z42i12kEMKjWQ8uNTpuK5jVNwqFWzaaDxzM7hHbxqCdTIqCtdOn5xZ70raN80CCbKacaikC5wFMIY1vrPJU2Q=,iv:xxM/lJT7NaSreqDS0E5+rdIyWN/Bko34IGd1ZJJKnkc=,tag:G/lfTXkxSnTgpxlLBw8Ehg==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.2

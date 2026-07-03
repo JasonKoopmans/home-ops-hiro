@@ -22,3 +22,4 @@ resources:
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml
+  - ./thanos-objstore-config.sops.yaml

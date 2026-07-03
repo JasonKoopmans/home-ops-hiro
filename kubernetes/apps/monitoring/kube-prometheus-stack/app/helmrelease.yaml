@@ -88,6 +88,15 @@ spec:
               resources:
                 requests:
                   storage: 45Gi
+        # Thanos sidecar: uploads TSDB blocks to Minio (observability-thanos bucket) for
+        # long-term storage. Local retention/retentionSize above are left unchanged —
+        # the sidecar uploads without affecting local disk usage or query behavior.
+        thanos:
+          image: quay.io/thanos/thanos:v0.39.2
+          objectStorageConfig:
+            existingSecret:
+              name: thanos-objstore-config
+              key: objstore.yml
         additionalScrapeConfigs:
           - job_name: "opnsense-telegraf"
             scrape_interval: 30s
