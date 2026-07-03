@@ -32,6 +32,7 @@ spec:
             - /bin/sh
             - -c
             - |
+              set -e
               RETRIES=0; MAX_RETRIES=60
               until mc alias set local http://minio.storage.svc.cluster.local:9000 \
                 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
@@ -61,8 +62,20 @@ spec:
               }
               POLICY
 
-              mc admin policy create local thanos-observability-rw /tmp/thanos-policy.json
-              mc admin user add local "$THANOS_ACCESS_KEY" "$THANOS_SECRET_KEY"
+              # Idempotent: create policy only if it does not already exist
+              if ! mc admin policy info local thanos-observability-rw > /dev/null 2>&1; then
+                mc admin policy create local thanos-observability-rw /tmp/thanos-policy.json
+              else
+                echo "policy thanos-observability-rw already exists, skipping"
+              fi
+
+              # Idempotent: create user only if it does not already exist
+              if ! mc admin user info local "$THANOS_ACCESS_KEY" > /dev/null 2>&1; then
+                mc admin user add local "$THANOS_ACCESS_KEY" "$THANOS_SECRET_KEY"
+              else
+                echo "user $THANOS_ACCESS_KEY already exists, skipping"
+              fi
+
               mc admin policy attach local thanos-observability-rw --user "$THANOS_ACCESS_KEY"
               echo "thanos minio user ready"
           env:
