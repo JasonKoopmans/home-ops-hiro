@@ -61,4 +61,8 @@ spec:
 
     metrics:
       serviceMonitor:
-        enabled: false
+        enabled: true
+        # Standalone mode has one node, but this also scrapes per-drive/process
+        # metrics (S3 request errors, uptime) not present in the cluster-level Probe.
+        includeNode: true
+        interval: 30s

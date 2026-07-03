@@ -1,0 +1,68 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: minio-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: minio.rules
+      rules:
+        - alert: MinioDown
+          # job label comes from the Minio chart's Service/Probe name ("minio");
+          # verify against `up{job=~".*minio.*"}` after first scrape if this
+          # never fires as expected.
+          expr: up{job="minio"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Minio metrics target is down
+            description: Minio target {{ $labels.instance }} has been down for more than 10 minutes.
+
+        - alert: MinioPodNotReady
+          expr: |
+            sum(kube_pod_status_ready{namespace="storage", condition="true", pod=~"minio-.*"}) < 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Minio pod is not ready
+            description: Minio has had no ready pods in the storage namespace for more than 10 minutes. Thanos and Loki writes will fail while this is down.
+
+        - alert: MinioContainerRestartsHigh
+          expr: |
+            sum(increase(kube_pod_container_status_restarts_total{namespace="storage", container="minio", pod=~"minio-.*"}[15m])) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Minio container is restarting frequently
+            description: Minio container has restarted more than 2 times in the last 15 minutes.
+
+        - alert: MinioDriveOffline
+          # Standalone mode runs a single drive, so any offline drive means the
+          # whole deployment is degraded, not just reduced redundancy.
+          expr: minio_cluster_drive_offline_total > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: Minio has an offline drive
+            description: Minio has reported at least one offline drive for more than 5 minutes. Thanos block uploads and Loki writes may be failing.
+
+        - alert: MinioS3ServerErrorsHigh
+          # Only 5xx (server-side faults) are alerted by default. 4xx is
+          # intentionally excluded here — it includes expected background noise
+          # (e.g. compactor/store-gateway probing for objects that don't exist
+          # yet), so a useful 4xx threshold would need tuning against real
+          # traffic first.
+          expr: sum(rate(minio_s3_requests_5xx_errors_total[10m])) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Minio is returning S3 server errors
+            description: Minio has served 5xx errors to S3 clients (Thanos sidecar/compactor/store-gateway) over the last 10 minutes.

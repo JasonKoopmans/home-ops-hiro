@@ -78,10 +78,15 @@ spec:
         retention: 3d
         retentionSize: 10GB
         enableRemoteWriteReceiver: true
-        # Discover all ServiceMonitors and PodMonitors in the cluster
+        # Discover all ServiceMonitors, PodMonitors, and Probes in the cluster
         serviceMonitorSelectorNilUsesHelmValues: false
         podMonitorSelectorNilUsesHelmValues: false
         ruleSelectorNilUsesHelmValues: false
+        # Without this, Probe discovery falls back to the chart's default
+        # `release: kube-prometheus-stack` label selector, which the Minio
+        # chart's own Probe resource (release: minio) doesn't carry — it would
+        # be created but silently never scraped.
+        probeSelectorNilUsesHelmValues: false
         resources:
           requests:
             cpu: 100m
