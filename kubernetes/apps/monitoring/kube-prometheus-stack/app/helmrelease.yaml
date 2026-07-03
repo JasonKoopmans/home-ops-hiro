@@ -67,8 +67,16 @@ spec:
     prometheus:
       prometheusSpec:
         replicas: 1
-        retention: 14d
-        retentionSize: 38GB
+        # Reduced from 14d/38GB now that the Thanos sidecar (Phase 3) and Query/Store
+        # Gateway/Compactor (Phase 2, confirmed healthy in Phase 4) provide validated
+        # long-term durability in Minio. Local Prometheus now only needs to cover:
+        #   - fast local queries for recording/alerting rules
+        #   - a buffer window in case block uploads to Minio lag or fail transiently
+        # 3d/10GB is a conservative buffer (~3x the ~2.7GB/day observed at the prior
+        # 14d/38GB ratio) — well short of the Thanos Compactor's own 30d raw retention,
+        # so, assuming timely sidecar uploads, there's no intended gap between "local" and "long-term" coverage.
+        retention: 3d
+        retentionSize: 10GB
         enableRemoteWriteReceiver: true
         # Discover all ServiceMonitors and PodMonitors in the cluster
         serviceMonitorSelectorNilUsesHelmValues: false
@@ -87,10 +95,15 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
+                  # PVC size intentionally left at 45Gi rather than shrunk to match the
+                  # new retentionSize: most storage classes (including Longhorn) don't
+                  # support in-place PVC shrink, so reducing this would require a
+                  # disruptive volume recreation. The retention/retentionSize policy
+                  # above is what actually bounds disk usage; the extra headroom here
+                  # is unused but harmless.
                   storage: 45Gi
         # Thanos sidecar: uploads TSDB blocks to Minio (observability-thanos bucket) for
-        # long-term storage. Local retention/retentionSize above are left unchanged —
-        # the sidecar uploads without affecting local disk usage or query behavior.
+        # long-term storage.
         thanos:
           image: quay.io/thanos/thanos:v0.39.2
           objectStorageConfig:
