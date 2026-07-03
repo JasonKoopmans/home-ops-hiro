@@ -2,23 +2,16 @@
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
-  name: &app knative-serving
-  namespace: flux-system
+  name: knative-serving
 spec:
   dependsOn:
     - name: knative-operator
-  targetNamespace: knative-serving
-  commonMetadata:
-    labels:
-      app.kubernetes.io/name: *app
   healthChecks:
     - apiVersion: operator.knative.dev/v1beta1
       kind: KnativeServing
       name: knative-serving
       namespace: knative-serving
   interval: 1h
-  retryInterval: 1m
-  timeout: 5m
   path: ./kubernetes/apps/serverless/knative-serving/app
   postBuild:
     substituteFrom:
@@ -29,4 +22,5 @@ spec:
     kind: GitRepository
     name: flux-system
     namespace: flux-system
+  targetNamespace: knative-serving
   wait: false

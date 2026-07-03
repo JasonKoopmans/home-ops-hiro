@@ -20,6 +20,6 @@ releases:
     version: v1.8.1
 
   - name: kube-prometheus-stack
-    namespace: observability
+    namespace: monitoring
     chart: oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
     version: 87.5.1
