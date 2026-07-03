@@ -18,11 +18,11 @@ metadata:
   name: loki-user-bootstrap
   namespace: storage
   annotations:
-    # prune: false prevents Flux from deleting this Job if the pod outlives the
-    # reconcile window. To fully decommission this Job, remove it from
-    # storage/minio/app/kustomization.yaml — kubectl delete alone won't work
-    # because Flux will recreate it on the next reconcile while it remains in
-    # the resources list.
+    # prune: false prevents Flux from deleting this Job when it is removed from the
+    # Kustomization's resources list. To decommission it, remove it from
+    # storage/minio/app/kustomization.yaml and then delete the Job manually.
+    # Deleting the Job while it is still listed will cause Flux to recreate it
+    # on the next reconcile.
     kustomize.toolkit.fluxcd.io/prune: "false"
 spec:
   template:
