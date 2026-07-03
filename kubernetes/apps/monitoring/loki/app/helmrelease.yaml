@@ -68,11 +68,10 @@ spec:
         retention_period: 14d
       compactor:
         retention_enabled: true
-        # Matches the active (latest) schemaConfig period's object_store, since
-        # that's where the compactor's delete-request markers should live going
-        # forward. The old filesystem-period logs age out under the same
-        # retention_period and get cleaned up from the local volume as usual.
-        delete_request_store: s3
+        # Keep delete-request markers on the local volume until the S3 cutover
+        # has been validated in-cluster; this avoids hard-failing startup if
+        # object storage connectivity is degraded during rollout.
+        delete_request_store: filesystem
       schemaConfig:
         configs:
           # Pre-cutover: existing logs already written to the local filesystem
