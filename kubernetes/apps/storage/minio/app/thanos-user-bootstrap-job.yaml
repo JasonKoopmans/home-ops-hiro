@@ -18,8 +18,11 @@ metadata:
   name: thanos-user-bootstrap
   namespace: storage
   annotations:
-    # Remove this job from Flux management after first successful run
-    # by deleting it: kubectl -n storage delete job thanos-user-bootstrap
+    # prune: false prevents Flux from deleting this Job if the pod outlives the
+    # reconcile window. To fully decommission this Job, remove it from
+    # storage/minio/app/kustomization.yaml — kubectl delete alone won't work
+    # because Flux will recreate it on the next reconcile while it remains in
+    # the resources list.
     kustomize.toolkit.fluxcd.io/prune: "false"
 spec:
   template:
