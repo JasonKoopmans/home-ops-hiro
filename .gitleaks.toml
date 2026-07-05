@@ -1,0 +1,10 @@
+title = "home-ops-hiro gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "SOPS-encrypted files are ciphertext, not plaintext secrets"
+paths = [
+  '''.*\.sops\.ya?ml$''',
+]

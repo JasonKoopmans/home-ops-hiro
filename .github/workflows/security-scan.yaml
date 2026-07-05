@@ -1,0 +1,93 @@
+---
+name: "Security Scan"
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths: ["kubernetes/**"]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-job:
+    name: Security Scan Pre-Job
+    runs-on: ubuntu-latest
+    outputs:
+      any_changed: ${{ steps.changed-files.outputs.any_changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Get Changed Files
+        id: changed-files
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files: kubernetes/**
+
+  scan:
+    name: KubeLinter + Kubescape + gitleaks
+    needs: pre-job
+    runs-on: ubuntu-latest
+    # Always run on schedule/manual dispatch; on PRs, only when kubernetes/** changed.
+    if: ${{ github.event_name != 'pull_request' || needs.pre-job.outputs.any_changed == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          cache: false
+
+      - name: Render Flux manifests (Helm-inflated)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            ghcr.io/allenporter/flux-local:v8.0.1 \
+            build all --enable-helm --output-file /workspace/rendered.yaml kubernetes/flux/cluster
+
+      - name: Run KubeLinter
+        id: kube-linter
+        continue-on-error: true
+        run: kube-linter lint rendered.yaml > kube-linter-results.txt 2>&1
+
+      - name: Run Kubescape (NSA framework)
+        id: kubescape
+        continue-on-error: true
+        run: kubescape scan framework nsa rendered.yaml > kubescape-results.txt 2>&1
+
+      - name: Run gitleaks
+        id: gitleaks
+        continue-on-error: true
+        run: gitleaks dir . --config .gitleaks.toml -v > gitleaks-results.txt 2>&1
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Security Scan Results"
+            echo ""
+            echo "_Report-only: findings here never fail this job or block a PR._"
+            echo ""
+            echo "### KubeLinter — manifest misconfigurations"
+            echo '```'
+            cat kube-linter-results.txt || echo "no output captured"
+            echo '```'
+            echo ""
+            echo "### Kubescape — NSA framework compliance score"
+            echo '```'
+            cat kubescape-results.txt || echo "no output captured"
+            echo '```'
+            echo ""
+            echo "### gitleaks — accidental plaintext secrets"
+            echo '```'
+            cat gitleaks-results.txt || echo "no output captured"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
