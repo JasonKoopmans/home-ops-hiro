@@ -4,7 +4,7 @@ title = "home-ops-hiro gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "SOPS-encrypted files are ciphertext, not plaintext secrets"
-paths = [
-  '''.*\.sops\.ya?ml$''',
+description = "Allowlist SOPS ciphertext tokens (still scan *.sops.yaml for accidental plaintext)"
+regexes = [
+  '''ENC\[AES256_GCM,.*\]''',
 ]
