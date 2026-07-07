@@ -1,0 +1,62 @@
+---
+name: "Image Vulnerability Scan"
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          cache: false
+
+      - name: Render Flux manifests (Helm-inflated)
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            ghcr.io/allenporter/flux-local:v8.0.1 \
+            build all --enable-helm --output-file /workspace/rendered.yaml kubernetes/flux/cluster
+
+      - name: Extract referenced container images
+        continue-on-error: true
+        run: |
+          grep -E '^\s*image:\s*' rendered.yaml \
+            | awk -F': ' '{print $2}' \
+            | sed -E 's/^["'"'"'"']//; s/["'"'"'"']$//' \
+            | sort -u > images.txt || true
+          echo "Found $(wc -l < images.txt) unique image references"
+
+      - name: Scan each image with Trivy
+        continue-on-error: true
+        run: |
+          {
+            echo "## Image Vulnerability Scan Results"
+            echo ""
+            echo "_Report-only: findings here never fail this job._"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while IFS= read -r img; do
+            [ -z "$img" ] && continue
+            {
+              echo ""
+              echo "### \`$img\`"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            trivy image --exit-code 0 --format table "$img" >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "scan failed for $img" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done < images.txt

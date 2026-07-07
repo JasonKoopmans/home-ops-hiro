@@ -1,0 +1,10 @@
+title = "home-ops-hiro gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist SOPS ciphertext tokens (still scan *.sops.yaml for accidental plaintext)"
+regexes = [
+  '''ENC\[AES256_GCM,.*\]''',
+]
