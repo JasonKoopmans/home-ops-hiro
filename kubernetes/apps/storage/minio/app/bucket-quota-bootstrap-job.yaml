@@ -18,6 +18,17 @@
 # Manual equivalent:
 #   mc admin bucket quota local/observability-thanos --size 45GiB
 #   mc admin bucket quota local/observability-loki --size 2GiB
+#
+# Failure detection relies on kube-prometheus-stack's default KubeJobFailed
+# alert (kube_job_failed > 0, for: 15m) — verified this fires for Jobs in any
+# namespace including storage, but it only fires once the Job reaches a
+# terminal Failed condition. backoffLimit is lowered from the Kubernetes
+# default of 6 (which could take 90+ minutes to exhaust here, since each
+# attempt repeats the ~15 minute wait-for-minio loop below) so a persistent
+# failure (bad creds, malformed args) surfaces in well under an hour instead.
+# activeDeadlineSeconds is a hard ceiling in case `mc` hangs outright, which
+# wouldn't otherwise be caught by backoffLimit at all — an exit code is
+# required for that to count as a failed attempt.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -28,6 +39,8 @@ metadata:
     # by deleting it: kubectl -n storage delete job minio-bucket-quota-bootstrap
     kustomize.toolkit.fluxcd.io/prune: "false"
 spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 3600
   template:
     spec:
       restartPolicy: OnFailure
@@ -38,6 +51,7 @@ spec:
             - /bin/sh
             - -c
             - |
+              set -e
               RETRIES=0; MAX_RETRIES=180
               until mc alias set local http://minio.storage.svc.cluster.local:9000 \
                 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
