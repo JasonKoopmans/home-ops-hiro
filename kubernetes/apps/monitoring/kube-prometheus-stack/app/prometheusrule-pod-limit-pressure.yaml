@@ -25,7 +25,7 @@ spec:
             severity: warning
           annotations:
             summary: Pod container CPU usage is near its configured limit
-            description: Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used more than 85% of its CPU limit for 15 minutes.
+            description: Container {{ $$labels.container }} in pod {{ $$labels.namespace }}/{{ $$labels.pod }} has used more than 85% of its CPU limit for 15 minutes.
 
         - alert: PodCpuLimitPressureCritical
           expr: |
@@ -42,7 +42,7 @@ spec:
             severity: critical
           annotations:
             summary: Pod container CPU usage is critically close to its configured limit
-            description: Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used more than 95% of its CPU limit for 10 minutes.
+            description: Container {{ $$labels.container }} in pod {{ $$labels.namespace }}/{{ $$labels.pod }} has used more than 95% of its CPU limit for 10 minutes.
 
         - alert: PodMemoryLimitPressureHigh
           expr: |
@@ -57,7 +57,7 @@ spec:
             severity: warning
           annotations:
             summary: Pod container memory usage is near its configured limit
-            description: Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used more than 90% of its memory limit for 15 minutes.
+            description: Container {{ $$labels.container }} in pod {{ $$labels.namespace }}/{{ $$labels.pod }} has used more than 90% of its memory limit for 15 minutes.
 
         - alert: PodMemoryLimitPressureCritical
           expr: |
@@ -72,4 +72,4 @@ spec:
             severity: critical
           annotations:
             summary: Pod container memory usage is critically close to its configured limit
-            description: Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used more than 98% of its memory limit for 10 minutes.
+            description: Container {{ $$labels.container }} in pod {{ $$labels.namespace }}/{{ $$labels.pod }} has used more than 98% of its memory limit for 10 minutes.
