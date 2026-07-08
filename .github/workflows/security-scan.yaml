@@ -48,6 +48,15 @@ jobs:
         with:
           cache: false
 
+      # Runs before rendering so it only ever sees committed repo content —
+      # once flux-local writes rendered.yaml into the working tree, `gitleaks
+      # dir .` would scan that generated artifact too (checksum/* annotations
+      # in it read as high-entropy "secrets").
+      - name: Run gitleaks
+        id: gitleaks
+        continue-on-error: true
+        run: gitleaks dir . --config .gitleaks.toml -v 2>&1 | tee gitleaks-results.txt
+
       - name: Render Flux manifests (Helm-inflated)
         run: |
           docker run --rm \
@@ -71,11 +80,6 @@ jobs:
         id: kubescape
         continue-on-error: true
         run: kubescape scan framework nsa rendered.yaml 2>&1 | tee kubescape-results.txt
-
-      - name: Run gitleaks
-        id: gitleaks
-        continue-on-error: true
-        run: gitleaks dir . --config .gitleaks.toml -v 2>&1 | tee gitleaks-results.txt
 
       - name: Publish summary
         if: always()
