@@ -49,27 +49,33 @@ jobs:
           cache: false
 
       - name: Render Flux manifests (Helm-inflated)
-        continue-on-error: true
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
             -w /workspace \
             ghcr.io/allenporter/flux-local:v8.0.1 \
             build all --enable-helm --output-file /workspace/rendered.yaml kubernetes/flux/cluster
+
+      - name: Sanity-check rendered output
+        run: |
+          echo "rendered.yaml size: $(wc -c < rendered.yaml) bytes, $(wc -l < rendered.yaml) lines"
+          echo "Resource kinds found:"
+          grep -E '^kind:' rendered.yaml | sort | uniq -c | sort -rn
+
       - name: Run KubeLinter
         id: kube-linter
         continue-on-error: true
-        run: kube-linter lint rendered.yaml > kube-linter-results.txt 2>&1
+        run: kube-linter lint rendered.yaml 2>&1 | tee kube-linter-results.txt
 
       - name: Run Kubescape (NSA framework)
         id: kubescape
         continue-on-error: true
-        run: kubescape scan framework nsa rendered.yaml > kubescape-results.txt 2>&1
+        run: kubescape scan framework nsa rendered.yaml 2>&1 | tee kubescape-results.txt
 
       - name: Run gitleaks
         id: gitleaks
         continue-on-error: true
-        run: gitleaks dir . --config .gitleaks.toml -v > gitleaks-results.txt 2>&1
+        run: gitleaks dir . --config .gitleaks.toml -v 2>&1 | tee gitleaks-results.txt
 
       - name: Publish summary
         if: always()
