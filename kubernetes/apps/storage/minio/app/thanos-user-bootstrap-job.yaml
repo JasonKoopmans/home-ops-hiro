@@ -12,6 +12,17 @@
 #   mc admin policy create local thanos-observability-rw /tmp/policy.json
 #   mc admin user add local <thanos accessKey> <thanos secretKey>
 #   mc admin policy attach local thanos-observability-rw --user <thanos accessKey>
+#
+# Failure detection relies on kube-prometheus-stack's default KubeJobFailed
+# alert (kube_job_failed > 0, for: 15m) — verified this fires for Jobs in any
+# namespace including storage, but only once the Job reaches a terminal
+# Failed condition. backoffLimit is lowered from the Kubernetes default of 6
+# (which could take 90+ minutes to exhaust here, since each attempt repeats
+# the ~15 minute wait-for-minio loop below) so a persistent failure — e.g.
+# Thanos silently losing write access to its bucket — surfaces in well under
+# an hour instead. activeDeadlineSeconds is a hard ceiling in case `mc` hangs
+# outright, which wouldn't otherwise produce the exit code backoffLimit needs
+# to count an attempt as failed.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -25,6 +36,8 @@ metadata:
     # the resources list.
     kustomize.toolkit.fluxcd.io/prune: "false"
 spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 3600
   template:
     spec:
       restartPolicy: OnFailure
