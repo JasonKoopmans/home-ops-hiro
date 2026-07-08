@@ -79,7 +79,13 @@ jobs:
       - name: Run Kubescape (NSA framework)
         id: kubescape
         continue-on-error: true
-        run: kubescape scan framework nsa rendered.yaml 2>&1 | tee kubescape-results.txt
+        # --logger error: without a live cluster to query, kubescape can't resolve
+        # CRD kinds (Kustomization, HelmRelease, HTTPRoute, ...) via api-resources
+        # and logs a warning per resource for it — ~200 harmless lines on this repo.
+        # None of those kinds carry a pod spec, so no NSA control applies to them
+        # anyway; raising the log threshold drops the noise without touching the
+        # actual scan results.
+        run: kubescape scan framework nsa rendered.yaml --logger error 2>&1 | tee kubescape-results.txt
 
       - name: Publish summary
         if: always()
