@@ -20,7 +20,7 @@ spec:
             severity: critical
           annotations:
             summary: Minio metrics target is down
-            description: Minio target {{ $labels.instance }} has been down for more than 10 minutes.
+            description: Minio target {{ $$labels.instance }} has been down for more than 10 minutes.
 
         - alert: MinioPodNotReady
           expr: |
@@ -78,7 +78,7 @@ spec:
             severity: warning
           annotations:
             summary: Minio bucket is approaching its quota
-            description: Bucket {{ $labels.bucket }} has been above 70% of its configured quota for 30 minutes. Growing the PVC or raising the quota is worth planning now, before writes start failing.
+            description: Bucket {{ $$labels.bucket }} has been above 70% of its configured quota for 30 minutes. Growing the PVC or raising the quota is worth planning now, before writes start failing.
 
         - alert: MinioBucketQuotaCritical
           expr: |
@@ -89,4 +89,4 @@ spec:
             severity: critical
           annotations:
             summary: Minio bucket is nearly at its quota
-            description: Bucket {{ $labels.bucket }} has been above 90% of its configured quota for 15 minutes. Writes to this bucket (Thanos block uploads or Loki chunks) will start failing once the quota is hit.
+            description: Bucket {{ $$labels.bucket }} has been above 90% of its configured quota for 15 minutes. Writes to this bucket (Thanos block uploads or Loki chunks) will start failing once the quota is hit.
