@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   scan:
     name: Trivy Image Scan
@@ -24,7 +27,6 @@ jobs:
           cache: false
 
       - name: Render Flux manifests (Helm-inflated)
-        continue-on-error: true
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/workspace" \
@@ -32,13 +34,16 @@ jobs:
             ghcr.io/allenporter/flux-local:v8.0.1 \
             build all --enable-helm --output-file /workspace/rendered.yaml kubernetes/flux/cluster
 
+      - name: Sanity-check rendered output
+        run: |
+          echo "rendered.yaml size: $(wc -c < rendered.yaml) bytes, $(wc -l < rendered.yaml) lines"
+
       - name: Extract referenced container images
-        continue-on-error: true
         run: |
           grep -E '^\s*image:\s*' rendered.yaml \
             | awk -F': ' '{print $2}' \
             | sed -E 's/^["'"'"'"']//; s/["'"'"'"']$//' \
-            | sort -u > images.txt || true
+            | sort -u > images.txt
           echo "Found $(wc -l < images.txt) unique image references"
 
       - name: Scan each image with Trivy

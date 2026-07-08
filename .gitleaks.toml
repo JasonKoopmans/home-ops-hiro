@@ -4,7 +4,8 @@ title = "home-ops-hiro gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "Allowlist SOPS ciphertext tokens (still scan *.sops.yaml for accidental plaintext)"
+description = "Allowlist SOPS ciphertext and age public keys (not secrets — still scan *.sops.yaml for accidental plaintext)"
 regexes = [
   '''ENC\[AES256_GCM,.*\]''',
+  '''age1[a-z0-9]{58}''',
 ]
