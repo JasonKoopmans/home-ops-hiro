@@ -57,6 +57,20 @@ spec:
     alertmanager:
       alertmanagerSpec:
         replicas: 1
+        # Soft anti-affinity: keep Alertmanager off whichever node is running
+        # Prometheus, so the two don't compete for CPU on the same (often
+        # control-plane-sized) node.
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values: ["prometheus"]
+                  topologyKey: kubernetes.io/hostname
         resources:
           requests:
             cpu: 10m
@@ -67,6 +81,31 @@ spec:
     prometheus:
       prometheusSpec:
         replicas: 1
+        # Soft anti-affinity: keep Prometheus off whichever node is running
+        # Alertmanager or the Thanos storegateway, to avoid CPU contention
+        # (see monitoring/thanos helmrelease.yaml for the matching rule).
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values: ["alertmanager"]
+                  topologyKey: kubernetes.io/hostname
+              - weight: 50
+                podAffinityTerm:
+                  labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values: ["thanos"]
+                      - key: app.kubernetes.io/controller
+                        operator: In
+                        values: ["storegateway"]
+                  topologyKey: kubernetes.io/hostname
         # Reduced from 14d/38GB now that the Thanos sidecar (Phase 3) and Query/Store
         # Gateway/Compactor (Phase 2, confirmed healthy in Phase 4) provide validated
         # long-term durability in Minio. Local Prometheus now only needs to cover:
@@ -100,13 +139,13 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  # PVC size intentionally left at 45Gi rather than shrunk to match the
+                  # PVC size intentionally left at 15Gi rather than shrunk to match the
                   # new retentionSize: most storage classes (including Longhorn) don't
                   # support in-place PVC shrink, so reducing this would require a
                   # disruptive volume recreation. The retention/retentionSize policy
                   # above is what actually bounds disk usage; the extra headroom here
                   # is unused but harmless.
-                  storage: 45Gi
+                  storage: 15Gi
         # Thanos sidecar: uploads TSDB blocks to Minio (observability-thanos bucket) for
         # long-term storage.
         thanos:
@@ -130,10 +169,19 @@ spec:
       enabled: true
       deploymentStrategy:
         type: Recreate
+      # Keep Grafana's persisted datasource rows aligned with the provisioned
+      # file once the one-time stale sqlite rows from the pre-uid setup are
+      # removed.
+      prune: true
       admin:
         existingSecret: grafana-admin-secret
         userKey: admin-user
         passwordKey: admin-password
+      envValueFrom:
+        GF_TELEGRAM_BOT_TOKEN:
+          secretKeyRef:
+            name: alertmanager-telegram-secret
+            key: bot-token
       persistence:
         enabled: true
         storageClassName: longhorn
@@ -158,23 +206,32 @@ spec:
       additionalDataSources:
         - name: Thanos
           type: prometheus
-          # Explicit uid required: without one, this collided with Loki's own
-          # auto-assigned uid at provisioning time (Grafana crash-looped with
-          # "Datasource provisioning error: data source with the same uid
-          # already exists" once a second uid-less additionalDataSources entry
-          # was introduced). Loki is deliberately left without an explicit uid
-          # since it's worked unmodified for months; changing it risks
-          # orphaning any dashboard panel that already references its current
-          # auto-assigned uid.
+          # Every managed datasource needs an explicit uid. The original
+          # uid-less Thanos/Loki pair allowed stale sqlite rows to collide
+          # unpredictably during reprovisioning after upgrades or reloads.
           uid: thanos
           url: http://thanos-query.monitoring.svc.cluster.local:10902
           access: proxy
           isDefault: true
         - name: Loki
           type: loki
+          uid: loki
           url: http://loki.monitoring.svc.cluster.local:3100
           access: proxy
           isDefault: false
+      alerting:
+        contactpoints.yaml:
+          apiVersion: 1
+          contactPoints:
+            - orgId: 1
+              name: Telegram
+              receivers:
+                - uid: telegram
+                  type: telegram
+                  disableResolveMessage: false
+                  settings:
+                    bottoken: $$GF_TELEGRAM_BOT_TOKEN
+                    chatid: "8854064758"
 
     prometheus-node-exporter:
       enabled: true

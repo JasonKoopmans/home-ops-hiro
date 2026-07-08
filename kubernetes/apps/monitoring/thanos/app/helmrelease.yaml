@@ -69,6 +69,29 @@ spec:
                 memory: 512Mi
 
       storegateway:
+        pod:
+          # Soft anti-affinity: keep the Store Gateway off whichever node is
+          # running Prometheus or Alertmanager (see monitoring/kube-prometheus-stack
+          # helmrelease.yaml for the matching rules) to avoid piling onto one node.
+          affinity:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    labelSelector:
+                      matchExpressions:
+                        - key: app.kubernetes.io/name
+                          operator: In
+                          values: ["prometheus"]
+                    topologyKey: kubernetes.io/hostname
+                - weight: 50
+                  podAffinityTerm:
+                    labelSelector:
+                      matchExpressions:
+                        - key: app.kubernetes.io/name
+                          operator: In
+                          values: ["alertmanager"]
+                    topologyKey: kubernetes.io/hostname
         containers:
           app:
             image:
