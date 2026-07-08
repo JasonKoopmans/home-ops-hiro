@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export KUBECONFIG=\"/Users/jake/Documents/code/homeops workspace/home-ops-hiro/kubeconfig\")",
+      "Bash(kubectl -n storage get pod instance-manager-b966ebc86bca0de8f6e2036220c0b35f -o wide)",
+      "Bash(kubectl -n storage get pod instance-manager-b966ebc86bca0de8f6e2036220c0b35f -o jsonpath='{.spec.containers[*].name}')",
+      "Bash(kubectl -n storage logs instance-manager-b966ebc86bca0de8f6e2036220c0b35f --since=30m)"
+    ]
+  }
+}
