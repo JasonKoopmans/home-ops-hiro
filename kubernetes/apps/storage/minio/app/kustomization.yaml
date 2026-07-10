@@ -8,6 +8,7 @@ resources:
   - ./bucket-bootstrap-job.yaml
   - ./bucket-quota-bootstrap-job.yaml
   - ./probe-bucket-metrics.yaml
+  - ./heal-cronjob.yaml
   - ./thanos-user-credentials.sops.yaml
   - ./thanos-user-bootstrap-job.yaml
   - ./loki-user-credentials.sops.yaml
