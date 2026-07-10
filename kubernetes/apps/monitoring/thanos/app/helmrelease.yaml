@@ -209,7 +209,8 @@ spec:
 
     persistence:
       storegateway-data:
-        existingClaim: thanos-storegateway-data
+        type: emptyDir
+        sizeLimit: 10Gi
         advancedMounts:
           storegateway:
             app:
@@ -226,7 +227,8 @@ spec:
                 readOnly: true
 
       compactor-data:
-        existingClaim: thanos-compactor-data
+        type: emptyDir
+        sizeLimit: 20Gi
         advancedMounts:
           compactor:
             app:
