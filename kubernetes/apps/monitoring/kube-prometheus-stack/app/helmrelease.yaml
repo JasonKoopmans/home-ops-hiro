@@ -57,6 +57,11 @@ spec:
     alertmanager:
       alertmanagerSpec:
         replicas: 1
+        # Disable the chart's own podAntiAffinity convenience default (it
+        # defaults to "soft" and renders its own podAntiAffinity block under
+        # the same affinity key as our custom one below, which is a duplicate
+        # YAML mapping key and fails post-render).
+        podAntiAffinity: ""
         # Soft anti-affinity: keep Alertmanager off whichever node is running
         # Prometheus, so the two don't compete for CPU on the same (often
         # control-plane-sized) node.
@@ -81,6 +86,11 @@ spec:
     prometheus:
       prometheusSpec:
         replicas: 1
+        # Disable the chart's own podAntiAffinity convenience default (it
+        # defaults to "soft" and renders its own podAntiAffinity block under
+        # the same affinity key as our custom one below, which is a duplicate
+        # YAML mapping key and fails post-render).
+        podAntiAffinity: ""
         # Soft anti-affinity: keep Prometheus off whichever node is running
         # Alertmanager or the Thanos storegateway, to avoid CPU contention
         # (see monitoring/thanos helmrelease.yaml for the matching rule).
