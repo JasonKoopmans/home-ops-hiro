@@ -290,7 +290,7 @@ data:
             "name": "host",
             "label": "Host",
             "type": "query",
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "datasource": {"type": "prometheus", "uid": "$${DS_PROMETHEUS}"},
             "query": "label_values(up{job=\"node-exporter\"}, instance)",
             "refresh": 2,
             "multi": true,

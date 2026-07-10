@@ -154,10 +154,10 @@ data:
           "title": "API Server — Watch Cache Churn Logs",
           "description": "Frequent 'too old resource version' or 'relist' messages after a cache size reduction are a rollback signal.",
           "gridPos": {"h": 10, "w": 24, "x": 0, "y": 37},
-          "datasource": {"type": "loki", "uid": "${lokiDatasource}"},
+          "datasource": {"type": "loki", "uid": "$${lokiDatasource}"},
           "targets": [
             {
-              "datasource": {"type": "loki", "uid": "${lokiDatasource}"},
+              "datasource": {"type": "loki", "uid": "$${lokiDatasource}"},
               "expr": "{namespace=\"kube-system\",pod=~\"kube-apiserver.*\"} |~ `watch.cache|too old resource version|cache size|relist|event queue`",
               "legendFormat": ""
             }

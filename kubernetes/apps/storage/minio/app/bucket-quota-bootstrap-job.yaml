@@ -16,8 +16,8 @@
 # against silent growth if that ever changes, not a tuned value.
 #
 # Manual equivalent:
-#   mc admin bucket quota local/observability-thanos --size 45GiB
-#   mc admin bucket quota local/observability-loki --size 2GiB
+#   mc quota set local/observability-thanos --size 45GiB
+#   mc quota set local/observability-loki --size 2GiB
 #
 # Failure detection relies on kube-prometheus-stack's default KubeJobFailed
 # alert (kube_job_failed > 0, for: 15m) — verified this fires for Jobs in any
@@ -64,8 +64,8 @@ spec:
                 fi
                 echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
               done
-              mc admin bucket quota local/observability-thanos --size 45GiB
-              mc admin bucket quota local/observability-loki --size 2GiB
+              mc quota set local/observability-thanos --size 45GiB
+              mc quota set local/observability-loki --size 2GiB
               echo "bucket quotas set"
           env:
             - name: MINIO_ROOT_USER

@@ -215,7 +215,7 @@ data:
             "name": "interface",
             "label": "Interface",
             "type": "query",
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "datasource": {"type": "prometheus", "uid": "$${DS_PROMETHEUS}"},
             "query": "label_values(net_bytes_recv{job=\"opnsense-telegraf\"}, interface)",
             "refresh": 2,
             "multi": true,
