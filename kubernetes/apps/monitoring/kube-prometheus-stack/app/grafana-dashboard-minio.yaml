@@ -143,6 +143,68 @@ data:
               }
             ]
           }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "S3 Request Rate",
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 12},
+          "targets": [
+            {"expr": "sum(rate(minio_s3_requests_total[5m]))", "legendFormat": "requests/s"}
+          ],
+          "fieldConfig": {
+            "defaults": {"min": 0, "unit": "reqps", "custom": {"lineWidth": 2, "fillOpacity": 10}},
+            "overrides": []
+          }
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "S3 Request Latency (p99 TTFB)",
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 12},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum by (le) (minio_s3_requests_ttfb_seconds_distribution))",
+              "legendFormat": "p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"min": 0, "unit": "s", "custom": {"lineWidth": 2, "fillOpacity": 10}},
+            "overrides": []
+          }
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "S3 Traffic",
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 12},
+          "targets": [
+            {"expr": "rate(minio_s3_traffic_received_bytes[5m])", "legendFormat": "received"},
+            {"expr": "rate(minio_s3_traffic_sent_bytes[5m])", "legendFormat": "sent"}
+          ],
+          "fieldConfig": {
+            "defaults": {"min": 0, "unit": "Bps", "custom": {"lineWidth": 2, "fillOpacity": 10}},
+            "overrides": []
+          }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "S3 Errors by Type",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+          "targets": [
+            {"expr": "sum(rate(minio_s3_requests_4xx_errors_total[5m]))", "legendFormat": "4xx"},
+            {"expr": "sum(rate(minio_s3_requests_5xx_errors_total[5m]))", "legendFormat": "5xx"}
+          ],
+          "fieldConfig": {
+            "defaults": {"min": 0, "unit": "reqps", "custom": {"lineWidth": 2, "fillOpacity": 10}},
+            "overrides": [
+              {
+                "matcher": {"id": "byName", "options": "5xx"},
+                "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+              }
+            ]
+          }
         }
       ],
       "schemaVersion": 39,
