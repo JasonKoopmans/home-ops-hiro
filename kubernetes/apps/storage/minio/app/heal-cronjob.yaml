@@ -1,0 +1,98 @@
+---
+# Recurring bitrot scrub. Minio verifies an object's checksum on every read,
+# but that only catches corruption for objects something actually reads —
+# this proactively scans everything on a schedule instead of waiting for a
+# client to stumble onto a bad object.
+#
+# Standalone mode runs a single drive with no erasure coding, so `mc admin
+# heal` can DETECT corruption (checksum mismatch) but generally can't REPAIR
+# it — there's no parity/replica within Minio itself to reconstruct from.
+# Treat this as a bitrot canary, not full self-healing, unless the deployment
+# moves to a multi-drive erasure-coded topology (see chat notes: this Helm
+# chart only supports that via mode: distributed with a suitable
+# drivesPerNode, even for a single node — mode: standalone hardcodes exactly
+# one mount path/PVC. Not done here — it's a disruptive re-provision, not a
+# value flip, and would stack Minio's own EC parity on top of Longhorn's
+# existing 2x replication under longhorn-2-no-backup for redundancy that's
+# largely already covered at the block layer).
+#
+# `mc admin heal` always exits 0 even when it finds objects it couldn't fully
+# heal (verified against mc's own source — DisplayAndFollowHealStatus always
+# returns nil), so success/failure here is inferred from the output itself
+# via a conservative keyword heuristic, not a parsed API contract. Tune the
+# grep pattern after reviewing a real run's output if it proves noisy.
+#
+# Failure detection relies on kube-prometheus-stack's default KubeJobFailed
+# alert (kube_job_failed > 0, for: 15m) — verified in a prior change to cover
+# Jobs in any namespace including storage. CronJob-spawned Jobs are ordinary
+# Jobs, so no separate PrometheusRule is needed here.
+#
+# Manual equivalent:
+#   mc admin heal --recursive local/
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: minio-heal
+  namespace: storage
+spec:
+  schedule: "0 3 * * 0" # Sunday 03:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # A full recursive heal scan can run long depending on object count;
+      # generous relative to the current ~50Gi deployment.
+      activeDeadlineSeconds: 7200
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: mc
+              image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  RETRIES=0; MAX_RETRIES=12
+                  until mc alias set local http://minio.storage.svc.cluster.local:9000 \
+                    "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                    RETRIES=$((RETRIES + 1))
+                    if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
+                      echo "ERROR: minio unreachable after $((MAX_RETRIES * 5))s, giving up"
+                      exit 1
+                    fi
+                    echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
+                  done
+
+                  OUTPUT=$(mc admin heal --recursive local/ 2>&1) || {
+                    echo "$OUTPUT"
+                    echo "ERROR: mc admin heal exited non-zero"
+                    exit 1
+                  }
+                  echo "$OUTPUT"
+
+                  if echo "$OUTPUT" | grep -qiE "fail|corrupt|offline|error|unable to heal"; then
+                    echo "ERROR: heal output indicates a problem, see above"
+                    exit 1
+                  fi
+                  echo "heal scan clean"
+              env:
+                - name: MINIO_ROOT_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: minio-root-credentials
+                      key: rootUser
+                - name: MINIO_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: minio-root-credentials
+                      key: rootPassword
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
