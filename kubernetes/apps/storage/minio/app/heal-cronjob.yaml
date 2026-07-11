@@ -45,6 +45,7 @@ spec:
       # A full recursive heal scan can run long depending on object count;
       # generous relative to the current ~50Gi deployment.
       activeDeadlineSeconds: 7200
+      template:
         spec:
           restartPolicy: Never
           containers:
