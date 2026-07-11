@@ -227,6 +227,8 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 | Workflow | Purpose |
 |---|---|
 | **Flux Local** | **The primary (and only real) CI gate.** Runs `flux-local test` and posts `flux-local diff` for HelmReleases and Kustomizations on every PR touching `kubernetes/**`. |
+| **Security Scan** | Report-only. Runs KubeLinter (manifest misconfigurations) and Kubescape (NSA framework compliance score) against Helm-rendered manifests, plus gitleaks (accidental plaintext secrets) against the raw repo. On PRs touching `kubernetes/**` and weekly (for score-over-time tracking). Never fails the build — findings post to the run's **step summary**, not a PR comment. |
+| **Image Vulnerability Scan** | Report-only. Trivy CVE scan of every container image referenced in the rendered manifests. Weekly + manual dispatch only (not per-PR — image CVEs don't change with unrelated PRs). Results in the step summary. |
 | **e2e** | Template-validation workflow inherited from cluster-template. It is gated to `onedr0p/cluster-template` and **does not run in this repo**. |
 | **Labeler / Label Sync** | PR auto-labeling housekeeping. |
 
@@ -237,6 +239,16 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 - Flux Kustomization `path:` values in `ks.yaml` must match the actual directory structure.
 - If `flux-local` fails on your PR, the likely causes are a malformed HelmRelease, a missing resource in a `kustomization.yaml`, or an incorrect path.
 - Local pre-checks: `task build path=<group>/<app>` (kustomize build + envsubst), `task validate` (kubeconform across `kubernetes/`).
+
+### Statically Linting Manifests (gotcha)
+
+Most apps here (~38/41) are `HelmRelease` + `chartRef`, so the YAML committed under `kubernetes/apps/**` is Helm *values*, not rendered Pod/Deployment specs. A generic linter pointed at that YAML directly (KubeLinter, Checkov, Kubescape, etc.) mostly won't see anything meaningful — it needs the fully Helm-templated output. Render first with the same mechanism the Flux Local and Security Scan workflows already use:
+
+```sh
+flux-local build all --enable-helm --output-file rendered.yaml kubernetes/flux/cluster
+```
+
+(defaults to `--skip-secrets`/`--skip-crds`, so no SOPS age key is needed). Feed `rendered.yaml`, not the source tree, to any static analysis tool.
 
 ---
 
@@ -353,7 +365,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 
 ## Development Environment
 
-- **mise** (`.mise.toml`) manages CLI tool versions (kubectl, flux, talosctl, sops, kustomize, kubeconform, etc.) and sets `KUBECONFIG`, `SOPS_AGE_KEY_FILE`, and `TALOSCONFIG` to repo-local paths.
+- **mise** (`.mise.toml`) manages CLI tool versions (kubectl, flux, talosctl, sops, kustomize, kubeconform, etc.) and sets `KUBECONFIG`, `SOPS_AGE_KEY_FILE`, and `TALOSCONFIG` to repo-local paths. Also pins the security scanning toolchain used by the Security Scan / Image Vulnerability Scan workflows: `kube-linter`, `trivy`, `gitleaks`, `kubescape`, `conftest` (the last is available for future OPA/Rego policy checks but isn't wired into CI).
 - A `.devcontainer/` config is provided for VS Code / Codespaces.
 - **Task** (`Taskfile.yaml` + `.taskfiles/`) provides common workflows:
   - `task reconcile` — force Flux to sync from Git
