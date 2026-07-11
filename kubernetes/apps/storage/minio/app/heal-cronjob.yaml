@@ -45,9 +45,8 @@ spec:
       # A full recursive heal scan can run long depending on object count;
       # generous relative to the current ~50Gi deployment.
       activeDeadlineSeconds: 7200
-      template:
         spec:
-          restartPolicy: OnFailure
+          restartPolicy: Never
           containers:
             - name: mc
               image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
