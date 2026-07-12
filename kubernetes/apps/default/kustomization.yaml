@@ -25,3 +25,4 @@ resources:
   - ./kroki/ks.yaml
   - ./tika-ner/ks.yaml
   - ./changedetection/ks.yaml
+  - ./guacamole/ks.yaml
