@@ -159,7 +159,7 @@ spec:
         # Thanos sidecar: uploads TSDB blocks to Minio (observability-thanos bucket) for
         # long-term storage.
         thanos:
-          image: quay.io/thanos/thanos:v0.41.0
+          image: quay.io/thanos/thanos:v0.42.0
           objectStorageConfig:
             existingSecret:
               name: thanos-objstore-config
