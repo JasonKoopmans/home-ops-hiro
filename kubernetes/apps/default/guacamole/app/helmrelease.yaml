@@ -127,7 +127,7 @@ spec:
       # password from user-mapping.xml. That's fine for operator/tailnet use.
       # -------------------------------------------------------------------
       internal:
-        hostnames: ["guac.${SECRET_DOMAIN}"]
+        hostnames: ["workspaces.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
             namespace: network
@@ -139,17 +139,17 @@ spec:
 
       # -------------------------------------------------------------------
       # PUBLIC path (Michele, any network) via the external gateway +
-      # cloudflared. external-dns publishes guac.${SECRET_DOMAIN} and the
+      # cloudflared. external-dns publishes workspaces.${SECRET_DOMAIN} and the
       # tunnel routes it — so enabling this exposes the endpoint to the
       # internet, gated ONLY by the Cloudflare Access policy.
       #
       # !!! SAFETY: keep this COMMENTED until the Cloudflare Access policy
-      # for guac.${SECRET_DOMAIN} is live in Zero Trust (allow Michele +
+      # for workspaces.${SECRET_DOMAIN} is live in Zero Trust (allow Michele +
       # operator, SSO/MFA). Uncommenting before that exposes her desktop to
       # the open internet. See remote-access-plan.md Phase 3.
       # -------------------------------------------------------------------
       # external:
-      #   hostnames: ["guac.${SECRET_DOMAIN}"]
+      #   hostnames: ["workspaces.${SECRET_DOMAIN}"]
       #   parentRefs:
       #     - name: envoy-external
       #       namespace: network
