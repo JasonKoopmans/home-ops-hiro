@@ -55,21 +55,34 @@ spec:
       serviceMonitor:
         metricRelabelings:
           # Drop high-cardinality apiserver histograms not needed for basic homelab dashboards.
-          # apiserver_request_duration_seconds_bucket and apiserver_request_sli_duration_seconds_bucket
-          # are kept as they back the default API Server and SLI dashboards.
+          #
+          # apiserver_request_duration_seconds_bucket (~42.4k series, ~14% of the
+          # TSDB) is dropped: its only consumer was the API Server Watch Cache
+          # tuning dashboard, retired in this commit once that exercise concluded
+          # (see talos/patches/controller/cluster.yaml default-watch-cache-size).
+          # No PrometheusRule reads it, and the chart's own API Server dashboard
+          # does not either — it reads recording rules derived from the _sli_
+          # variant below, not this metric.
+          #
+          # apiserver_request_sli_duration_seconds_bucket is deliberately KEPT: it
+          # is load-bearing for kube-apiserver-{burnrate,availability,histogram}.rules,
+          # which produce the recording rules (apiserver_request:availability30d,
+          # cluster_quantile:apiserver_request_sli_duration_seconds:histogram_quantile)
+          # that the chart's API Server dashboard and the SLO alerts read. Dropping
+          # it would silently empty those rules — a recording rule cannot be computed
+          # from a series that was dropped at scrape time.
           - action: drop
             sourceLabels: [__name__]
-            regex: apiserver_request_body_size_bytes_bucket|apiserver_watch_list_duration_seconds_bucket|apiserver_watch_cache_read_wait_seconds_bucket|apiserver_response_sizes_bucket|apiserver_watch_events_sizes_bucket
+            regex: apiserver_request_duration_seconds_bucket|apiserver_request_body_size_bytes_bucket|apiserver_watch_list_duration_seconds_bucket|apiserver_watch_cache_read_wait_seconds_bucket|apiserver_response_sizes_bucket|apiserver_watch_events_sizes_bucket
           # The kube-apiserver exports its own etcd client histogram under
           # job="apiserver" — distinct from etcd's server-side metrics above. It
           # carries `group` and `resource` labels, so its cardinality scales with
           # every installed CRD: 24 le x 6 operation x 4 apiservers x ~65
           # group/resource pairs = ~37.7k series, ~12.7% of the whole TSDB.
           #
-          # Nothing reads it: no PrometheusRule references it, and the repo's own
-          # "etcd Range (Read) Latency p99" panel (grafana-dashboard-apiserver-watch-cache)
-          # filters job=~".*etcd.*", which these series do not match. _count/_sum
-          # are retained, so rate/avg queries still work.
+          # Nothing reads it: no PrometheusRule references it, and no dashboard
+          # queries it under job="apiserver". _count/_sum are retained, so
+          # rate/avg queries still work.
           - action: drop
             sourceLabels: [__name__]
             regex: etcd_request_duration_seconds_bucket
