@@ -40,6 +40,13 @@ spec:
         metricRelabelings:
           # etcd request histograms are extremely high-cardinality for a homelab.
           # The _count and _sum variants are retained for rate/avg queries.
+          #
+          # NOTE: this rule only covers etcd's own scrape job, which currently has
+          # no targets — the chart's kube-etcd Service has zero endpoints on Talos,
+          # so nothing matches this today. It is kept so the rule is already correct
+          # if etcd scraping is ever wired up. The series that actually exist come
+          # from the apiserver's etcd *client* instrumentation — see kubeApiServer
+          # below. Do not assume this rule is what bounds etcd histogram cardinality.
           - action: drop
             sourceLabels: [__name__]
             regex: etcd_request_duration_seconds_bucket
@@ -53,6 +60,19 @@ spec:
           - action: drop
             sourceLabels: [__name__]
             regex: apiserver_request_body_size_bytes_bucket|apiserver_watch_list_duration_seconds_bucket|apiserver_watch_cache_read_wait_seconds_bucket|apiserver_response_sizes_bucket|apiserver_watch_events_sizes_bucket
+          # The kube-apiserver exports its own etcd client histogram under
+          # job="apiserver" — distinct from etcd's server-side metrics above. It
+          # carries `group` and `resource` labels, so its cardinality scales with
+          # every installed CRD: 24 le x 6 operation x 4 apiservers x ~65
+          # group/resource pairs = ~37.7k series, ~12.7% of the whole TSDB.
+          #
+          # Nothing reads it: no PrometheusRule references it, and the repo's own
+          # "etcd Range (Read) Latency p99" panel (grafana-dashboard-apiserver-watch-cache)
+          # filters job=~".*etcd.*", which these series do not match. _count/_sum
+          # are retained, so rate/avg queries still work.
+          - action: drop
+            sourceLabels: [__name__]
+            regex: etcd_request_duration_seconds_bucket
 
     alertmanager:
       alertmanagerSpec:
