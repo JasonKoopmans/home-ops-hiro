@@ -1,0 +1,160 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app guacamole
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: guacamole
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      guacamole:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        strategy: RollingUpdate
+        containers:
+          # guacd — the protocol proxy that actually speaks VNC to the
+          # workstation. Sidecar; the webapp reaches it over localhost.
+          guacd:
+            image:
+              repository: docker.io/guacamole/guacd
+              tag: "1.6.0"
+            env:
+              GUACD_LOG_LEVEL: info
+            probes:
+              liveness: &guacdProbe
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: 4822
+                  initialDelaySeconds: 10
+                  periodSeconds: 15
+                  timeoutSeconds: 5
+                  failureThreshold: 5
+              readiness: *guacdProbe
+            resources:
+              requests:
+                cpu: 25m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+          # Guacamole web application (Tomcat), served at "/".
+          app:
+            image:
+              repository: docker.io/guacamole/guacamole
+              tag: "1.6.0"
+            env:
+              # guacd is a sidecar in this same pod.
+              GUACD_HOSTNAME: 127.0.0.1
+              GUACD_PORT: "4822"
+              # Serve at "/" instead of "/guacamole".
+              WEBAPP_CONTEXT: ROOT
+              # Where the file-based authz (user-mapping.xml) is read from.
+              GUACAMOLE_HOME: /etc/guacamole
+              # --- HTTP header auth ---
+              # cloudflared forwards Cf-Access-Authenticated-User-Email for
+              # requests that passed the Cloudflare Access policy. The header
+              # extension signs that user in (no separate Guacamole login);
+              # user-mapping.xml then supplies the connection for that username.
+              HEADER_ENABLED: "true"
+              HTTP_AUTH_HEADER: Cf-Access-Authenticated-User-Email
+            probes:
+              liveness: &appProbe
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: &appPort 8080
+                  initialDelaySeconds: 60
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              readiness: *appProbe
+            resources:
+              requests:
+                cpu: 50m
+                memory: 512Mi
+              limits:
+                memory: 1Gi
+
+    defaultPodOptions:
+      securityContext:
+        # The upstream Guacamole image runs its Tomcat entrypoint as root and
+        # writes guacamole.properties into GUACAMOLE_HOME at start.
+        runAsNonRoot: false
+
+    service:
+      app:
+        controller: guacamole
+        ports:
+          http:
+            port: *appPort
+
+    persistence:
+      # Mount only user-mapping.xml (from the SOPS secret) into GUACAMOLE_HOME,
+      # leaving the rest of the dir writable for the generated properties.
+      user-mapping:
+        type: secret
+        name: guacamole-secret
+        advancedMounts:
+          guacamole:
+            app:
+              - path: /etc/guacamole/user-mapping.xml
+                subPath: user-mapping.xml
+                readOnly: true
+
+    route:
+      # -------------------------------------------------------------------
+      # Internal path (LAN / tailnet) via the internal gateway. No Cloudflare
+      # Access in front — reachable only from the private network. Safe to
+      # ship: internal-only DNS (k8s-gateway) resolves this to 192.168.25.101.
+      #
+      # NOTE: header auth expects Cf-Access-Authenticated-User-Email. Reaching
+      # this route internally (bypassing cloudflared) sends no such header, so
+      # Guacamole falls back to its login form — log in with the username/
+      # password from user-mapping.xml. That's fine for operator/tailnet use.
+      # -------------------------------------------------------------------
+      internal:
+        hostnames: ["workspaces.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *appPort
+
+      # -------------------------------------------------------------------
+      # PUBLIC path (Michele, any network) via the external gateway +
+      # cloudflared. external-dns publishes workspaces.${SECRET_DOMAIN} and the
+      # tunnel routes it — so enabling this exposes the endpoint to the
+      # internet, gated ONLY by the Cloudflare Access policy.
+      #
+      # !!! SAFETY: keep this COMMENTED until the Cloudflare Access policy
+      # for workspaces.${SECRET_DOMAIN} is live in Zero Trust (allow Michele +
+      # operator, SSO/MFA). Uncommenting before that exposes her desktop to
+      # the open internet. See remote-access-plan.md Phase 3.
+      # -------------------------------------------------------------------
+      # external:
+      #   hostnames: ["workspaces.${SECRET_DOMAIN}"]
+      #   parentRefs:
+      #     - name: envoy-external
+      #       namespace: network
+      #       sectionName: https
+      #   rules:
+      #     - backendRefs:
+      #         - identifier: app
+      #           port: *appPort
