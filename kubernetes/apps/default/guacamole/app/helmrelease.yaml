@@ -126,16 +126,16 @@ spec:
       # Guacamole falls back to its login form — log in with the username/
       # password from user-mapping.xml. That's fine for operator/tailnet use.
       # -------------------------------------------------------------------
-      internal:
-        hostnames: ["workspaces.${SECRET_DOMAIN}"]
-        parentRefs:
-          - name: envoy-internal
-            namespace: network
-            sectionName: https
-        rules:
-          - backendRefs:
-              - identifier: app
-                port: *appPort
+      #internal:
+      #  hostnames: ["workspaces.${SECRET_DOMAIN}"]
+      #  parentRefs:
+      #    - name: envoy-internal
+      #      namespace: network
+      #      sectionName: https
+      #  rules:
+      #    - backendRefs:
+      #        - identifier: app
+      #          port: *appPort
 
       # -------------------------------------------------------------------
       # PUBLIC path (Michele, any network) via the external gateway +
@@ -148,13 +148,13 @@ spec:
       # operator, SSO/MFA). Uncommenting before that exposes her desktop to
       # the open internet. See remote-access-plan.md Phase 3.
       # -------------------------------------------------------------------
-      # external:
-      #   hostnames: ["workspaces.${SECRET_DOMAIN}"]
-      #   parentRefs:
-      #     - name: envoy-external
-      #       namespace: network
-      #       sectionName: https
-      #   rules:
-      #     - backendRefs:
-      #         - identifier: app
-      #           port: *appPort
+      external:
+        hostnames: ["workspaces.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-external
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *appPort
