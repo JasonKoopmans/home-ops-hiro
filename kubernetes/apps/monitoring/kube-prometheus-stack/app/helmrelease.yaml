@@ -194,7 +194,7 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  # Bounds the volume at 1.5x retentionSize (10GB) — enough for blocks
+                  # Allocates ~16GB (15Gi), i.e. ~1.6x the retentionSize (10GB) — enough for blocks
                   # plus WAL/head, with headroom for compaction.
                   #
                   # NOTE: a StatefulSet's volumeClaimTemplates are immutable, so editing
