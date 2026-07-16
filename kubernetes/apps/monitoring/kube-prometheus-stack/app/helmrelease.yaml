@@ -178,16 +178,33 @@ spec:
         storageSpec:
           volumeClaimTemplate:
             spec:
-              storageClassName: longhorn-2-no-backup
+              # longhorn-tsdb, not longhorn-2-no-backup. Both are 2-replica/no-backup,
+              # but the "-no-backup" classes set recurringJobSelector: "[]", which does
+              # NOT opt a volume out of recurring jobs — Longhorn files those volumes
+              # into the `default` group, which snapshots every 6h (retain 3) and backs
+              # up daily. Each rotation coalesces the pruned snapshot's blocks forward
+              # into the root snapshot instead of freeing them, so the chain grows
+              # without bound: this volume reached 30.15Gi actualSize against 6.92Gi of
+              # live TSDB (4.4x), and its engine controller became the top CPU consumer
+              # on its node — which in turn timed out the kube-apiserver-burnrate rule
+              # evaluations. longhorn-tsdb selects the `tsdb` recurring-job group
+              # (daily snapshot, retain 2), which is what this class exists for.
+              # See docs/runbook-longhorn-volume-trim.md.
+              storageClassName: longhorn-tsdb
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  # PVC size intentionally left at 15Gi rather than shrunk to match the
-                  # new retentionSize: most storage classes (including Longhorn) don't
-                  # support in-place PVC shrink, so reducing this would require a
-                  # disruptive volume recreation. The retention/retentionSize policy
-                  # above is what actually bounds disk usage; the extra headroom here
-                  # is unused but harmless.
+                  # Bounds the volume at 1.5x retentionSize (10GB) — enough for blocks
+                  # plus WAL/head, with headroom for compaction.
+                  #
+                  # NOTE: a StatefulSet's volumeClaimTemplates are immutable, so editing
+                  # this value alone never resizes an existing PVC. #265 reduced this
+                  # 45Gi -> 15Gi, but the live PVC stayed at 45Gi and was simply adopted
+                  # by the rebuilt StatefulSet. That oversizing is not harmless: at 45Gi
+                  # the second replica could not be scheduled on any node (100%
+                  # over-provisioning; no node had 45Gi free), leaving the volume
+                  # permanently `degraded` on a single replica. Changing size or class
+                  # here requires deleting the PVC so the StatefulSet reprovisions it.
                   storage: 15Gi
         # Thanos sidecar: uploads TSDB blocks to Minio (observability-thanos bucket) for
         # long-term storage.
