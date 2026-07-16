@@ -179,11 +179,11 @@ spec:
           volumeClaimTemplate:
             spec:
               # longhorn-tsdb, not longhorn-2-no-backup. Both are 2-replica/no-backup,
-              # but the "-no-backup" classes set recurringJobSelector: "[]", which does
-              # NOT opt a volume out of recurring jobs — Longhorn files those volumes
-              # into the `default` group, which snapshots every 6h (retain 3) and backs
-              # up daily. Each rotation coalesces the pruned snapshot's blocks forward
-              # into the root snapshot instead of freeing them, so the chain grows
+              # but the "-no-backup" classes currently set recurringJobSelector: "[]"
+              # (intended to opt volumes out of recurring jobs; see storageclasses.yaml).
+              # In practice these volumes have still ended up with the `default` group's 6h
+              # snapshot (retain 3) and daily backup jobs, so the snapshot chain can grow
+              # without bound (coalescing blocks into the root snapshot rather than freeing).
               # without bound: this volume reached 30.15Gi actualSize against 6.92Gi of
               # live TSDB (4.4x), and its engine controller became the top CPU consumer
               # on its node — which in turn timed out the kube-apiserver-burnrate rule
