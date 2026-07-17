@@ -144,7 +144,17 @@ spec:
               - --objstore.config-file=/etc/thanos/objstore.yml
               - --http-address=0.0.0.0:10902
               - --wait
-              - --retention.resolution-raw=30d
+              # Retention per resolution tier. These coexist — downsampling writes an
+              # additional copy, it does not replace raw — so total ≈ sum of all three.
+              #
+              # raw cut 30d -> 7d: at the observed post-cardinality growth the raw tier
+              # dominated the ~50Gi Minio volume, pushing it past 85%. Raw below the
+              # local Prometheus retention (3d) is redundant anyway — the sidecar serves
+              # that window off local disk — so raw only earns its keep for the 3d..7d
+              # zoom-into-old-data case. 5m keeps min/max/avg (peaks preserved, rate()
+              # works) for 90d; 1h covers a full year. Cutting raw immediately deletes
+              # the accumulated 8d..30d of raw blocks whose 5m/1h copies already exist.
+              - --retention.resolution-raw=7d
               - --retention.resolution-5m=90d
               - --retention.resolution-1h=1y
             probes:
