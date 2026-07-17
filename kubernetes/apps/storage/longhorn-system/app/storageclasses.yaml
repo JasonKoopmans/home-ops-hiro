@@ -6,6 +6,8 @@ metadata:
   name: longhorn-1
   annotations:
     storageclass.kubernetes.io/is-default-class: "false"
+    # params are immutable; let Flux recreate rather than fail the apply
+    kustomize.toolkit.fluxcd.io/force: "Enabled"
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
 reclaimPolicy: Delete
@@ -23,6 +25,8 @@ metadata:
   name: longhorn-2
   annotations:
     storageclass.kubernetes.io/is-default-class: "false"
+    # params are immutable; let Flux recreate rather than fail the apply
+    kustomize.toolkit.fluxcd.io/force: "Enabled"
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
 reclaimPolicy: Delete
@@ -33,13 +37,24 @@ parameters:
   replicaAutoBalance: best-effort
 
 ---
-# 3 replicas, no backups — same redundancy as default but exempt from recurring backup/snapshot jobs
+# 3 replicas, no backups — same redundancy as default, snapshots but no recurring backup.
+#
+# recurringJobSelector MUST name a real group. An empty "[]" does NOT opt out:
+# Longhorn "will automatically add a volume to the `default` group when the volume
+# has no recurring job", and `default` carries BOTH a 6-hourly snapshot job AND a
+# daily backup job — so "[]" silently opted these classes into the exact backups
+# their name disclaims. Naming the snapshot-only group is what actually excludes
+# them, because the volume then has a job and default is not auto-applied.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: longhorn-no-backup
   annotations:
     storageclass.kubernetes.io/is-default-class: "false"
+    # StorageClass.parameters is immutable; without this a selector change fails to
+    # apply and wedges the whole longhorn Kustomization. Scoped per-resource rather
+    # than spec.force, which would also cover the Longhorn HelmRelease.
+    kustomize.toolkit.fluxcd.io/force: "Enabled"
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
 reclaimPolicy: Delete
@@ -48,7 +63,7 @@ parameters:
   numberOfReplicas: "3"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
-  recurringJobSelector: "[]"
+  recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
 # 1 replica, no backups
@@ -58,6 +73,7 @@ metadata:
   name: longhorn-1-no-backup
   annotations:
     storageclass.kubernetes.io/is-default-class: "false"
+    kustomize.toolkit.fluxcd.io/force: "Enabled"
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
 reclaimPolicy: Delete
@@ -66,7 +82,7 @@ parameters:
   numberOfReplicas: "1"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
-  recurringJobSelector: "[]"
+  recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
 # 2 replicas, no backups
@@ -76,6 +92,7 @@ metadata:
   name: longhorn-2-no-backup
   annotations:
     storageclass.kubernetes.io/is-default-class: "false"
+    kustomize.toolkit.fluxcd.io/force: "Enabled"
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
 reclaimPolicy: Delete
@@ -84,17 +101,21 @@ parameters:
   numberOfReplicas: "2"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
-  recurringJobSelector: "[]"
+  recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
 # TSDB/write-heavy volumes (e.g., Prometheus) — daily snapshot only via longhorn-tsdb-snapshot-job.
-# Operator: reprovision or relabel Prometheus PVCs to use this class to stop 6-hourly snapshot amplification.
+# The Prometheus PVC was moved onto this class in #310; the daily/retain-2 cadence is
+# what keeps its snapshot chain from outrunning cleanup. Use this class (not the
+# *-no-backup ones, which snapshot 6-hourly) for any new continuously-written volume.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: longhorn-tsdb
   annotations:
     storageclass.kubernetes.io/is-default-class: "false"
+    # params are immutable; let Flux recreate rather than fail the apply
+    kustomize.toolkit.fluxcd.io/force: "Enabled"
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
 reclaimPolicy: Delete
