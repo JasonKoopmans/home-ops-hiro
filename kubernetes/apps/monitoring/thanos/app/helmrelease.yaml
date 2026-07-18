@@ -237,8 +237,13 @@ spec:
                 readOnly: true
 
       compactor-data:
-        type: emptyDir
-        sizeLimit: 20Gi
+        # emptyDir competed with the node's container images/logs for Talos's
+        # shared ~48Gi /var partition, and had no ephemeral-storage floor, so
+        # it was evicted first under any DiskPressure -- 2,737 evictions,
+        # zero successful compactions in 24h. See pvc.yaml (longhorn-scratch:
+        # single replica, no snapshots, no backups -- functionally scratch,
+        # just off node-local disk).
+        existingClaim: thanos-compactor-data
         advancedMounts:
           compactor:
             app:
