@@ -2,6 +2,18 @@ machine:
   kubelet:
     extraConfig:
       serializeImagePulls: false
+      # Stock Kubernetes defaults (high=85/low=80) are sized for nodes with
+      # hundreds of GB of disk. Talos's EPHEMERAL partition (/var, hosts both
+      # imagefs and the node's general ephemeral storage) is ~48Gi on every
+      # node here, and images alone were observed using 23-56% of it. At
+      # stock thresholds, GC doesn't trigger until images hit ~40.6Gi and
+      # only cleans down to ~38.2Gi -- leaving ~9.5Gi free against kubelet's
+      # own nodefs.available<10% (~4.8Gi) eviction threshold. Any burst on
+      # top of that (e.g. a pod's emptyDir scratch use) tips the node into
+      # DiskPressure. Tightened so GC keeps a wider, earlier margin:
+      # triggers at ~35.8Gi, cleans to ~28.7Gi, leaving ~19Gi of headroom.
+      imageGCHighThresholdPercent: 75
+      imageGCLowThresholdPercent: 60
     nodeIP:
       validSubnets:
         - 192.168.25.0/24
