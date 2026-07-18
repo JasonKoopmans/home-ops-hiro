@@ -125,3 +125,36 @@ parameters:
   dataLocality: best-effort
   replicaAutoBalance: best-effort
   recurringJobSelector: '[{"name":"tsdb","isGroup":true}]'
+
+---
+# Disposable working scratch — rewritten/discarded every run, worth zero snapshots
+# or backups (unlike snapshot-only/tsdb, which still take periodic snapshots for
+# rollback). Single replica: no redundancy value in scratch data, and no reason to
+# pay 2x write cost for it — on node loss the consumer just redownloads/recomputes.
+#
+# recurringJobSelector names a group ("scratch") that has NO RecurringJob targeting
+# it. This is deliberate, not an oversight: per #311, the CSI driver sets the
+# recurring-job-group label purely from this selector at provision time — it does
+# not check whether a job exists for the name. That label's mere presence is what
+# excludes the volume from Longhorn's `default` group (6-hourly snapshot + daily
+# backup) fallback. Since nothing ever targets "scratch", no job ever fires: no
+# snapshots are taken, so there is no chain to bloat — closer in behaviour to
+# emptyDir than to any other class here. Do NOT add a RecurringJob for this group;
+# that would defeat the point.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-scratch
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    # params are immutable; let Flux recreate rather than fail the apply
+    kustomize.toolkit.fluxcd.io/force: "Enabled"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  dataLocality: best-effort
+  replicaAutoBalance: best-effort
+  recurringJobSelector: '[{"name":"scratch","isGroup":true}]'
