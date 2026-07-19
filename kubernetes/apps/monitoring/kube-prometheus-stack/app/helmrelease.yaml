@@ -53,6 +53,15 @@ spec:
 
     kubeApiServer:
       serviceMonitor:
+        # Scrape the apiserver at 60s instead of the 30s global default. The
+        # apiserver is ~43% of total sample ingestion (its large histograms),
+        # so halving its scrape rate is the single biggest reduction in TSDB
+        # write I/O — which was saturating the (2-CPU) node running Prometheus.
+        # All apiserver-derived rules use [5m]+ windows and are unaffected; the
+        # one exception is the stock KubeAggregatedAPIErrors alert (a [1m]
+        # window), which is disabled by this change — an accepted trade for a
+        # homelab. Everything else stays at the 30s global interval.
+        interval: 60s
         metricRelabelings:
           # Drop high-cardinality apiserver histograms not needed for basic homelab dashboards.
           #
@@ -128,6 +137,19 @@ spec:
         # Alertmanager or the Thanos storegateway, to avoid CPU contention
         # (see monitoring/thanos helmrelease.yaml for the matching rule).
         affinity:
+          # Soft preference for the 3-CPU nodes (cmp-01/cmp-02). Prometheus is
+          # the heaviest stateful I/O workload here; keeping it off the 2-CPU
+          # nodes (cmp-03/cmp-04) avoids saturating them. Preference, not a
+          # hard requirement — it still schedules elsewhere if these are full.
+          # Matched by hostname since the nodes carry no CPU-tier label.
+          nodeAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                preference:
+                  matchExpressions:
+                    - key: kubernetes.io/hostname
+                      operator: In
+                      values: ["hiro-cmp-01", "hiro-cmp-02"]
           podAntiAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
               - weight: 100
