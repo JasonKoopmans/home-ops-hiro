@@ -1,0 +1,103 @@
+---
+# Bucket lifecycle bootstrap Job — runs once after Minio is healthy.
+# Expires noncurrent object versions and zombie delete markers so deleted
+# Thanos/Loki blocks actually get reclaimed on disk instead of leaving
+# permanent tombstones.
+#
+# Why this exists: both buckets show bucket versioning Status: Suspended
+# (checked via `curl ...?versioning`) -- versioning was explicitly enabled
+# at some point in this cluster's history via an untracked manual action
+# (nothing in this repo ever sets it) and later suspended. Per S3 semantics,
+# suspending versioning does NOT retroactively clean up delete
+# markers/noncurrent versions created while it was enabled, and with no
+# lifecycle policy, nothing ever expired them. This surfaced 2026-07-19 as
+# thanos-compactor's aborted-partial-upload cleaner getting stuck
+# re-processing 211+ ghost blocks every cycle (confirmed to be Minio
+# `DelObj` tombstones, zero real data behind them) -- full story in
+# docs/incident-thanos-compactor-disk-pressure.md #6. That day's cleanup was
+# a one-time manual sweep; this Job is the actual permanent fix so it
+# doesn't recur.
+#
+# Deliberately does NOT use --expire-days (current-object expiration): that
+# would race with Thanos's own retention flags
+# (kubernetes/apps/monitoring/thanos/app/helmrelease.yaml,
+# --retention.resolution-raw=7d etc.) and could delete live block data Thanos
+# still needs. Only --noncurrent-expire-days and --expire-delete-marker are
+# used, which only ever touch versions/markers behind an object Thanos (or
+# Loki) has already deleted through its own logic.
+#
+# Manual equivalent:
+#   mc ilm rule add --noncurrent-expire-days 1 --expire-delete-marker local/observability-thanos
+#   mc ilm rule add --noncurrent-expire-days 1 --expire-delete-marker local/observability-loki
+#
+# `mc ilm rule add` is idempotent per unique rule content but will add a
+# duplicate rule (harmless, same effect) if run again with different
+# arguments -- if this Job's command ever changes, delete the old completed
+# Job first (`kubectl -n storage delete job minio-bucket-lifecycle-bootstrap`)
+# so Flux can recreate it; spec.template is immutable once created, same
+# caveat as bucket-quota-bootstrap-job.yaml.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-lifecycle-bootstrap
+  namespace: storage
+  annotations:
+    # prune: false prevents Flux from auto-deleting this Job if it is ever
+    # removed from kustomization.yaml (completed Job acts as an audit record).
+    # To fully remove: first delete this resource from kustomization.yaml and
+    # push to Git, then manually clean up the completed Job:
+    #   kubectl -n storage delete job minio-bucket-lifecycle-bootstrap
+    kustomize.toolkit.fluxcd.io/prune: "false"
+    # ssa: IfNotPresent tells kustomize-controller to skip applying this
+    # resource once it already exists in the cluster. Without this, every
+    # reconcile does a fresh dry-run apply against the completed Job, which
+    # fails with "field is immutable" (spec.template can't change, and the
+    # live object's controller-added labels, e.g. batch.kubernetes.io/controller-uid,
+    # never match a fresh dry-run projection) — leaving this Kustomization
+    # permanently Ready=False after the Job's first successful run. See
+    # docs/incident-thanos-compactor-disk-pressure.md.
+    kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              RETRIES=0; MAX_RETRIES=180
+              until mc alias set local http://minio.storage.svc.cluster.local:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                RETRIES=$((RETRIES + 1))
+                if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
+                  echo "ERROR: minio did not become ready after $((MAX_RETRIES * 5))s, giving up"
+                  exit 1
+                fi
+                echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
+              done
+              mc ilm rule add --noncurrent-expire-days 1 --expire-delete-marker local/observability-thanos
+              mc ilm rule add --noncurrent-expire-days 1 --expire-delete-marker local/observability-loki
+              echo "bucket lifecycle rules set"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root-credentials
+                  key: rootUser
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root-credentials
+                  key: rootPassword
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
