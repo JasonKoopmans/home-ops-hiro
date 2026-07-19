@@ -76,7 +76,9 @@ spec:
                   failureThreshold: 60
             resources:
               requests:
-                cpu: 250m
+                # Idles ~3m; 50m keeps burst headroom without over-reserving
+                # scheduling capacity (limits below still allow bursting).
+                cpu: 50m
                 memory: 512Mi
               limits:
                 cpu: 2000m
