@@ -50,22 +50,22 @@ spec:
     persistence:
       enabled: true
       storageClass: longhorn-2-no-backup
-      # Grown 50Gi -> 65Gi: observability-thanos alone reached 47Gi (PVC was
-      # at 99% used, 767Mi free), starving the compactor's raw-resolution
-      # merge of the transient headroom it needs to write a new block before
-      # deleting its sources. Same live-expansion pattern as #315
-      # (thanos-compactor-data 30Gi -> 60Gi) - storage.requests is mutable,
-      # storageClassName is not.
-      #
-      # Capped at 65Gi, not a round 100Gi: this class has 2 replicas, and one
-      # of this volume's replicas lives on hiro-cmp-01/disk-1, which only had
-      # 17.8GB free (107.3GB total) at the time of this change -- a straight
-      # 100Gi attempt was rejected outright by Longhorn's admission webhook
-      # (CheckReplicasSizeExpansion, insufficient physical space) and Flux
-      # rolled it back automatically. 65Gi fits within that disk's actual
-      # headroom with margin. Revisit alongside the quota below once
-      # hiro-cmp-01/disk-1 has more room or this volume's replica moves.
-      size: 65Gi
+      # Stayed at 50Gi after two failed growth attempts (2026-07-19, see
+      # docs/incident-thanos-compactor-disk-pressure.md #7): one of this
+      # volume's 2 replicas lives on hiro-cmp-01/disk-1, a disk shared by 8
+      # other volumes and already near its scheduled-capacity ceiling
+      # (~6.7GB real headroom via Longhorn's ScheduledTotal check, not the
+      # ~17.8GB raw StorageAvailable figure that first looked promising). The
+      # transient space a stuck compaction group actually needed (~35-40GB:
+      # 7 source blocks totaling ~19.7GB, plus the new merged block) was far
+      # beyond what that disk could ever provide without relocating a
+      # replica. The stuck group ages out of the 7d raw retention window on
+      # 2026-07-23 and gets deleted outright instead of compacted, so this
+      # self-resolves without a PVC change. A real permanent fix (if
+      # capacity pressure recurs) means evicting/rebuilding the
+      # hiro-cmp-01 replica onto a roomier node (hiro-cmp-02 or -04 both had
+      # >25GB scheduled headroom at the time), not just bumping this number.
+      size: 50Gi
 
     resources:
       requests:

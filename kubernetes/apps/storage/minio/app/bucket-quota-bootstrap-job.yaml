@@ -1,27 +1,25 @@
 ---
 # Bucket quota bootstrap Job — runs once after Minio is healthy.
 # Sets a hard quota per bucket so a runaway write pattern (e.g. a cardinality
-# explosion in Thanos) fails writes instead of filling the shared 65Gi PVC
+# explosion in Thanos) fails writes instead of filling the shared 50Gi PVC
 # and taking the whole node down.
 #
-# These are backstop values, not a capacity plan. The original 45GiB quota on
-# a 50Gi PVC was hit for real: observability-thanos reached 47Gi and the PVC
-# sat at 99% used with 767Mi free, which starved the compactor's raw-
-# resolution merge of the transient headroom it needs to write a new block
-# before deleting its sources — see docs/incident-thanos-compactor-disk-pressure.md.
-# Fixed by growing the PVC 50Gi -> 65Gi and this quota 45GiB -> 55GiB. (Capped
-# at 65Gi, not a round 100Gi, by physical free space on one of this volume's
-# two Longhorn replica disks — see the persistence.size comment in
-# helmrelease.yaml for the full explanation.)
-# Revisit both again once minio_bucket_usage_total_bytes (scraped via
-# probe-bucket-metrics.yaml) has a few weeks of real data past this change.
+# These are backstop values, not a capacity plan. This quota was hit for
+# real on 2026-07-19: observability-thanos reached 47Gi and the PVC sat at
+# 99% used (767Mi free). A PVC grow attempt was reverted after discovering
+# the disk backing one of minio's Longhorn replicas has almost no headroom
+# to give — see docs/incident-thanos-compactor-disk-pressure.md #7 for the
+# full story and why the quota stayed at 45GiB instead of increasing.
+# Revisit both once hiro-cmp-01/disk-1 has more room (or this volume's
+# replica moves off it) and minio_bucket_usage_total_bytes (scraped via
+# probe-bucket-metrics.yaml) has a few weeks of real data.
 #
 # observability-loki is currently unused (Loki runs with storage.type: filesystem,
 # see monitoring/loki/app/helmrelease.yaml) — its quota here is just a guard
 # against silent growth if that ever changes, not a tuned value.
 #
 # Manual equivalent:
-#   mc quota set local/observability-thanos --size 55GiB
+#   mc quota set local/observability-thanos --size 45GiB
 #   mc quota set local/observability-loki --size 2GiB
 #
 # Failure detection relies on kube-prometheus-stack's default KubeJobFailed
@@ -69,7 +67,7 @@ spec:
                 fi
                 echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
               done
-              mc quota set local/observability-thanos --size 55GiB
+              mc quota set local/observability-thanos --size 45GiB
               mc quota set local/observability-loki --size 2GiB
               echo "bucket quotas set"
           env:

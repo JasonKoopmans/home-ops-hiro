@@ -1,13 +1,15 @@
 # Incident: thanos-compactor disk pressure, eviction loop, and a Minio ghost-block loop
 
-Started 2026-07-13. **Fully resolved as of 2026-07-19** — this doc now covers
-the whole arc: the original eviction/disk-pressure loop (2026-07-13 to
-2026-07-18), the Minio ghost-block loop that blocked compaction afterward
-(diagnosed and fixed 2026-07-19), and the Minio capacity exhaustion that
-surfaced once compaction started running again (also fixed 2026-07-19).
-Kept for reference — the mechanisms here (Longhorn recurring-job defaults,
-Minio single-drive-mode quirks, PVC vs. Deployment resize patterns) are
-likely to recur elsewhere in this cluster.
+Started 2026-07-13. **Resolved as of 2026-07-19**, with one item left to
+self-resolve on its own by 2026-07-23 (see #7). This doc covers the whole
+arc: the original eviction/disk-pressure loop (2026-07-13 to 2026-07-18),
+the Minio ghost-block loop that blocked compaction afterward (diagnosed and
+fixed 2026-07-19), and the Minio capacity exhaustion that surfaced once
+compaction started running again (diagnosed 2026-07-19, deliberately *not*
+fixed with a PVC grow — see #7 for why). Kept for reference — the
+mechanisms here (Longhorn recurring-job defaults and its scheduled-capacity
+admission check, Minio single-drive-mode quirks, PVC vs. Deployment resize
+patterns) are likely to recur elsewhere in this cluster.
 
 ## Timeline / root causes found and fixed
 
@@ -83,41 +85,89 @@ likely to recur elsewhere in this cluster.
    pod <name>`, Deployment recreates it) to clear. After restart: real
    compaction resumed immediately (14 successful raw-resolution compactions
    within the first hour).
-7. **Minio capacity exhaustion** (fixed 2026-07-19, PVC + quota bump, no PR
-   number yet). Once compaction started succeeding again (#6), the last
-   remaining raw-resolution compaction group hit a **`Bucket quota exceeded`**
-   error on every retry (~15min cycle: 7min download+merge, then fail on
-   upload). Root cause was two ceilings hit simultaneously: the
-   `observability-thanos` bucket had grown to 47Gi against its 45GiB
-   Minio-level quota (`kubernetes/apps/storage/minio/app/bucket-quota-bootstrap-job.yaml`),
-   **and** the underlying `minio` PVC itself (50Gi, `longhorn-2-no-backup`)
-   was physically at 99% used (767Mi free) — so raising the quota alone
-   would not have helped; there was no disk left regardless. This is the
-   exact risk the quota job's own header comment had flagged as plausible
-   but unconfirmed. Not self-healing: the retention-driven shrinkage that
-   compaction would eventually produce is precisely what a full disk was
-   blocking. First attempt was a straight 50Gi → 100Gi PVC bump
-   (`helmrelease.yaml`, `persistence.size` — same live-expansion mechanism
-   as #315, this app's PVC is a plain Deployment-referenced PVC from the
-   official Minio chart's `mode: standalone`, not a StatefulSet
-   `volumeClaimTemplate`, so the `storage.requests` bump alone triggers a
-   live Longhorn expansion) — **Longhorn's admission webhook rejected it**:
-   this class has 2 replicas, and one lives on `hiro-cmp-01/disk-1`, which
-   only had 17.8GB free (107.3GB total) at the time —
-   `CheckReplicasSizeExpansion` correctly refused an expansion that disk
-   physically couldn't hold, and Flux's HelmRelease remediation
-   auto-rolled-back to the last-good release after 3 failed attempts (nothing
-   was broken in the meantime — Minio kept running on the old 50Gi PVC
-   throughout). Landed instead on 50Gi → 65Gi, which fits that disk's actual
-   headroom with margin, plus `observability-thanos` quota 45GiB → 55GiB to
-   match. `loki` quota (2GiB, currently unused) left unchanged. **Check
-   `hiro-cmp-01/disk-1` free space again before ever proposing a bigger PVC
-   here** — the ceiling is that disk, not the bucket's logical needs.
+7. **Minio capacity exhaustion — diagnosed, deliberately left unfixed at the
+   PVC level, self-resolves 2026-07-23** (2026-07-19, no PR). Once compaction
+   started succeeding again (#6), the last remaining raw-resolution
+   compaction group hit a **`Bucket quota exceeded`** error on every retry
+   (~15min cycle: 7min download+merge, then fail on upload). Immediate cause
+   was two ceilings hit simultaneously: `observability-thanos` had grown to
+   47Gi against its 45GiB Minio-level quota
+   (`kubernetes/apps/storage/minio/app/bucket-quota-bootstrap-job.yaml`),
+   **and** the underlying `minio` PVC (50Gi, `longhorn-2-no-backup`) was
+   physically at 99% used (767Mi free) — raising the quota alone would not
+   have helped; there was no disk left regardless. This is the exact risk
+   the quota job's own header comment had flagged as plausible but
+   unconfirmed.
+   - **First attempt**: 50Gi → 100Gi PVC bump (`helmrelease.yaml`,
+     `persistence.size` — same live-expansion mechanism as #315: this app's
+     PVC is a plain Deployment-referenced PVC from the official Minio
+     chart's `mode: standalone`, not a StatefulSet `volumeClaimTemplate`, so
+     bumping `storage.requests` alone normally triggers live Longhorn
+     expansion). **Rejected by Longhorn's admission webhook**
+     (`validator.longhorn.io`, `CheckReplicasSizeExpansion`): this class has
+     2 replicas, and one lives on `hiro-cmp-01/disk-1`, which had only
+     17.8GB of `StorageAvailable` (raw free bytes) — nowhere near the 50GB
+     the jump needed.
+   - **Second attempt**: recalculated against `StorageAvailable`, tried a
+     more modest 50Gi → 65Gi (+15Gi). **Also rejected**, with a more precise
+     error this time: Longhorn's expansion check does *not* use raw free
+     bytes at all — it compares `StorageScheduled` (the sum of every
+     replica's *logical/requested* size already committed to that disk,
+     across every volume, not actual physical usage) against
+     `StorageMaximum × OverProvisioningPercentage`. On `hiro-cmp-01/disk-1`,
+     8 unrelated replicas (n8n, minio, and 6 others) already had
+     `StorageScheduled=100.1GB` against a `StorageMaximum=107.3GB` with
+     `OverProvisioningPercentage=100` (i.e. no overprovisioning allowed) —
+     true remaining headroom was **~6.7GB**, not the 17.8GB `StorageAvailable`
+     had suggested. **Lesson: for Longhorn expansion feasibility, check
+     `StorageMaximum − StorageScheduled` per disk
+     (`kubectl get nodes.longhorn.io -o json` →
+     `.items[].status.diskStatus`), not `StorageAvailable`.**
+     Both failed attempts were safe no-ops from Minio's perspective: Flux's
+     HelmRelease remediation auto-rolled-back to the last-good release each
+     time after 3 failed upgrade attempts, and Minio kept running on the
+     original 50Gi PVC throughout with zero downtime or restarts.
+   - **Then the real scope became clear**: even 6.7GB of headroom would not
+     have been enough. The specific stuck group's 7 source blocks total
+     ~19.7GB on disk (`du -sh` per block, captured from the `compact.go`
+     plan log line); Thanos needs the new merged output block to fully
+     upload *before* deleting the sources, so the true transient
+     requirement was on the order of **35-40GB** — an order of magnitude
+     beyond what `hiro-cmp-01/disk-1` could provide without relocating a
+     replica onto a different node.
+   - **Decision: reverted both the PVC and the quota back to the original
+     50Gi / 45GiB** (matching what was already proven stable in production)
+     rather than pursue a Longhorn replica eviction/rebuild — a real fix,
+     but materially more invasive than this incident warranted. Justification:
+     the stuck group's newest block is dated 2026-07-16, raw retention is
+     7d, so it **ages out of retention entirely on 2026-07-23** — at which
+     point Thanos deletes it outright instead of compacting it (deletion
+     needs no extra space), and the retry-and-fail loop on this one group
+     stops on its own. Until then it's cosmetic: one wasted 7min
+     download+merge cycle every ~15min, no disk growth, no data risk (each
+     failed attempt's partial output is discarded, not left behind — verify
+     this hasn't regressed by checking `/data/compact` usage on the
+     compactor pod stays flat across a few cycles if revisiting this).
+   - **If this recurs or a permanent capacity increase is wanted later**:
+     the real fix is evicting/rebuilding the `hiro-cmp-01` replica of the
+     `minio` PVC (`pvc-e7b3d058-c535-4cdc-ae3f-0dce0f82d102`) onto a node
+     with more scheduled headroom — `hiro-cmp-02` (~50GB headroom) or
+     `hiro-cmp-04` (~25GB headroom) both had room at the time this was
+     written; `hiro-cmp-03` (~100GB+ headroom) already hosts this volume's
+     other replica, so Longhorn won't schedule a second one there. This is
+     a genuine data-rebuild operation (not just a manifest edit) and
+     deserves its own deliberate, low-traffic-window attempt rather than
+     being bundled into a reactive fix.
 
-All seven are either merged to `main` or (for #6, a pure data-plane fix with
-no manifest to merge) confirmed live-applied as of this writing. **Do not
+All seven are either merged to `main`, or (for #6, a pure data-plane fix
+with no manifest to merge; and #7, deliberately reverted rather than
+merged) confirmed live and understood as of this writing. **Do not
 re-diagnose these** — verify current state first (commands below) before
-assuming any of 1-7 has regressed.
+assuming any of 1-7 has regressed. In particular, before 2026-07-23, don't
+be alarmed by the compactor logging one `Bucket quota exceeded` retriable
+error roughly every 15 minutes — that's expected until the stuck group ages
+out; only worry if the *set* of `todo_compactions` groups grows beyond 1 or
+the quota error starts naming a different group.
 
 ## Current live facts (verify these haven't drifted before trusting anything above)
 
@@ -127,13 +177,15 @@ Compactor pod:  Deployment "thanos-compactor" in namespace monitoring, label app
                 use app.kubernetes.io/controller=compactor if you need a label selector).
                 Single replica by design — never scale, see comment in helmrelease.yaml.
 PVC (compactor scratch): monitoring/thanos-compactor-data, 60Gi, storageClassName=longhorn-scratch
-PVC (minio):    storage/minio, 65Gi (grown from 50Gi 2026-07-19), storageClassName=longhorn-2-no-backup
-                (2 replicas; one on hiro-cmp-01/disk-1, which is the tight one — check its free
-                space before growing this further)
+PVC (minio):    storage/minio, still 50Gi as of 2026-07-19 — two grow attempts (see #7) were
+                reverted after discovering the disk backing one of its 2 Longhorn replicas
+                (hiro-cmp-01/disk-1, shared by 8 other volumes) has ~6.7GB real scheduled
+                headroom, nowhere near enough for the ~35-40GB the stuck compaction group
+                actually needed. storageClassName=longhorn-2-no-backup.
 Object store:   Minio (quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z), mode-server-xl-single
                 (single-drive — mc admin heal unsupported), bucket observability-thanos,
                 endpoint minio.storage.svc.cluster.local:9000, insecure (plain HTTP, in-cluster only)
-Bucket quotas:  observability-thanos 55GiB (grown from 45GiB 2026-07-19), observability-loki 2GiB
+Bucket quotas:  observability-thanos 45GiB, observability-loki 2GiB (unchanged — see #7)
 Retention:      raw=7d, 5m=90d, 1h=1y (kubernetes/apps/monitoring/thanos/app/helmrelease.yaml)
 ```
 
