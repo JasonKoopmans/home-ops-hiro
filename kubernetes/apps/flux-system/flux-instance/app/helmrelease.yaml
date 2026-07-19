@@ -58,6 +58,26 @@ spec:
             target:
               kind: Deployment
               name: (kustomize-controller|helm-controller|source-controller)
+          - # Right-size CPU requests. Controllers idle at 1-3m but the
+            # flux-operator defaults reserve 50-100m each; only the CPU
+            # request is lowered (no CPU limit is set, so bursting during
+            # reconciliation is unaffected).
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: all
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: manager
+                        resources:
+                          requests:
+                            cpu: 25m
+            target:
+              kind: Deployment
+              name: (kustomize-controller|helm-controller|source-controller|notification-controller)
           - # Enable in-memory kustomize builds
             patch: |
               - op: add

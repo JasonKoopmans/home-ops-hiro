@@ -47,7 +47,9 @@ spec:
               N8N_LOG_OUTPUT: console
             resources:
               requests:
-                cpu: 250m
+                # Idles ~6m; 50m keeps burst headroom without over-reserving
+                # scheduling capacity (limits below still allow bursting).
+                cpu: 50m
                 memory: 512Mi
               limits:
                 cpu: 2000m
