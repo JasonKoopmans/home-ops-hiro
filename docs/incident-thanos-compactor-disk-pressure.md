@@ -96,13 +96,23 @@ likely to recur elsewhere in this cluster.
    exact risk the quota job's own header comment had flagged as plausible
    but unconfirmed. Not self-healing: the retention-driven shrinkage that
    compaction would eventually produce is precisely what a full disk was
-   blocking. Fixed by growing the PVC 50Gi → 100Gi (`helmrelease.yaml`,
-   `persistence.size` — same live-expansion mechanism as #315, this app's
-   PVC is a plain Deployment-referenced PVC from the official Minio chart's
-   `mode: standalone`, not a StatefulSet `volumeClaimTemplate`, so the
-   `storage.requests` bump alone triggers a live Longhorn expansion) and the
-   `observability-thanos` quota 45GiB → 90GiB proportionally. `loki` quota
-   (2GiB, currently unused) left unchanged.
+   blocking. First attempt was a straight 50Gi → 100Gi PVC bump
+   (`helmrelease.yaml`, `persistence.size` — same live-expansion mechanism
+   as #315, this app's PVC is a plain Deployment-referenced PVC from the
+   official Minio chart's `mode: standalone`, not a StatefulSet
+   `volumeClaimTemplate`, so the `storage.requests` bump alone triggers a
+   live Longhorn expansion) — **Longhorn's admission webhook rejected it**:
+   this class has 2 replicas, and one lives on `hiro-cmp-01/disk-1`, which
+   only had 17.8GB free (107.3GB total) at the time —
+   `CheckReplicasSizeExpansion` correctly refused an expansion that disk
+   physically couldn't hold, and Flux's HelmRelease remediation
+   auto-rolled-back to the last-good release after 3 failed attempts (nothing
+   was broken in the meantime — Minio kept running on the old 50Gi PVC
+   throughout). Landed instead on 50Gi → 65Gi, which fits that disk's actual
+   headroom with margin, plus `observability-thanos` quota 45GiB → 55GiB to
+   match. `loki` quota (2GiB, currently unused) left unchanged. **Check
+   `hiro-cmp-01/disk-1` free space again before ever proposing a bigger PVC
+   here** — the ceiling is that disk, not the bucket's logical needs.
 
 All seven are either merged to `main` or (for #6, a pure data-plane fix with
 no manifest to merge) confirmed live-applied as of this writing. **Do not
@@ -117,11 +127,13 @@ Compactor pod:  Deployment "thanos-compactor" in namespace monitoring, label app
                 use app.kubernetes.io/controller=compactor if you need a label selector).
                 Single replica by design — never scale, see comment in helmrelease.yaml.
 PVC (compactor scratch): monitoring/thanos-compactor-data, 60Gi, storageClassName=longhorn-scratch
-PVC (minio):    storage/minio, 100Gi (grown from 50Gi 2026-07-19), storageClassName=longhorn-2-no-backup
+PVC (minio):    storage/minio, 65Gi (grown from 50Gi 2026-07-19), storageClassName=longhorn-2-no-backup
+                (2 replicas; one on hiro-cmp-01/disk-1, which is the tight one — check its free
+                space before growing this further)
 Object store:   Minio (quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z), mode-server-xl-single
                 (single-drive — mc admin heal unsupported), bucket observability-thanos,
                 endpoint minio.storage.svc.cluster.local:9000, insecure (plain HTTP, in-cluster only)
-Bucket quotas:  observability-thanos 90GiB (grown from 45GiB 2026-07-19), observability-loki 2GiB
+Bucket quotas:  observability-thanos 55GiB (grown from 45GiB 2026-07-19), observability-loki 2GiB
 Retention:      raw=7d, 5m=90d, 1h=1y (kubernetes/apps/monitoring/thanos/app/helmrelease.yaml)
 ```
 
@@ -189,3 +201,17 @@ delete pod` sweep if it's ever in the way of `kubectl get pods` output.
   it just because the manifest changed; delete the old completed Job
   (`kubectl -n storage delete job minio-bucket-quota-bootstrap`) so the next
   reconcile creates a fresh one from the updated manifest.
+- **Before proposing any Longhorn PVC size bump, check actual free space on
+  every disk backing that volume's replicas** — not just "is the bucket/app
+  logically bigger than the PVC." `storage.requests` being a mutable PVC
+  field doesn't mean Longhorn can honor an arbitrary target: its admission
+  webhook (`validator.longhorn.io`) hard-rejects an expansion any replica's
+  disk can't physically fit, and a HelmRelease upgrade that trips this fails
+  and auto-rolls-back after exhausting its remediation retries (safe, but a
+  wasted round-trip). Check per-disk headroom first:
+  `kubectl get nodes.longhorn.io -o json` → `.items[].status.diskStatus.*.storageAvailable`,
+  cross-referenced against the target volume's actual replica placement
+  (`kubectl -n storage get replicas.longhorn.io -l longhornvolume=<vol> -o
+  custom-columns=NAME:.metadata.name,NODE:.spec.nodeID,DISK:.spec.diskID`) —
+  the binding constraint is whichever replica's disk has the least free
+  space, not the average or the largest.

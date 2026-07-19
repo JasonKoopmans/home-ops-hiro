@@ -50,13 +50,22 @@ spec:
     persistence:
       enabled: true
       storageClass: longhorn-2-no-backup
-      # Grown 50Gi -> 100Gi: observability-thanos alone reached 47Gi (PVC was
+      # Grown 50Gi -> 65Gi: observability-thanos alone reached 47Gi (PVC was
       # at 99% used, 767Mi free), starving the compactor's raw-resolution
       # merge of the transient headroom it needs to write a new block before
       # deleting its sources. Same live-expansion pattern as #315
       # (thanos-compactor-data 30Gi -> 60Gi) - storage.requests is mutable,
       # storageClassName is not.
-      size: 100Gi
+      #
+      # Capped at 65Gi, not a round 100Gi: this class has 2 replicas, and one
+      # of this volume's replicas lives on hiro-cmp-01/disk-1, which only had
+      # 17.8GB free (107.3GB total) at the time of this change -- a straight
+      # 100Gi attempt was rejected outright by Longhorn's admission webhook
+      # (CheckReplicasSizeExpansion, insufficient physical space) and Flux
+      # rolled it back automatically. 65Gi fits within that disk's actual
+      # headroom with margin. Revisit alongside the quota below once
+      # hiro-cmp-01/disk-1 has more room or this volume's replica moves.
+      size: 65Gi
 
     resources:
       requests:
