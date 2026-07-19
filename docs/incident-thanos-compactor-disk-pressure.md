@@ -55,15 +55,42 @@ patterns) are likely to recur elsewhere in this cluster.
 6. **Minio ghost-block loop** (diagnosed and fixed 2026-07-19, no PR — direct
    data-plane fix, not a manifest change). After #315, the compactor's
    aborted-partial-upload cleaner got stuck re-processing the same 199 block
-   IDs every cycle, and real compaction hadn't run in hours. Root cause:
+   IDs every cycle, and real compaction hadn't run in hours. Immediate cause:
    those 199 "blocks" were **`DelObj` tombstones** — Minio's own delete-marker
    format (`xl.meta` files with `Type: DelObj`), confirmed via the binary
    `XL2` header — left over from real, successful deletes (raw blocks aging
    out of the 7d retention, or superseded by earlier compaction) whose parent
-   directories were never garbage-collected off the filesystem. This Minio
-   deployment runs `mode-server-xl-single` (single-drive, no erasure set),
-   where `mc admin heal` is unsupported and whatever background scanner
-   should reclaim these tombstones apparently doesn't, in this version.
+   directories were never garbage-collected off the filesystem. **Actual root
+   cause, found later the same day (see the "why doesn't the scanner clean
+   these up" follow-up below): `observability-thanos` and `observability-loki`
+   both show bucket versioning `Status: Suspended`**
+   (`curl ...?versioning`) — meaning versioning was explicitly enabled at
+   some point in this cluster's history (nothing in this repo's Git-tracked
+   bootstrap jobs ever touches versioning, so this was a manual/untracked
+   `mc`/console action) and later suspended. Per S3 semantics, suspending
+   versioning does **not** retroactively remove delete markers or noncurrent
+   versions created while it was enabled — they persist forever unless a
+   lifecycle policy expires them, and **no lifecycle policy exists on either
+   bucket** (`?lifecycle` → `NoSuchLifecycleConfiguration`). This is not a
+   Minio bug and not specific to `mode-server-xl-single`: Minio's admin info
+   API (`?` `/minio/admin/v3/info`) confirms the scanner **is** actively
+   running (`"scanning":true` per drive) and reports **3,142 total delete
+   markers / 24,259 total object versions** bucket-wide — Minio is behaving
+   exactly as documented; there was simply never anything configured to
+   reclaim this class of object. The 199 (then 12 more, see below) were only
+   the subset that happened to sit at a top-level, ULID-shaped prefix Thanos's
+   block iterator walks — individual chunk/index/meta.json-level delete
+   markers on already-known blocks don't surface there and were not part of
+   this count. Sampled `?versions` listings show no meaningful retained data
+   behind these markers (single-version objects, `versionId=null`, consistent
+   with direct filesystem inspection of every tombstone actually fixed here
+   — real content was already gone, only small marker stubs remained), so
+   this doesn't materially change the capacity picture in #7, but the
+   **permanent fix**, not done here, is an S3 lifecycle rule expiring
+   noncurrent versions and delete markers after N days
+   (`mc ilm add --expired-object-delete-marker` / `--noncurrent-expire-days`),
+   which would make this genuinely self-healing instead of requiring another
+   manual sweep next time it recurs.
    Confirmed **zero data-loss risk**: every one of the 199 had zero real
    objects (no chunks, no meta.json, no index) under a *recursive* S3 listing
    — only Minio's *delimited* (directory-style) listing still reported them,
@@ -237,6 +264,19 @@ delete pod` sweep if it's ever in the way of `kubectl get pods` output.
   need to fix on-disk state (see #6 above for the safe pattern: `rm` only
   files verified as tombstones, `rmdir` only — never `rm -rf` — since
   `rmdir` refuses non-empty directories and gives you a free safety net).
+- **Ghost/tombstone blocks are not a Minio bug or a single-drive-mode
+  limitation — check bucket versioning and lifecycle config first.**
+  `/minio/admin/v3/info` (same `--aws-sigv4` curl pattern, no special admin
+  auth beyond the root credentials) reports live `deletemarkers`/`versions`
+  counts and per-drive `"scanning"` state — useful to confirm the scanner is
+  actually running before assuming it's broken. `?versioning` on a bucket
+  returning `Suspended` (not absent) means versioning was explicitly
+  enabled at some point and later turned off — S3 semantics don't
+  retroactively clean up markers/versions from that period. `?lifecycle`
+  returning `NoSuchLifecycleConfiguration` means nothing will ever expire
+  them automatically. This combination is the real explanation for #6, not
+  `mode-server-xl-single` — an erasure-coded Minio with the same versioning
+  history and no lifecycle rule would have the identical problem.
 - `jq` on this host is **aliased to a Docker container**
   (`docker run --rm -i ghcr.io/jqlang/jq`) — it cannot see local files.
   Always pipe via stdin (`cmd | jq ...`), never `jq '...' file.json`.
