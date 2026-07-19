@@ -1,22 +1,24 @@
 ---
 # Bucket quota bootstrap Job — runs once after Minio is healthy.
 # Sets a hard quota per bucket so a runaway write pattern (e.g. a cardinality
-# explosion in Thanos) fails writes instead of filling the shared 50Gi PVC and
-# taking the whole node down.
+# explosion in Thanos) fails writes instead of filling the shared 100Gi PVC
+# and taking the whole node down.
 #
-# These are backstop values, not a capacity plan: the Thanos compactor's own
-# retention (30d raw + 90d/5m + 1y/1h — see monitoring/thanos/app/helmrelease.yaml)
-# can plausibly need more than 50Gi total under normal operation, so a tightly
-# tuned quota risks rejecting legitimate writes. Revisit both the quota and the
-# PVC size once minio_bucket_usage_total_bytes (scraped via probe-bucket-metrics.yaml)
-# has a few weeks of real data.
+# These are backstop values, not a capacity plan. The original 45GiB quota on
+# a 50Gi PVC was hit for real: observability-thanos reached 47Gi and the PVC
+# sat at 99% used with 767Mi free, which starved the compactor's raw-
+# resolution merge of the transient headroom it needs to write a new block
+# before deleting its sources — see docs/incident-thanos-compactor-disk-pressure.md.
+# Fixed by growing the PVC 50Gi -> 100Gi and this quota 45GiB -> 90GiB.
+# Revisit both again once minio_bucket_usage_total_bytes (scraped via
+# probe-bucket-metrics.yaml) has a few weeks of real data past this change.
 #
 # observability-loki is currently unused (Loki runs with storage.type: filesystem,
 # see monitoring/loki/app/helmrelease.yaml) — its quota here is just a guard
 # against silent growth if that ever changes, not a tuned value.
 #
 # Manual equivalent:
-#   mc quota set local/observability-thanos --size 45GiB
+#   mc quota set local/observability-thanos --size 90GiB
 #   mc quota set local/observability-loki --size 2GiB
 #
 # Failure detection relies on kube-prometheus-stack's default KubeJobFailed
@@ -64,7 +66,7 @@ spec:
                 fi
                 echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
               done
-              mc quota set local/observability-thanos --size 45GiB
+              mc quota set local/observability-thanos --size 90GiB
               mc quota set local/observability-loki --size 2GiB
               echo "bucket quotas set"
           env:
