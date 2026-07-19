@@ -413,7 +413,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 | Item | Value |
 |---|---|
 | Kubernetes distribution | Talos Linux |
-| Nodes | 4 (Proxmox VMs: 192.168.25.21–24) |
+| Nodes | 4 (Proxmox VMs: 192.168.25.21–24). **CPU-asymmetric**: `hiro-cmp-01`/`-02` have 3 CPU, `hiro-cmp-03`/`-04` have 2 CPU (memory uniform ~11.8Gi). Steer heavy stateful I/O workloads (e.g. Prometheus) to the 3-CPU nodes — on the 2-CPU nodes the Longhorn instance-manager + kernel I/O path dominates CPU, so high CPU there is usually I/O, not compute. |
 | GitOps engine | Flux CD (flux-operator + flux-instance) |
 | CNI | Cilium |
 | Ingress | Envoy Gateway (Gateway API): `envoy-external`, `envoy-internal` |
