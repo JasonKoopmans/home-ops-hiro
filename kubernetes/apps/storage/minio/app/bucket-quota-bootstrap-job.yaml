@@ -76,8 +76,8 @@ spec:
                 fi
                 echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
               done
-              mc quota set local/observability-thanos --size 45GiB
-              mc quota set local/observability-loki --size 2GiB
+              mc quota set local/observability-thanos --size 100GiB
+              mc quota set local/observability-loki --size 20GiB
               echo "bucket quotas set"
           env:
             - name: MINIO_ROOT_USER
