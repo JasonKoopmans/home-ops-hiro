@@ -59,6 +59,15 @@ tasks:
     preconditions:
       - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
 
+  release-retry:
+    desc: Retry a failed HelmRelease by resetting the retry counter
+    summary: |
+      Args:
+        release: Name of the HelmRelease to reset (required)
+        namespace: Namespace of the HelmRelease (required)
+    cmd: |
+      flux reconcile helmrelease {{release}} -n {{namespace}} --reset
+
   remove:
     desc: Remove a App Kustomization resource for a cluster while testing
     summary: |
