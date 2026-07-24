@@ -37,6 +37,12 @@ nodes:
         mtu: 1500
         vip:
           ip: "192.168.25.20"
+    # GitOps-managed Longhorn storage: create-default-disk=config tells Longhorn
+    # to build this node's disks from the default-disks-config annotation below.
+    nodeLabels:
+      node.longhorn.io/create-default-disk: "config"
+    nodeAnnotations:
+      node.longhorn.io/default-disks-config: '[{"path": "/var/mnt/longhorn", "allowScheduling": true, "storageReserved": 0}]'
   - hostname: "hiro-cmp-02"
     ipAddress: "192.168.25.22"
     installDisk: "/dev/sda"
@@ -56,6 +62,12 @@ nodes:
         mtu: 1500
         vip:
           ip: "192.168.25.20"
+    # GitOps-managed Longhorn storage: create-default-disk=config tells Longhorn
+    # to build this node's disks from the default-disks-config annotation below.
+    nodeLabels:
+      node.longhorn.io/create-default-disk: "config"
+    nodeAnnotations:
+      node.longhorn.io/default-disks-config: '[{"path": "/var/mnt/longhorn", "allowScheduling": true, "storageReserved": 0}]'
   - hostname: "hiro-cmp-03"
     ipAddress: "192.168.25.23"
     installDisk: "/dev/sda"
@@ -75,6 +87,12 @@ nodes:
         mtu: 1500
         vip:
           ip: "192.168.25.20"
+    # GitOps-managed Longhorn storage: create-default-disk=config tells Longhorn
+    # to build this node's disks from the default-disks-config annotation below.
+    nodeLabels:
+      node.longhorn.io/create-default-disk: "config"
+    nodeAnnotations:
+      node.longhorn.io/default-disks-config: '[{"path": "/var/mnt/longhorn", "allowScheduling": true, "storageReserved": 0}]'
   - hostname: "hiro-cmp-04"
     ipAddress: "192.168.25.24"
     installDisk: "/dev/sda"
@@ -94,6 +112,12 @@ nodes:
         mtu: 1500
         vip:
           ip: "192.168.25.20"
+    # GitOps-managed Longhorn storage: create-default-disk=config tells Longhorn
+    # to build this node's disks from the default-disks-config annotation below.
+    nodeLabels:
+      node.longhorn.io/create-default-disk: "config"
+    nodeAnnotations:
+      node.longhorn.io/default-disks-config: '[{"path": "/var/mnt/longhorn", "allowScheduling": true, "storageReserved": 0}]'
   - hostname: "hiro-cmp-05"
     ipAddress: "192.168.25.25"
     installDisk: "/dev/sda"
@@ -113,6 +137,12 @@ nodes:
         mtu: 1500
         vip:
           ip: "192.168.25.20"
+    # GitOps-managed Longhorn storage: create-default-disk=config tells Longhorn
+    # to build this node's disks from the default-disks-config annotation below.
+    nodeLabels:
+      node.longhorn.io/create-default-disk: "config"
+    nodeAnnotations:
+      node.longhorn.io/default-disks-config: '[{"path": "/var/mnt/longhorn", "allowScheduling": true, "storageReserved": 0}]'
 
 # Global patches
 patches:

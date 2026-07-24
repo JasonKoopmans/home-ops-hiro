@@ -63,6 +63,17 @@ nodes:
           ip: "#{ cluster_api_addr }#"
         #% endif %#
         #% endif %#
+    #% if item.longhorn is defined and item.longhorn.disks is defined %#
+    # GitOps-managed Longhorn storage: create-default-disk=config tells Longhorn
+    # to build this node's disks from the default-disks-config annotation below.
+    nodeLabels:
+      node.longhorn.io/create-default-disk: "config"
+    nodeAnnotations:
+      node.longhorn.io/default-disks-config: '#{ item.longhorn.disks | tojson }#'
+      #% if item.longhorn.node_tags is defined %#
+      node.longhorn.io/default-node-tags: '#{ item.longhorn.node_tags | tojson }#'
+      #% endif %#
+    #% endif %#
     #% if talos_patches('%s' % (item.name)) | length == 0 %#
     #% if item.encrypt_disk | default(false, true) %#
     patches:

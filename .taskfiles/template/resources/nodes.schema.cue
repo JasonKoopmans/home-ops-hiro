@@ -24,6 +24,23 @@ import (
 	mtu?:          >=1450 & <=9000
 	secureboot?:   bool
 	encrypt_disk?: bool
+	longhorn?:     #Longhorn
+}
+
+// Optional per-node Longhorn storage config. When set, the talconfig template
+// emits node labels/annotations that Longhorn reads (createDefaultDiskLabeledNodes
+// is enabled in the HelmRelease) to create the node's disks at registration.
+// Disk keys mirror Longhorn's default-disks-config annotation schema verbatim.
+#Longhorn: {
+	disks: [...#LonghornDisk]
+	node_tags?: [...string]
+}
+
+#LonghornDisk: {
+	path:             string
+	allowScheduling?: bool
+	storageReserved?: int & >=0
+	tags?: [...string]
 }
 
 #Config
