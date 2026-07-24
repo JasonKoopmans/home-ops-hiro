@@ -65,7 +65,9 @@ spec:
       # capacity pressure recurs) means evicting/rebuilding the
       # hiro-cmp-01 replica onto a roomier node (hiro-cmp-02 or -04 both had
       # >25GB scheduled headroom at the time), not just bumping this number.
-      size: 50Gi
+      # 2026-07-24: Storage added to cluster, evicted volume relica from hiro-cmp-01/disk-1,
+      # and minio-bucket-quota-bootstrap Job re-run successfully. Grew the PVC to 120Gi to give more headroom for future compactions
+      size: 120Gi
 
     resources:
       requests:
