@@ -94,6 +94,25 @@ nodes:
         mtu: 1500
         vip:
           ip: "192.168.25.20"
+  - hostname: "hiro-cmp-05"
+    ipAddress: "192.168.25.25"
+    installDisk: "/dev/sda"
+    machineSpec:
+      secureboot: false
+    talosImageURL: factory.talos.dev/installer/188d1f7a5c4f1d3aba7df787c448c1d3d008ed29cfb34af53fa0df4336a56040b
+    controlPlane: true
+    networkInterfaces:
+      - deviceSelector:
+          hardwareAddr: "bc:24:11:8e:69:d9"
+        dhcp: false
+        addresses:
+          - "192.168.25.25/24"
+        routes:
+          - network: "0.0.0.0/0"
+            gateway: "192.168.25.1"
+        mtu: 1500
+        vip:
+          ip: "192.168.25.20"
 
 # Global patches
 patches:
