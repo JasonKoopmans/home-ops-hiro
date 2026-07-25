@@ -267,6 +267,41 @@ tasks:
       - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
       - { msg: "Missing envoy healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/envoy-healthcheck.sh" }
 
+  longhorn:evict-replica:
+    desc: Safely evict/relocate a Longhorn replica off a node (disables dataLocality first to avoid a stalled handoff)
+    summary: |
+      Args (provide pvc or replica):
+        pvc: PVC name, "namespace/pvc", or Longhorn volume name (pvc-<uuid>)
+        replica: exact replica name (globally unique); owning volume is derived
+                 from it, so pvc is optional. Replica names are ephemeral, so this
+                 targets whatever exists right now.
+        node: node whose replica to evict/relocate (ignored when replica= is set).
+              If neither node nor replica is given, current replicas and candidate
+              landing disks are printed and the task stops.
+        locality: dataLocality to leave the volume with when done
+                  (optional, default: disabled; pass best-effort/strict-local to restore)
+        timeout: seconds to wait for the eviction handoff (optional, default: 1800)
+        yes: set to "true" to skip the confirmation prompt (optional)
+        force: set to "true" to proceed even if no landing disk clearly fits (optional)
+
+      Disables dataLocality, requests eviction of the target replica, and waits for
+      Longhorn's build-then-remove handoff to fully complete (replacement healthy,
+      source removed, robustness healthy) before restoring dataLocality. Never
+      force-deletes a replica, so redundancy is never dropped.
+    cmd: >-
+      bash {{.SCRIPTS_DIR}}/longhorn-replica-evict.sh
+      {{if .pvc}}--pvc {{.pvc}}{{end}}
+      {{if .replica}}--replica {{.replica}}{{end}}
+      {{if .node}}--node {{.node}}{{end}}
+      --locality {{.locality | default "disabled"}}
+      --timeout {{.timeout | default "1800"}}
+      {{if eq .yes "true"}}--yes{{end}}
+      {{if eq .force "true"}}--force{{end}}
+    preconditions:
+      - { msg: "Provide pvc= or replica=", sh: 'test -n "{{.pvc}}" -o -n "{{.replica}}"' }
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing longhorn evict script", sh: "test -f {{.SCRIPTS_DIR}}/longhorn-replica-evict.sh" }
+
   # Pre-flight gate for higher-risk operations: fail fast if core controllers,
   # workloads, storage, jobs, or key infra namespaces show unhealthy signals.
   cluster:health:
