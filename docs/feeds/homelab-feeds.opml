@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>home-ops-hiro — release feeds</title>
+  </head>
+  <body>
+    <outline text="1 - Platform &amp; Infra" title="1 - Platform &amp; Infra">
+      <outline type="rss" text="Talos Linux" title="Talos Linux" xmlUrl="https://github.com/siderolabs/talos/releases.atom" htmlUrl="https://github.com/siderolabs/talos/releases"/>
+      <outline type="rss" text="Flux Operator" title="Flux Operator" xmlUrl="https://github.com/controlplaneio-fluxcd/flux-operator/releases.atom" htmlUrl="https://github.com/controlplaneio-fluxcd/flux-operator/releases"/>
+      <outline type="rss" text="Flux (upstream flux2)" title="Flux (upstream flux2)" xmlUrl="https://github.com/fluxcd/flux2/releases.atom" htmlUrl="https://github.com/fluxcd/flux2/releases"/>
+      <outline type="rss" text="Cilium" title="Cilium" xmlUrl="https://github.com/cilium/cilium/releases.atom" htmlUrl="https://github.com/cilium/cilium/releases"/>
+      <outline type="rss" text="Envoy Gateway" title="Envoy Gateway" xmlUrl="https://github.com/envoyproxy/gateway/releases.atom" htmlUrl="https://github.com/envoyproxy/gateway/releases"/>
+      <outline type="rss" text="cert-manager" title="cert-manager" xmlUrl="https://github.com/cert-manager/cert-manager/releases.atom" htmlUrl="https://github.com/cert-manager/cert-manager/releases"/>
+      <outline type="rss" text="Longhorn" title="Longhorn" xmlUrl="https://github.com/longhorn/longhorn/releases.atom" htmlUrl="https://github.com/longhorn/longhorn/releases"/>
+      <outline type="rss" text="CoreDNS" title="CoreDNS" xmlUrl="https://github.com/coredns/coredns/releases.atom" htmlUrl="https://github.com/coredns/coredns/releases"/>
+      <outline type="rss" text="external-dns" title="external-dns" xmlUrl="https://github.com/kubernetes-sigs/external-dns/releases.atom" htmlUrl="https://github.com/kubernetes-sigs/external-dns/releases"/>
+      <outline type="rss" text="k8s_gateway" title="k8s_gateway" xmlUrl="https://github.com/k8s-gateway/k8s_gateway/releases.atom" htmlUrl="https://github.com/k8s-gateway/k8s_gateway/releases"/>
+      <outline type="rss" text="MinIO" title="MinIO" xmlUrl="https://github.com/minio/minio/releases.atom" htmlUrl="https://github.com/minio/minio/releases"/>
+      <outline type="rss" text="Multus CNI" title="Multus CNI" xmlUrl="https://github.com/k8snetworkplumbingwg/multus-cni/releases.atom" htmlUrl="https://github.com/k8snetworkplumbingwg/multus-cni/releases"/>
+      <outline type="rss" text="metrics-server" title="metrics-server" xmlUrl="https://github.com/kubernetes-sigs/metrics-server/releases.atom" htmlUrl="https://github.com/kubernetes-sigs/metrics-server/releases"/>
+      <outline type="rss" text="Spegel" title="Spegel" xmlUrl="https://github.com/spegel-org/spegel/releases.atom" htmlUrl="https://github.com/spegel-org/spegel/releases"/>
+      <outline type="rss" text="Reloader" title="Reloader" xmlUrl="https://github.com/stakater/Reloader/releases.atom" htmlUrl="https://github.com/stakater/Reloader/releases"/>
+      <outline type="rss" text="cloudflared" title="cloudflared" xmlUrl="https://github.com/cloudflare/cloudflared/releases.atom" htmlUrl="https://github.com/cloudflare/cloudflared/releases"/>
+    </outline>
+    <outline text="2 - Observability &amp; Data" title="2 - Observability &amp; Data">
+      <outline type="rss" text="Prometheus" title="Prometheus" xmlUrl="https://github.com/prometheus/prometheus/releases.atom" htmlUrl="https://github.com/prometheus/prometheus/releases"/>
+      <outline type="rss" text="Grafana" title="Grafana" xmlUrl="https://github.com/grafana/grafana/releases.atom" htmlUrl="https://github.com/grafana/grafana/releases"/>
+      <outline type="rss" text="Loki" title="Loki" xmlUrl="https://github.com/grafana/loki/releases.atom" htmlUrl="https://github.com/grafana/loki/releases"/>
+      <outline type="rss" text="Grafana Alloy" title="Grafana Alloy" xmlUrl="https://github.com/grafana/alloy/releases.atom" htmlUrl="https://github.com/grafana/alloy/releases"/>
+      <outline type="rss" text="Thanos" title="Thanos" xmlUrl="https://github.com/thanos-io/thanos/releases.atom" htmlUrl="https://github.com/thanos-io/thanos/releases"/>
+      <outline type="rss" text="mariadb-operator" title="mariadb-operator" xmlUrl="https://github.com/mariadb-operator/mariadb-operator/releases.atom" htmlUrl="https://github.com/mariadb-operator/mariadb-operator/releases"/>
+      <outline type="rss" text="Knative Serving" title="Knative Serving" xmlUrl="https://github.com/knative/serving/releases.atom" htmlUrl="https://github.com/knative/serving/releases"/>
+      <outline type="rss" text="Knative Operator" title="Knative Operator" xmlUrl="https://github.com/knative/operator/releases.atom" htmlUrl="https://github.com/knative/operator/releases"/>
+    </outline>
+    <outline text="3 - Applications" title="3 - Applications">
+      <outline type="rss" text="n8n" title="n8n" xmlUrl="https://github.com/n8n-io/n8n/releases.atom" htmlUrl="https://github.com/n8n-io/n8n/releases"/>
+      <outline type="rss" text="changedetection.io" title="changedetection.io" xmlUrl="https://github.com/dgtlmoon/changedetection.io/releases.atom" htmlUrl="https://github.com/dgtlmoon/changedetection.io/releases"/>
+      <outline type="rss" text="Homepage" title="Homepage" xmlUrl="https://github.com/gethomepage/homepage/releases.atom" htmlUrl="https://github.com/gethomepage/homepage/releases"/>
+      <outline type="rss" text="qBittorrent" title="qBittorrent" xmlUrl="https://github.com/qbittorrent/qBittorrent/releases.atom" htmlUrl="https://github.com/qbittorrent/qBittorrent/releases"/>
+      <outline type="rss" text="Prowlarr" title="Prowlarr" xmlUrl="https://github.com/Prowlarr/Prowlarr/releases.atom" htmlUrl="https://github.com/Prowlarr/Prowlarr/releases"/>
+      <outline type="rss" text="Gluetun" title="Gluetun" xmlUrl="https://github.com/qdm12/gluetun/releases.atom" htmlUrl="https://github.com/qdm12/gluetun/releases"/>
+      <outline type="rss" text="Apache Guacamole (client)" title="Apache Guacamole (client)" xmlUrl="https://github.com/apache/guacamole-client/releases.atom" htmlUrl="https://github.com/apache/guacamole-client/releases"/>
+      <outline type="rss" text="Kroki" title="Kroki" xmlUrl="https://github.com/yuzutech/kroki/releases.atom" htmlUrl="https://github.com/yuzutech/kroki/releases"/>
+      <outline type="rss" text="Apache Tika" title="Apache Tika" xmlUrl="https://github.com/apache/tika/tags.atom" htmlUrl="https://github.com/apache/tika/tags"/>
+      <outline type="rss" text="Minecraft server image (itzg)" title="Minecraft server image (itzg)" xmlUrl="https://github.com/itzg/docker-minecraft-server/releases.atom" htmlUrl="https://github.com/itzg/docker-minecraft-server/releases"/>
+      <outline type="rss" text="Obsidian image (linuxserver)" title="Obsidian image (linuxserver)" xmlUrl="https://github.com/linuxserver/docker-obsidian/releases.atom" htmlUrl="https://github.com/linuxserver/docker-obsidian/releases"/>
+      <outline type="rss" text="Filebrowser" title="Filebrowser" xmlUrl="https://github.com/filebrowser/filebrowser/releases.atom" htmlUrl="https://github.com/filebrowser/filebrowser/releases"/>
+      <outline type="rss" text="Hermes Agent" title="Hermes Agent" xmlUrl="https://github.com/NousResearch/hermes-agent/releases.atom" htmlUrl="https://github.com/NousResearch/hermes-agent/releases"/>
+    </outline>
+    <outline text="4 - Meta / Tooling" title="4 - Meta / Tooling">
+      <outline type="rss" text="app-template (bjw-s)" title="app-template (bjw-s)" xmlUrl="https://github.com/bjw-s-labs/helm-charts/releases.atom" htmlUrl="https://github.com/bjw-s-labs/helm-charts/releases"/>
+      <outline type="rss" text="home-operations containers" title="home-operations containers" xmlUrl="https://github.com/home-operations/containers/releases.atom" htmlUrl="https://github.com/home-operations/containers/releases"/>
+    </outline>
+    <outline text="5 - Dev Toolchain (mise)" title="5 - Dev Toolchain (mise)">
+      <outline type="rss" text="talhelper" title="talhelper" xmlUrl="https://github.com/budimanjojo/talhelper/releases.atom" htmlUrl="https://github.com/budimanjojo/talhelper/releases"/>
+      <outline type="rss" text="cilium-cli" title="cilium-cli" xmlUrl="https://github.com/cilium/cilium-cli/releases.atom" htmlUrl="https://github.com/cilium/cilium-cli/releases"/>
+      <outline type="rss" text="GitHub CLI (gh)" title="GitHub CLI (gh)" xmlUrl="https://github.com/cli/cli/releases.atom" htmlUrl="https://github.com/cli/cli/releases"/>
+      <outline type="rss" text="CUE" title="CUE" xmlUrl="https://github.com/cue-lang/cue/releases.atom" htmlUrl="https://github.com/cue-lang/cue/releases"/>
+      <outline type="rss" text="age" title="age" xmlUrl="https://github.com/FiloSottile/age/releases.atom" htmlUrl="https://github.com/FiloSottile/age/releases"/>
+      <outline type="rss" text="SOPS" title="SOPS" xmlUrl="https://github.com/getsops/sops/releases.atom" htmlUrl="https://github.com/getsops/sops/releases"/>
+      <outline type="rss" text="Task (go-task)" title="Task (go-task)" xmlUrl="https://github.com/go-task/task/releases.atom" htmlUrl="https://github.com/go-task/task/releases"/>
+      <outline type="rss" text="Helm" title="Helm" xmlUrl="https://github.com/helm/helm/releases.atom" htmlUrl="https://github.com/helm/helm/releases"/>
+      <outline type="rss" text="Helmfile" title="Helmfile" xmlUrl="https://github.com/helmfile/helmfile/releases.atom" htmlUrl="https://github.com/helmfile/helmfile/releases"/>
+      <outline type="rss" text="jq" title="jq" xmlUrl="https://github.com/jqlang/jq/releases.atom" htmlUrl="https://github.com/jqlang/jq/releases"/>
+      <outline type="rss" text="Kustomize" title="Kustomize" xmlUrl="https://github.com/kubernetes-sigs/kustomize/releases.atom" htmlUrl="https://github.com/kubernetes-sigs/kustomize/releases"/>
+      <outline type="rss" text="Kubernetes (kubectl)" title="Kubernetes (kubectl)" xmlUrl="https://github.com/kubernetes/kubernetes/releases.atom" htmlUrl="https://github.com/kubernetes/kubernetes/releases"/>
+      <outline type="rss" text="yq" title="yq" xmlUrl="https://github.com/mikefarah/yq/releases.atom" htmlUrl="https://github.com/mikefarah/yq/releases"/>
+      <outline type="rss" text="kubeconform" title="kubeconform" xmlUrl="https://github.com/yannh/kubeconform/releases.atom" htmlUrl="https://github.com/yannh/kubeconform/releases"/>
+      <outline type="rss" text="k9s" title="k9s" xmlUrl="https://github.com/derailed/k9s/releases.atom" htmlUrl="https://github.com/derailed/k9s/releases"/>
+      <outline type="rss" text="envsubst (a8m)" title="envsubst (a8m)" xmlUrl="https://github.com/a8m/envsubst/releases.atom" htmlUrl="https://github.com/a8m/envsubst/releases"/>
+      <outline type="rss" text="ripgrep" title="ripgrep" xmlUrl="https://github.com/BurntSushi/ripgrep/releases.atom" htmlUrl="https://github.com/BurntSushi/ripgrep/releases"/>
+      <outline type="rss" text="fd" title="fd" xmlUrl="https://github.com/sharkdp/fd/releases.atom" htmlUrl="https://github.com/sharkdp/fd/releases"/>
+      <outline type="rss" text="fzf" title="fzf" xmlUrl="https://github.com/junegunn/fzf/releases.atom" htmlUrl="https://github.com/junegunn/fzf/releases"/>
+      <outline type="rss" text="ShellCheck" title="ShellCheck" xmlUrl="https://github.com/koalaman/shellcheck/releases.atom" htmlUrl="https://github.com/koalaman/shellcheck/releases"/>
+      <outline type="rss" text="actionlint" title="actionlint" xmlUrl="https://github.com/rhysd/actionlint/releases.atom" htmlUrl="https://github.com/rhysd/actionlint/releases"/>
+      <outline type="rss" text="gitleaks" title="gitleaks" xmlUrl="https://github.com/gitleaks/gitleaks/releases.atom" htmlUrl="https://github.com/gitleaks/gitleaks/releases"/>
+      <outline type="rss" text="kube-linter" title="kube-linter" xmlUrl="https://github.com/stackrox/kube-linter/releases.atom" htmlUrl="https://github.com/stackrox/kube-linter/releases"/>
+      <outline type="rss" text="Trivy" title="Trivy" xmlUrl="https://github.com/aquasecurity/trivy/releases.atom" htmlUrl="https://github.com/aquasecurity/trivy/releases"/>
+      <outline type="rss" text="Conftest" title="Conftest" xmlUrl="https://github.com/open-policy-agent/conftest/releases.atom" htmlUrl="https://github.com/open-policy-agent/conftest/releases"/>
+      <outline type="rss" text="Kubescape" title="Kubescape" xmlUrl="https://github.com/kubescape/kubescape/releases.atom" htmlUrl="https://github.com/kubescape/kubescape/releases"/>
+      <outline type="rss" text="Claude Code" title="Claude Code" xmlUrl="https://github.com/anthropics/claude-code/releases.atom" htmlUrl="https://github.com/anthropics/claude-code/releases"/>
+      <outline type="rss" text="Node.js" title="Node.js" xmlUrl="https://github.com/nodejs/node/releases.atom" htmlUrl="https://github.com/nodejs/node/releases"/>
+      <outline type="rss" text="pipx" title="pipx" xmlUrl="https://github.com/pypa/pipx/releases.atom" htmlUrl="https://github.com/pypa/pipx/releases"/>
+      <outline type="rss" text="makejinja" title="makejinja" xmlUrl="https://github.com/mirkolenz/makejinja/releases.atom" htmlUrl="https://github.com/mirkolenz/makejinja/releases"/>
+    </outline>
+  </body>
+</opml>
