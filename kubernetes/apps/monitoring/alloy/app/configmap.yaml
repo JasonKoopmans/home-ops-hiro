@@ -19,8 +19,71 @@ data:
       }
     }
 
-    loki.source.kubernetes "pods" {
-      targets    = discovery.kubernetes.pods.targets
+    // File-based tailing of /var/log/pods with on-disk positions.
+    // Replaces loki.source.kubernetes (API tailer) which kept its read
+    // position only in memory and, on every send failure, re-tailed from the
+    // earliest container-runtime-retained line. For low-volume long-lived pods
+    // that line is >7d old, so Loki (reject_old_samples_max_age: 168h) rejected
+    // it, the send failed, and it re-read the same old region forever.
+    discovery.relabel "pods" {
+      targets = discovery.kubernetes.pods.targets
+
+      // Preserve the label schema the old loki.source.kubernetes emitted so
+      // existing Grafana queries keep working: instance="<ns>/<pod>:<container>".
+      rule {
+        source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
+        separator     = "/"
+        target_label  = "instance"
+      }
+      rule {
+        source_labels = ["instance", "__meta_kubernetes_pod_container_name"]
+        separator     = ":"
+        target_label  = "instance"
+      }
+      rule {
+        action       = "replace"
+        target_label = "job"
+        replacement  = "loki.source.kubernetes.pods"
+      }
+
+      // /var/log/pods/<ns>_<pod>_<uid>/<container>/*.log
+      rule {
+        source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+        separator     = "/"
+        action        = "replace"
+        replacement   = "/var/log/pods/*$1/*.log"
+        target_label  = "__path__"
+      }
+
+      // Container runtime, used to gate CRI parsing below; dropped before write.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_id"]
+        regex         = "^(\\S+):\\/\\/.+$"
+        replacement   = "$1"
+        target_label  = "tmp_container_runtime"
+      }
+    }
+
+    local.file_match "pods" {
+      path_targets = discovery.relabel.pods.output
+    }
+
+    loki.source.file "pods" {
+      targets    = local.file_match.pods.targets
+      forward_to = [loki.process.pods.receiver]
+    }
+
+    loki.process "pods" {
+      // Recover the real log timestamp + stream from the CRI-format line.
+      stage.match {
+        selector = "{tmp_container_runtime=\"containerd\"}"
+        stage.cri {}
+      }
+      // Drop helper labels so streams match the previous schema exactly
+      // (filename is added automatically by loki.source.file).
+      stage.label_drop {
+        values = ["tmp_container_runtime", "filename"]
+      }
       forward_to = [loki.write.default.receiver]
     }
 
