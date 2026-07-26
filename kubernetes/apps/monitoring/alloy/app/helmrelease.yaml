@@ -28,6 +28,10 @@ spec:
         create: false
         name: alloy-config
         key: config.alloy
+      # Mount host /var/log (read-only) so loki.source.file can tail
+      # /var/log/pods/*/*/*.log.
+      mounts:
+        varlog: true
       extraEnv:
         - name: NODE_NAME
           valueFrom:
