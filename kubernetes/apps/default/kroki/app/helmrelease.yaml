@@ -25,7 +25,7 @@ spec:
           app:
             image:
               repository: docker.io/yuzutech/kroki
-              tag: 0.31.0
+              tag: 0.31.1
             env:
               KROKI_PORT: "8000"
             resources:

@@ -35,6 +35,16 @@ metadata:
     # because Flux will recreate it on the next reconcile while it remains in
     # the resources list.
     kustomize.toolkit.fluxcd.io/prune: "false"
+    # ssa: IfNotPresent tells kustomize-controller to skip applying this
+    # resource once it already exists in the cluster. Without this, a
+    # reconcile can do a fresh dry-run apply against the completed Job, which
+    # fails with "field is immutable" (spec.template can't change, and the
+    # live object's controller-added labels, e.g. batch.kubernetes.io/controller-uid,
+    # never match a fresh dry-run projection) — leaving this Kustomization
+    # Ready=False after the Job's first successful run. Same fix applied to
+    # this Job's three siblings (bucket-bootstrap, bucket-quota-bootstrap,
+    # loki-user-bootstrap) after the failure was observed on those.
+    kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
 spec:
   backoffLimit: 2
   activeDeadlineSeconds: 3600

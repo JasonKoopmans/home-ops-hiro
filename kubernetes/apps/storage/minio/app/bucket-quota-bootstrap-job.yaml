@@ -1,15 +1,18 @@
 ---
 # Bucket quota bootstrap Job — runs once after Minio is healthy.
 # Sets a hard quota per bucket so a runaway write pattern (e.g. a cardinality
-# explosion in Thanos) fails writes instead of filling the shared 50Gi PVC and
-# taking the whole node down.
+# explosion in Thanos) fails writes instead of filling the shared 50Gi PVC
+# and taking the whole node down.
 #
-# These are backstop values, not a capacity plan: the Thanos compactor's own
-# retention (30d raw + 90d/5m + 1y/1h — see monitoring/thanos/app/helmrelease.yaml)
-# can plausibly need more than 50Gi total under normal operation, so a tightly
-# tuned quota risks rejecting legitimate writes. Revisit both the quota and the
-# PVC size once minio_bucket_usage_total_bytes (scraped via probe-bucket-metrics.yaml)
-# has a few weeks of real data.
+# These are backstop values, not a capacity plan. This quota was hit for
+# real on 2026-07-19: observability-thanos reached 47Gi and the PVC sat at
+# 99% used (767Mi free). A PVC grow attempt was reverted after discovering
+# the disk backing one of minio's Longhorn replicas has almost no headroom
+# to give — see docs/incident-thanos-compactor-disk-pressure.md #7 for the
+# full story and why the quota stayed at 45GiB instead of increasing.
+# Revisit both once hiro-cmp-01/disk-1 has more room (or this volume's
+# replica moves off it) and minio_bucket_usage_total_bytes (scraped via
+# probe-bucket-metrics.yaml) has a few weeks of real data.
 #
 # observability-loki is currently unused (Loki runs with storage.type: filesystem,
 # see monitoring/loki/app/helmrelease.yaml) — its quota here is just a guard
@@ -40,6 +43,15 @@ metadata:
     # push to Git, then manually clean up the completed Job:
     #   kubectl -n storage delete job minio-bucket-quota-bootstrap
     kustomize.toolkit.fluxcd.io/prune: "false"
+    # ssa: IfNotPresent tells kustomize-controller to skip applying this
+    # resource once it already exists in the cluster. Without this, every
+    # reconcile does a fresh dry-run apply against the completed Job, which
+    # fails with "field is immutable" (spec.template can't change, and the
+    # live object's controller-added labels, e.g. batch.kubernetes.io/controller-uid,
+    # never match a fresh dry-run projection) — leaving this Kustomization
+    # permanently Ready=False after the Job's first successful run. See
+    # docs/incident-thanos-compactor-disk-pressure.md.
+    kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
 spec:
   backoffLimit: 2
   activeDeadlineSeconds: 3600
@@ -64,8 +76,8 @@ spec:
                 fi
                 echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
               done
-              mc quota set local/observability-thanos --size 45GiB
-              mc quota set local/observability-loki --size 2GiB
+              mc quota set local/observability-thanos --size 100GiB
+              mc quota set local/observability-loki --size 20GiB
               echo "bucket quotas set"
           env:
             - name: MINIO_ROOT_USER

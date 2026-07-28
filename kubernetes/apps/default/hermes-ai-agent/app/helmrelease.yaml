@@ -27,7 +27,7 @@ spec:
           app:
             image:
               repository: docker.io/nousresearch/hermes-agent
-              tag: v2026.7.7
+              tag: v2026.7.20
             tty: true
             stdin: true
             args:
@@ -76,7 +76,9 @@ spec:
                   failureThreshold: 60
             resources:
               requests:
-                cpu: 250m
+                # Idles ~3m; 50m keeps burst headroom without over-reserving
+                # scheduling capacity (limits below still allow bursting).
+                cpu: 50m
                 memory: 512Mi
               limits:
                 cpu: 2000m

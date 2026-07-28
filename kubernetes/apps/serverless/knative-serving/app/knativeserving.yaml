@@ -7,6 +7,48 @@ metadata:
 spec:
   # Keep control-plane and APIs on the latest 1.21 patch stream.
   version: "1.21"
+  # Right-size control-plane CPU requests. The upstream defaults reserve
+  # 300m (activator) / 100m (others), but these components idle at 1-2m on
+  # this cluster and were the bulk of a scheduling-headroom warning on one
+  # node. Memory requests and all limits are preserved, so bursting is
+  # unchanged — only the CPU reservation shrinks.
+  workloads:
+    - name: activator
+      resources:
+        - container: activator
+          requests:
+            cpu: 50m
+            memory: 60Mi
+          limits:
+            cpu: "1"
+            memory: 600Mi
+    - name: autoscaler
+      resources:
+        - container: autoscaler
+          requests:
+            cpu: 25m
+            memory: 100Mi
+          limits:
+            cpu: "1"
+            memory: 1000Mi
+    - name: controller
+      resources:
+        - container: controller
+          requests:
+            cpu: 25m
+            memory: 100Mi
+          limits:
+            cpu: "1"
+            memory: 1000Mi
+    - name: webhook
+      resources:
+        - container: webhook
+          requests:
+            cpu: 25m
+            memory: 100Mi
+          limits:
+            cpu: 500m
+            memory: 500Mi
   ingress:
     istio:
       enabled: false

@@ -7,12 +7,17 @@ spec:
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
-      # 30Gi (sized off steady-state ~13.4Gi usage) wasn't enough for the one-time
-      # catch-up backlog: 5 days without a successful compaction left a single group
-      # spanning 7 raw 2-day blocks, and Thanos's compactor needs ~2x the group's
-      # size locally (once to download the sources, once to build the merged
-      # output) -- observed ENOSPC at 29.79Gi actualSize. This is a one-time cost:
-      # steady-state compaction runs close to real-time in small increments once
-      # caught up, so no ongoing need for this much space is expected.
-      storage: 60Gi
+      # Sized for steady-state compaction (~13.4Gi observed live usage), ~2x
+      # headroom. Thanos's compactor needs roughly 2x a compaction group's size
+      # locally at peak: it downloads the source blocks and builds the merged
+      # output alongside them before uploading and deleting the sources.
+      #
+      # History: was temporarily grown (60Gi, then 120Gi) to absorb a one-time
+      # catch-up backlog -- a 5-day gap without a successful compaction produced
+      # a single group spanning 7 raw 2-day blocks, which ENOSPC'd the original
+      # 30Gi at 29.79Gi actualSize. That backlog is fully processed (fs drained
+      # to near-empty), so this returns to a steady-state size. If a large
+      # multi-day backlog ever recurs (e.g. the compactor is halted for days),
+      # grow this again temporarily; steady-state does not need more.
+      storage: 30Gi
   storageClassName: longhorn-scratch

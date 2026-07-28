@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>home-ops-hiro — feature-watch feeds (out-of-repo)</title>
+  </head>
+  <body>
+    <outline text="Network &amp; Edge" title="Network &amp; Edge">
+      <outline text="Tailscale" title="Tailscale">
+        <outline type="rss" text="Tailscale blog" title="Tailscale blog" xmlUrl="https://tailscale.com/blog/index.xml" htmlUrl="https://tailscale.com/blog"/>
+        <outline type="rss" text="Tailscale releases" title="Tailscale releases" xmlUrl="https://github.com/tailscale/tailscale/releases.atom" htmlUrl="https://github.com/tailscale/tailscale/releases"/>
+      </outline>
+      <outline text="Cloudflare" title="Cloudflare">
+        <outline type="rss" text="Cloudflare blog" title="Cloudflare blog" xmlUrl="https://blog.cloudflare.com/rss/" htmlUrl="https://blog.cloudflare.com"/>
+        <outline type="rss" text="Cloudflare changelog" title="Cloudflare changelog" xmlUrl="https://developers.cloudflare.com/changelog/rss.xml" htmlUrl="https://developers.cloudflare.com/changelog/"/>
+      </outline>
+      <outline text="OPNsense" title="OPNsense">
+        <outline type="rss" text="OPNsense blog" title="OPNsense blog" xmlUrl="https://opnsense.org/blog/feed/" htmlUrl="https://opnsense.org/blog/"/>
+        <outline type="rss" text="OPNsense releases" title="OPNsense releases" xmlUrl="https://github.com/opnsense/core/releases.atom" htmlUrl="https://github.com/opnsense/core/releases"/>
+      </outline>
+      <outline text="Omada (TP-Link)" title="Omada (TP-Link)">
+        <outline type="rss" text="Omada controller versions (community image proxy)" title="Omada controller versions (community image proxy)" xmlUrl="https://github.com/mbentley/docker-omada-controller/tags.atom" htmlUrl="https://github.com/mbentley/docker-omada-controller/tags"/>
+      </outline>
+      <outline text="netboot.xyz" title="netboot.xyz">
+        <outline type="rss" text="netboot.xyz releases" title="netboot.xyz releases" xmlUrl="https://github.com/netbootxyz/netboot.xyz/releases.atom" htmlUrl="https://github.com/netbootxyz/netboot.xyz/releases"/>
+      </outline>
+    </outline>
+    <outline text="Home &amp; Media" title="Home &amp; Media">
+      <outline text="Home Assistant" title="Home Assistant">
+        <outline type="rss" text="Home Assistant blog" title="Home Assistant blog" xmlUrl="https://www.home-assistant.io/atom.xml" htmlUrl="https://www.home-assistant.io/blog/"/>
+        <outline type="rss" text="Home Assistant releases" title="Home Assistant releases" xmlUrl="https://github.com/home-assistant/core/releases.atom" htmlUrl="https://github.com/home-assistant/core/releases"/>
+      </outline>
+      <outline text="Plex" title="Plex">
+        <outline type="rss" text="Plex blog" title="Plex blog" xmlUrl="https://www.plex.tv/blog/feed/" htmlUrl="https://www.plex.tv/blog/"/>
+      </outline>
+    </outline>
+    <outline text="Personal, SaaS &amp; AI" title="Personal, SaaS &amp; AI">
+      <outline text="Pocket (heypocket)" title="Pocket (heypocket)">
+        <outline type="rss" text="Pocket news" title="Pocket news" xmlUrl="https://heypocket.com/blogs/news.atom" htmlUrl="https://heypocket.com/blogs/news"/>
+      </outline>
+      <outline text="Readwise Reader" title="Readwise Reader">
+        <outline type="rss" text="Readwise blog" title="Readwise blog" xmlUrl="https://blog.readwise.io/rss/" htmlUrl="https://blog.readwise.io/"/>
+      </outline>
+      <outline text="Obsidian (product)" title="Obsidian (product)">
+        <outline type="rss" text="Obsidian release notes" title="Obsidian release notes" xmlUrl="https://github.com/obsidianmd/obsidian-releases/releases.atom" htmlUrl="https://github.com/obsidianmd/obsidian-releases/releases"/>
+      </outline>
+      <outline text="Gemini" title="Gemini">
+        <outline type="rss" text="Gemini blog" title="Gemini blog" xmlUrl="https://blog.google/products/gemini/rss/" htmlUrl="https://blog.google/products/gemini/"/>
+      </outline>
+    </outline>
+    <outline text="Dev &amp; AI Tooling" title="Dev &amp; AI Tooling">
+      <outline text="GitHub" title="GitHub">
+        <outline type="rss" text="GitHub Changelog" title="GitHub Changelog" xmlUrl="https://github.blog/changelog/feed/" htmlUrl="https://github.blog/changelog/"/>
+        <outline type="rss" text="GitHub Blog" title="GitHub Blog" xmlUrl="https://github.blog/feed/" htmlUrl="https://github.blog/"/>
+      </outline>
+      <outline text="GitHub Copilot" title="GitHub Copilot">
+        <outline type="rss" text="Copilot changelog" title="Copilot changelog" xmlUrl="https://github.blog/changelog/label/copilot/feed/" htmlUrl="https://github.blog/changelog/label/copilot/"/>
+      </outline>
+      <outline text="VS Code" title="VS Code">
+        <outline type="rss" text="VS Code release notes" title="VS Code release notes" xmlUrl="https://code.visualstudio.com/feed.xml" htmlUrl="https://code.visualstudio.com/updates"/>
+        <outline type="rss" text="VS Code releases" title="VS Code releases" xmlUrl="https://github.com/microsoft/vscode/releases.atom" htmlUrl="https://github.com/microsoft/vscode/releases"/>
+      </outline>
+    </outline>
+  </body>
+</opml>

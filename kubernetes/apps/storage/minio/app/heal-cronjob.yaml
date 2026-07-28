@@ -4,17 +4,26 @@
 # this proactively scans everything on a schedule instead of waiting for a
 # client to stumble onto a bad object.
 #
-# Standalone mode runs a single drive with no erasure coding, so `mc admin
-# heal` can DETECT corruption (checksum mismatch) but generally can't REPAIR
-# it — there's no parity/replica within Minio itself to reconstruct from.
-# Treat this as a bitrot canary, not full self-healing, unless the deployment
-# moves to a multi-drive erasure-coded topology (see chat notes: this Helm
-# chart only supports that via mode: distributed with a suitable
-# drivesPerNode, even for a single node — mode: standalone hardcodes exactly
-# one mount path/PVC. Not done here — it's a disruptive re-provision, not a
-# value flip, and would stack Minio's own EC parity on top of Longhorn's
-# existing 2x replication under longhorn-2-no-backup for redundancy that's
-# largely already covered at the block layer).
+# Standalone mode runs a single drive with no erasure coding. On this
+# topology Minio reports `mode-server-xl-single`, and the `mc admin heal`
+# admin API is NOT supported at all there — it doesn't merely fail to REPAIR,
+# the server rejects the call outright:
+#   "Unable to start healing. This 'admin' API is not supported by server in
+#    'mode-server-xl-single'."
+# So this job cannot function as a heal/repair canary until the deployment
+# moves to a multi-drive erasure-coded topology (this Helm chart only supports
+# that via mode: distributed with a suitable drivesPerNode, even for a single
+# node — mode: standalone hardcodes exactly one mount path/PVC. Not done here —
+# it's a disruptive re-provision, not a value flip, and would stack Minio's own
+# EC parity on top of Longhorn's existing 2x replication under
+# longhorn-2-no-backup for redundancy that's largely already covered at the
+# block layer).
+#
+# Rather than fail every run (KubeJobFailed), the job below detects the
+# unsupported single-drive mode and exits 0 with a clear log — a dormant
+# canary that will start doing real work automatically if the topology ever
+# gains erasure coding. Bitrot is still caught on read: Minio verifies each
+# object's checksum whenever a client reads it.
 #
 # `mc admin heal` always exits 0 even when it finds objects it couldn't fully
 # heal (verified against mc's own source — DisplayAndFollowHealStatus always
@@ -69,6 +78,14 @@ spec:
 
                   OUTPUT=$(mc admin heal --recursive local/ 2>&1) || {
                     echo "$OUTPUT"
+                    # Single-drive deployments report mode-server-xl-single and
+                    # reject the heal admin API entirely. That's an expected,
+                    # permanent property of this topology — not corruption — so
+                    # exit cleanly instead of firing KubeJobFailed every week.
+                    if echo "$OUTPUT" | grep -qiE "not supported by server in 'mode-server-xl-single'"; then
+                      echo "INFO: heal API unsupported on single-drive Minio; skipping (bitrot still checked on read)"
+                      exit 0
+                    fi
                     echo "ERROR: mc admin heal exited non-zero"
                     exit 1
                   }

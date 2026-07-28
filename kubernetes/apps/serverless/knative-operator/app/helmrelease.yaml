@@ -46,3 +46,22 @@ spec:
             patch: |
               - op: remove
                 path: /data/_example
+          # Right-size operator CPU requests. Both deployments idle at ~1-3m
+          # but the chart reserves 100m each; only the CPU request is lowered
+          # (memory request and limits are untouched, bursting unaffected).
+          - target:
+              kind: Deployment
+              name: knative-operator
+              namespace: knative-serving
+            patch: |
+              - op: replace
+                path: /spec/template/spec/containers/0/resources/requests/cpu
+                value: 25m
+          - target:
+              kind: Deployment
+              name: operator-webhook
+              namespace: knative-serving
+            patch: |
+              - op: replace
+                path: /spec/template/spec/containers/0/resources/requests/cpu
+                value: 25m

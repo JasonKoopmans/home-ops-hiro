@@ -25,7 +25,7 @@ spec:
           app:
             image:
               repository: ghcr.io/n8n-io/n8n
-              tag: 2.30.4
+              tag: 2.32.5
             envFrom:
               - secretRef:
                   name: n8n-smtp-secret
@@ -47,7 +47,9 @@ spec:
               N8N_LOG_OUTPUT: console
             resources:
               requests:
-                cpu: 250m
+                # Idles ~6m; 50m keeps burst headroom without over-reserving
+                # scheduling capacity (limits below still allow bursting).
+                cpu: 50m
                 memory: 512Mi
               limits:
                 cpu: 2000m
