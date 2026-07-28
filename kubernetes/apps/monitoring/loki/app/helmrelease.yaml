@@ -38,6 +38,27 @@ spec:
       auth_enabled: false
       commonConfig:
         replication_factor: 1
+      ingester:
+        wal:
+          # Upstream defaults this false, correctly, for distributed Loki: the WAL
+          # already recovers everything on restart, and flushing on every rolling
+          # restart writes partial chunks well under the 1.5MiB target -- more
+          # objects, worse compression, more chunk fetches per query.
+          #
+          # Neither reason holds here. This is singleBinary/replicas:1 with 0
+          # restarts in 9 days, so fragmentation is noise; and the WAL only saves
+          # you while the PVC survives, which is exactly the assumption the
+          # upcoming Talos node roll (5 drains) and a possible storage-class move
+          # are about to break. Without this, each restart carries a window of
+          # chunks that exist only in /var/loki/wal on that one volume -- up to
+          # max_chunk_age (2h) for a stream busy enough never to idle out.
+          #
+          # Only fires on graceful SIGTERM. OOMKill / node power loss still land
+          # on WAL replay, so this supplements the WAL, it does not replace it.
+          # Also NOT sufficient for a deliberate PVC delete: that needs an
+          # explicit POST /flush plus verification that the bucket stopped
+          # growing, not a best-effort window.
+          flush_on_shutdown: true
       # Long-term storage: Minio (observability-loki bucket), via a dedicated
       # bucket-scoped IAM user (kubernetes/apps/storage/minio/app/loki-user-bootstrap-job.yaml),
       # not Minio root credentials. accessKeyId/secretAccessKey come from
@@ -105,6 +126,13 @@ spec:
 
     singleBinary:
       replicas: 1
+      # Paired with ingester.wal.flush_on_shutdown above. The chart default is
+      # 30s, and flush_op_timeout is 10m -- so a flush that needs longer than the
+      # grace period gets SIGKILLed partway, leaving partial chunks in Minio AND
+      # still depending on WAL replay: the worst of both. 120s is generous for
+      # ~0.11GB of local data. Do not lower this without also reverting
+      # flush_on_shutdown.
+      terminationGracePeriodSeconds: 120
       persistence:
         # StatefulSet volumeClaimTemplates are immutable; keep this stable after first deploy.
         # To suppress Longhorn recurring backups/snapshots, disable the volume's default
