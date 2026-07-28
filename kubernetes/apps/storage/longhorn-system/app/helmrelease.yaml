@@ -35,6 +35,25 @@ spec:
       guaranteedReplicaManagerCPU: "10"
       nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
       orphanAutoDeletion: true
+      # Let filesystem-trim reclaim space that sits behind snapshots. Without
+      # this, trim only unmaps blocks in the live head volume and anything
+      # already captured by a snapshot stays allocated forever -- which is how
+      # prometheus-db reached 31.8GiB actualSize against 3.8GB of real data.
+      #
+      # Trade-off, deliberate: during a trim Longhorn marks the latest snapshot
+      # and its ancestors removed (stopping at any snapshot with multiple
+      # children), so rollback points are collapsed. Acceptable here -- the
+      # `default` group still ships daily backups to Minio, and the volumes that
+      # actually bloat (Prometheus TSDB, Thanos/Loki scratch) hold data that is
+      # either reproducible or already durable in object storage.
+      #
+      # Set globally rather than per-class on purpose: the per-volume
+      # `unmapMarkSnapChainRemoved` field is only stamped from a StorageClass
+      # parameter at provision time, so a class-level setting would not reach
+      # any volume that already exists (same trap as the recurring-job labels,
+      # see storageclasses.yaml). Every current volume is `ignored`, i.e.
+      # "follow the global setting", so this takes effect immediately.
+      removeSnapshotsDuringFilesystemTrim: true
       replicaAutoBalance: best-effort
       storageMinimalAvailablePercentage: "1"
       storageReservedPercentageForDefaultDisk: "5"

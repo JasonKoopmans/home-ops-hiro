@@ -57,3 +57,64 @@ spec:
   - tsdb
   retain: 2
   concurrency: 1
+
+---
+
+# filesystem-trim jobs. Longhorn never unmaps blocks freed by the guest
+# filesystem on its own, so volume actualSize ratchets toward the provisioned
+# size no matter what the application retains -- measured 2026-07-28:
+# thanos-compactor-data held 11.9GiB for 0.4MB of data, prometheus-db 31.8GiB
+# for 3.8GB. These jobs run `fstrim` against the guest filesystem to give the
+# space back. Paired with removeSnapshotsDuringFilesystemTrim in helmrelease.yaml,
+# which lets the reclaim reach bytes pinned behind snapshots.
+#
+# REQUIRES the siderolabs/util-linux-tools Talos extension (see #285) -- Talos
+# ships no `fstrim` binary, and without it Longhorn fails these with exit 127.
+#
+# Trim is I/O heavy and these nodes are 2-3 CPU, so: concurrency 1, one group
+# per job, staggered clear of the snapshot (:15 past every 6h, 4:15) and backup
+# (2:45) windows.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: longhorn-tsdb-trim-job
+  namespace: storage
+spec:
+  cron: "30 5 * * *" # every day at 5:30 AM, after the 4:15 tsdb snapshot
+  task: "filesystem-trim"
+  groups:
+  - tsdb
+  concurrency: 1
+
+---
+
+# The "scratch" group intentionally has no *snapshot* job (see storageclasses.yaml).
+# A trim job is the deliberate exception: it takes no snapshot, so it creates no
+# chain to bloat -- it only returns space these throwaway volumes have already
+# stopped using. Do not read this as license to add snapshot/backup jobs here.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: longhorn-scratch-trim-job
+  namespace: storage
+spec:
+  cron: "30 3 * * *" # every day at 3:30 AM
+  task: "filesystem-trim"
+  groups:
+  - scratch
+  concurrency: 1
+
+---
+
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: longhorn-general-trim-job
+  namespace: storage
+spec:
+  cron: "30 6 * * 0" # weekly, Sunday 6:30 AM
+  task: "filesystem-trim"
+  groups:
+  - default
+  - snapshot-only
+  concurrency: 1

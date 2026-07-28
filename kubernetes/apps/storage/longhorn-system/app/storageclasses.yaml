@@ -132,15 +132,21 @@ parameters:
 # rollback). Single replica: no redundancy value in scratch data, and no reason to
 # pay 2x write cost for it — on node loss the consumer just redownloads/recomputes.
 #
-# recurringJobSelector names a group ("scratch") that has NO RecurringJob targeting
-# it. This is deliberate, not an oversight: per #311, the CSI driver sets the
-# recurring-job-group label purely from this selector at provision time — it does
-# not check whether a job exists for the name. That label's mere presence is what
-# excludes the volume from Longhorn's `default` group (6-hourly snapshot + daily
-# backup) fallback. Since nothing ever targets "scratch", no job ever fires: no
-# snapshots are taken, so there is no chain to bloat — closer in behaviour to
-# emptyDir than to any other class here. Do NOT add a RecurringJob for this group;
-# that would defeat the point.
+# recurringJobSelector names a group ("scratch") with no snapshot or backup
+# RecurringJob targeting it. This is deliberate, not an oversight: per #311, the
+# CSI driver sets the recurring-job-group label purely from this selector at
+# provision time — it does not check whether a job exists for the name. That
+# label's mere presence is what excludes the volume from Longhorn's `default`
+# group (6-hourly snapshot + daily backup) fallback. No chain is ever created, so
+# none can bloat — closer in behaviour to emptyDir than to any other class here.
+# Do NOT add a snapshot or backup RecurringJob for this group; that would defeat
+# the point.
+#
+# The one job that DOES target "scratch" is longhorn-scratch-trim-job
+# (task: filesystem-trim, see default-jobs.yaml). Trim takes no snapshot — it only
+# unmaps blocks the volume has already stopped using — so it reclaims space
+# without reintroducing a chain. thanos-compactor-data was holding 11.9GiB of
+# allocation against 0.4MB of live data before that job existed.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
