@@ -23,7 +23,25 @@ nodes:
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/10f9392d7091b30abf573524649756e5bc894f653af525836e9ab0297f301fc2
+    # Image Factory schematic, declared inline rather than as a hardcoded
+    # talosImageURL: talhelper submits this to the factory and derives the
+    # installer URL itself, so the 64-char schematic ID is never hand-copied.
+    # (It is a sha256 of the schematic body, so it changes whenever this list
+    # does — a typed ID silently drifts, and did: cmp-05 previously carried a
+    # 65-char ID the factory 404'd on.)
+    #
+    # iscsi-tools + util-linux-tools are both Longhorn requirements — the
+    # latter provides the `fstrim` binary Longhorn nsenters into for
+    # filesystem-trim / space reclamation. qemu-guest-agent is the Proxmox
+    # guest integration.
+    schematic: &schematic
+      customization:
+        systemExtensions:
+          officialExtensions:
+            - siderolabs/iscsi-tools
+            - siderolabs/nfs-utils
+            - siderolabs/qemu-guest-agent
+            - siderolabs/util-linux-tools
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -48,7 +66,7 @@ nodes:
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/10f9392d7091b30abf573524649756e5bc894f653af525836e9ab0297f301fc2
+    schematic: *schematic
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -73,7 +91,7 @@ nodes:
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/10f9392d7091b30abf573524649756e5bc894f653af525836e9ab0297f301fc2
+    schematic: *schematic
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -98,7 +116,7 @@ nodes:
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/10f9392d7091b30abf573524649756e5bc894f653af525836e9ab0297f301fc2
+    schematic: *schematic
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
@@ -123,7 +141,7 @@ nodes:
     installDisk: "/dev/sda"
     machineSpec:
       secureboot: false
-    talosImageURL: factory.talos.dev/installer/188d1f7a5c4f1d3aba7df787c448c1d3d008ed29cfb34af53fa0df4336a56040b
+    schematic: *schematic
     controlPlane: true
     networkInterfaces:
       - deviceSelector:
