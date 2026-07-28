@@ -35,25 +35,27 @@ spec:
       guaranteedReplicaManagerCPU: "10"
       nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
       orphanAutoDeletion: true
-      # Let filesystem-trim reclaim space that sits behind snapshots. Without
-      # this, trim only unmaps blocks in the live head volume and anything
-      # already captured by a snapshot stays allocated forever -- which is how
-      # prometheus-db reached 31.8GiB actualSize against 3.8GB of real data.
+      # Deliberately FALSE (also the Longhorn default; stated explicitly to
+      # record the decision). This is the global fallback for volumes whose
+      # `unmapMarkSnapChainRemoved` is `ignored`, i.e. all of them today.
       #
-      # Trade-off, deliberate: during a trim Longhorn marks the latest snapshot
-      # and its ancestors removed (stopping at any snapshot with multiple
-      # children), so rollback points are collapsed. Acceptable here -- the
-      # `default` group still ships daily backups to Minio, and the volumes that
-      # actually bloat (Prometheus TSDB, Thanos/Loki scratch) hold data that is
-      # either reproducible or already durable in object storage.
+      # Two separable knobs, do not conflate them:
+      #   - a filesystem-trim RecurringJob (see default-jobs.yaml) is always
+      #     safe: it can only unmap blocks nothing references, and can never
+      #     touch a snapshot.
+      #   - snapshot-chain removal is destructive: during a trim Longhorn marks
+      #     the latest snapshot AND ALL ITS ANCESTORS removed, stopping only at
+      #     a snapshot with multiple children. Recurring jobs produce a linear
+      #     chain, so in practice the volume is left with ZERO restore points
+      #     until its next scheduled snapshot.
       #
-      # Set globally rather than per-class on purpose: the per-volume
-      # `unmapMarkSnapChainRemoved` field is only stamped from a StorageClass
-      # parameter at provision time, so a class-level setting would not reach
-      # any volume that already exists (same trap as the recurring-job labels,
-      # see storageclasses.yaml). Every current volume is `ignored`, i.e.
-      # "follow the global setting", so this takes effect immediately.
-      removeSnapshotsDuringFilesystemTrim: true
+      # Turning that on cluster-wide would strip the chain from all 15 volumes
+      # in the `default` group to reclaim space that has only actually been
+      # measured on four. Enabled per-class instead (see storageclasses.yaml),
+      # for volumes whose contents are reproducible or already durable
+      # elsewhere. Revisit for `default` once the trim-only jobs have run and
+      # there is evidence of bloat there.
+      removeSnapshotsDuringFilesystemTrim: false
       replicaAutoBalance: best-effort
       storageMinimalAvailablePercentage: "1"
       storageReservedPercentageForDefaultDisk: "5"

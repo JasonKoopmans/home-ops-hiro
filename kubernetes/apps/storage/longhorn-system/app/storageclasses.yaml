@@ -63,6 +63,9 @@ parameters:
   numberOfReplicas: "3"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # Reproducible/bulk data — let filesystem-trim reclaim space pinned behind
+  # snapshots. See default-jobs.yaml and helmrelease.yaml for the trade-off.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
@@ -82,6 +85,9 @@ parameters:
   numberOfReplicas: "1"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # Reproducible/bulk data — let filesystem-trim reclaim space pinned behind
+  # snapshots. See default-jobs.yaml and helmrelease.yaml for the trade-off.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
@@ -101,6 +107,9 @@ parameters:
   numberOfReplicas: "2"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # Reproducible/bulk data — let filesystem-trim reclaim space pinned behind
+  # snapshots. See default-jobs.yaml and helmrelease.yaml for the trade-off.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
@@ -124,6 +133,10 @@ parameters:
   numberOfReplicas: "2"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # TSDB churn is exactly the case snapshot-pinned blocks hurt most; the durable
+  # copy lives in object storage, so collapsing local restore points on trim is
+  # an accepted trade. See default-jobs.yaml.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"tsdb","isGroup":true}]'
 
 ---
@@ -163,4 +176,6 @@ parameters:
   numberOfReplicas: "1"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # Nothing here is worth a restore point in the first place.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"scratch","isGroup":true}]'

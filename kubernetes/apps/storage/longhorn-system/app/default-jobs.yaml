@@ -28,17 +28,23 @@ spec:
 
 ---
 
+# Currently only MinIO. Dialled back from 6-hourly/retain-3 to daily/retain-2:
+# the 6h cadence was buying logical-recovery granularity nobody uses while
+# pinning tens of GiB (one snapshot alone held 96.9GiB against 26.8GB of live
+# data). Runs at 05:00, two hours after longhorn-snapshot-only-trim-job, so the
+# weekly trim's chain removal is followed by a fresh restore point rather than
+# leaving the volume bare until the next day.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
   name: longhorn-snapshot-only-job
   namespace: storage
 spec:
-  cron: "15 */6 * * *" # every 6 hours at minute 15
+  cron: "0 5 * * *" # every day at 5:00 AM
   task: "snapshot"
   groups:
   - snapshot-only
-  retain: 3
+  retain: 2
   concurrency: 2
 
 ---
@@ -65,22 +71,32 @@ spec:
 # size no matter what the application retains -- measured 2026-07-28:
 # thanos-compactor-data held 11.9GiB for 0.4MB of data, prometheus-db 31.8GiB
 # for 3.8GB. These jobs run `fstrim` against the guest filesystem to give the
-# space back. Paired with removeSnapshotsDuringFilesystemTrim in helmrelease.yaml,
-# which lets the reclaim reach bytes pinned behind snapshots.
+# space back.
+#
+# How far a trim reaches depends on the volume's unmapMarkSnapChainRemoved,
+# which is set per StorageClass (see storageclasses.yaml), NOT here:
+#   enabled  (tsdb, scratch, *-no-backup) -- also reclaims bytes pinned behind
+#            snapshots, at the cost of collapsing the whole snapshot chain.
+#   ignored  (longhorn, longhorn-1/-2)    -- inherits the global `false`, so the
+#            trim can only reclaim unreferenced blocks and never removes a
+#            snapshot. Safe on any volume.
 #
 # REQUIRES the siderolabs/util-linux-tools Talos extension (see #285) -- Talos
 # ships no `fstrim` binary, and without it Longhorn fails these with exit 127.
 #
 # Trim is I/O heavy and these nodes are 2-3 CPU, so: concurrency 1, one group
-# per job, staggered clear of the snapshot (:15 past every 6h, 4:15) and backup
-# (2:45) windows.
+# per job. Where a group's class has chain removal enabled, the trim is
+# scheduled BEFORE that group's next snapshot (not after), so the volume is left
+# bare for the shortest possible window: tsdb trims 03:00 against a 04:15
+# snapshot, snapshot-only trims 03:00 Sunday against a 05:00 snapshot. All are
+# clear of the 02:45 backup window.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
   name: longhorn-tsdb-trim-job
   namespace: storage
 spec:
-  cron: "30 5 * * *" # every day at 5:30 AM, after the 4:15 tsdb snapshot
+  cron: "0 3 * * *" # every day at 3:00 AM — 75min BEFORE the 4:15 tsdb snapshot
   task: "filesystem-trim"
   groups:
   - tsdb
@@ -98,7 +114,7 @@ metadata:
   name: longhorn-scratch-trim-job
   namespace: storage
 spec:
-  cron: "30 3 * * *" # every day at 3:30 AM
+  cron: "30 1 * * *" # every day at 1:30 AM
   task: "filesystem-trim"
   groups:
   - scratch
@@ -106,6 +122,31 @@ spec:
 
 ---
 
+# snapshot-only (MinIO) is the one group where trim runs against a class with
+# unmapMarkSnapChainRemoved=enabled AND a meaningful restore point, so the
+# ordering matters: chain removal here at 03:00, fresh snapshot at 05:00 from
+# longhorn-snapshot-only-job. The 2h separation is padding, not synchronisation
+# -- Longhorn has no post-trim hook, so a trim that overruns simply reclaims
+# less that week. It cannot corrupt anything or skip the snapshot.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: longhorn-snapshot-only-trim-job
+  namespace: storage
+spec:
+  cron: "0 3 * * 0" # weekly, Sunday 3:00 AM — 2h before the daily snapshot
+  task: "filesystem-trim"
+  groups:
+  - snapshot-only
+  concurrency: 1
+
+---
+
+# Trim-only, by decision (2026-07-28): the `default` group's 15 volumes keep
+# their full 6-hourly snapshot chain and daily AWS S3 backups. This job can only
+# reclaim unreferenced blocks -- the class sets no unmapMarkSnapChainRemoved, so
+# it inherits the global `false` and cannot remove a snapshot. Revisit enabling
+# chain removal here once there is measured bloat to justify it.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
@@ -116,5 +157,4 @@ spec:
   task: "filesystem-trim"
   groups:
   - default
-  - snapshot-only
   concurrency: 1
