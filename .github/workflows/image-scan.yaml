@@ -42,7 +42,7 @@ jobs:
         run: |
           grep -E '^\s*image:\s*' rendered.yaml \
             | awk -F': ' '{print $2}' \
-            | sed -E 's/^["'"'"'"']//; s/["'"'"'"']$//' \
+            | sed -E 's/^["'\'']//; s/["'\'']$//' \
             | sort -u > images.txt
           echo "Found $(wc -l < images.txt) unique image references"
 
