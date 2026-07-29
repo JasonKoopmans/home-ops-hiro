@@ -31,7 +31,7 @@ nodes:
     # 65-char ID the factory 404'd on.)
     #
     # iscsi-tools + util-linux-tools are both Longhorn requirements — the
-    # latter provides the `fstrim` binary Longhorn nsenters into for
+    # latter provides the `fstrim` binary that Longhorn runs via `nsenter` for
     # filesystem-trim / space reclamation. qemu-guest-agent is the Proxmox
     # guest integration.
     schematic: &schematic
