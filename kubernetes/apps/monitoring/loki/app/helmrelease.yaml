@@ -109,10 +109,9 @@ spec:
         # StatefulSet volumeClaimTemplates are IMMUTABLE. Editing this value does
         # not move an existing PVC -- the rebuilt StatefulSet just adopts the old
         # one. Changing it requires deleting the PVC so it reprovisions, and that
-        # must be preceded by an explicit `POST /flush` against the ingester plus
-        # confirmation that the observability-loki bucket stopped growing (see
-        # ingester.wal.flush_on_shutdown above -- graceful shutdown alone is
-        # best-effort, not a guarantee).
+        # must be preceded by an explicit `POST /flush` plus confirmation that the
+        # observability-loki bucket stopped growing — graceful shutdown alone is
+        # best-effort, not a guarantee.
         #
         # longhorn-tsdb, moved off `longhorn` (2026-07-28): aligns Loki's RPO with
         # Prometheus, which is the right shape for it -- chunks and index ship to
