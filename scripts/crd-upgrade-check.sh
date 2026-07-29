@@ -461,12 +461,20 @@ render_crds() { # chart url version values_file out_ndjson
 LIVE_OK=0
 LIVE_REASON="not requested (--live)"
 probe_live_cluster() {
-  local first
+  local kc found
   if ! have kubectl; then LIVE_REASON="kubectl not found"; return 1; fi
   if [ -n "${KUBECONFIG:-}" ]; then
-    first="${KUBECONFIG%%:*}"
-    if [ ! -f "$first" ]; then
-      LIVE_REASON="KUBECONFIG points at ${first}, which does not exist"
+    # KUBECONFIG is a :-separated precedence list and client-go silently skips
+    # entries that do not exist, so only an entirely absent list means there is
+    # no config. Testing just the first entry would skip the live checks while
+    # kubectl itself would have worked fine off a later one.
+    found=0
+    while IFS= read -r kc; do
+      [ -n "$kc" ] || continue
+      if [ -f "$kc" ]; then found=1; break; fi
+    done < <(printf '%s' "$KUBECONFIG" | tr ':' '\n')
+    if [ "$found" -eq 0 ]; then
+      LIVE_REASON="no file in KUBECONFIG (${KUBECONFIG}) exists"
       return 1
     fi
   elif [ ! -f "${HOME}/.kube/config" ]; then
@@ -565,7 +573,9 @@ ensure_apiserver() {
   fi
   have kubectl || { APISERVER_REASON="kubectl not found"; return 1; }
   have kind    || { APISERVER_REASON="kind not found — install it or use --mode=schema"; return 1; }
-  have docker  || { APISERVER_REASON="no container runtime for kind — use --mode=schema"; return 1; }
+  # kind is driven through the `docker` CLI here; podman is only usable via its
+  # docker-compatible shim, so probing for `podman` by name would be misleading.
+  have docker  || { APISERVER_REASON="no docker CLI for kind (podman works only via its docker shim) — use --mode=schema"; return 1; }
 
   KIND_CLUSTER="crd-upgrade-check-$$"
   msg "   creating ephemeral kind cluster ${KIND_CLUSTER} (${KIND_NODE_IMAGE})"

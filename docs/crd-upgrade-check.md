@@ -110,7 +110,7 @@ Two backends:
 | | `--mode=schema` (default) | `--mode=apiserver` |
 |---|---|---|
 | Mechanism | new CRDs → JSON Schema → `kubeconform` | disposable `kind` cluster, `kubectl apply --dry-run=server` |
-| Needs | nothing beyond the pinned toolchain | `kind` + a container runtime |
+| Needs | nothing beyond the pinned toolchain | `kind` + a `docker` CLI (podman only via its docker shim) |
 | Runtime, given a rendered manifest | ~3 s | ~40 s (kind creation dominates) |
 | Evaluates CEL | **no** | yes |
 | Evaluates defaulting | no | yes |

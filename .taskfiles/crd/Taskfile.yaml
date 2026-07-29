@@ -79,7 +79,12 @@ tasks:
           markdown: "{{.markdown}}"
     preconditions:
       - { msg: "kind not found — install it, or use 'task crd:check' (--mode=schema)", sh: "which kind" }
-      - { msg: "No container runtime for kind", sh: "which docker || which podman" }
+      # The script drives both kind and flux-local through the `docker` CLI, so
+      # that is the real requirement. Podman satisfies it only when its
+      # docker-compatible shim is on PATH under that name — accepting a bare
+      # `which podman` here would pass the precondition and then SKIP Tier 3
+      # mid-run, which reads as a broken check rather than a missing dependency.
+      - { msg: "docker CLI not found (podman works only via its docker shim) — or use 'task crd:check' (--mode=schema)", sh: "which docker" }
 
   check:live:
     desc: CRD chart bump check including the read-only cluster checks
