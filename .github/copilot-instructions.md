@@ -189,7 +189,7 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 ## Storage
 
 - **Longhorn** is the only storage provisioner. Volumes are backed by dedicated disks on each node (Talos `UserVolumeConfig` in `talos/patches/global/machine-volumes.yaml`).
-- Backups target **AWS S3** (`s3://hiro-longhorn-backups@us-east-1/`), not the in-cluster MinIO — backup configuration lives in `kubernetes/apps/storage/longhorn-system/default-backup-target.yaml`. MinIO is an application object store (Thanos, Loki), not the Longhorn backupstore; do not conflate the two when reasoning about what survives a cluster loss.
+- Backups target **AWS S3** (`s3://hiro-longhorn-backups@us-east-1/`), not the in-cluster MinIO — backup configuration lives in `kubernetes/apps/storage/longhorn-system/app/default-backup-target.yaml`. MinIO is an application object store (Thanos, Loki), not the Longhorn backupstore; do not conflate the two when reasoning about what survives a cluster loss.
 - **Several storage classes exist** (defined in `kubernetes/apps/storage/longhorn-system/app/storageclasses.yaml`). Choose by redundancy and backup needs:
 
   | Class | Replicas | Recurring backups | Use for |
