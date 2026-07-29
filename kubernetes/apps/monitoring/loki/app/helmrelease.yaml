@@ -115,7 +115,7 @@ spec:
         #
         # longhorn-tsdb, moved off `longhorn` (2026-07-28): aligns Loki's RPO with
         # Prometheus, which is the right shape for it -- chunks and index ship to
-        # MinIO continuously (30m idle / 2h max chunk age, 5m index resync), so
+        # MinIO continuously, so
         # the local volume is a buffer, not the durable copy. The class name is
         # accurate despite the workload not being metrics: Loki's own schema is
         # `store: tsdb` with a tsdb_shipper index.
