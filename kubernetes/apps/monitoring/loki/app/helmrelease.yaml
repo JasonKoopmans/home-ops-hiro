@@ -134,10 +134,27 @@ spec:
       # flush_on_shutdown.
       terminationGracePeriodSeconds: 120
       persistence:
-        # StatefulSet volumeClaimTemplates are immutable; keep this stable after first deploy.
-        # To suppress Longhorn recurring backups/snapshots, disable the volume's default
-        # recurring-job label instead of changing storageClass in-place.
-        storageClass: longhorn
+        # StatefulSet volumeClaimTemplates are IMMUTABLE. Editing this value does
+        # not move an existing PVC -- the rebuilt StatefulSet just adopts the old
+        # one. Changing it requires deleting the PVC so it reprovisions, and that
+        # must be preceded by an explicit `POST /flush` plus confirmation that the
+        # observability-loki bucket stopped growing — graceful shutdown alone is
+        # best-effort, not a guarantee.
+        #
+        # longhorn-tsdb, moved off `longhorn` (2026-07-28): aligns Loki's RPO with
+        # Prometheus, which is the right shape for it -- chunks and index ship to
+        # MinIO continuously, so
+        # the local volume is a buffer, not the durable copy. The class name is
+        # accurate despite the workload not being metrics: Loki's own schema is
+        # `store: tsdb` with a tsdb_shipper index.
+        #
+        # Consequences, accepted deliberately: 3 replicas -> 2; daily AWS S3
+        # backups via the `default` recurring-job group are LOST (the tsdb group
+        # has no backup job); 6-hourly snapshots become daily/retain-2; and
+        # filesystem-trim will collapse the snapshot chain, so there are windows
+        # with no local restore point. All fine given a few hours of log loss is
+        # tolerable here and older data lives in MinIO.
+        storageClass: longhorn-tsdb
         size: 10Gi
       resources:
         requests:

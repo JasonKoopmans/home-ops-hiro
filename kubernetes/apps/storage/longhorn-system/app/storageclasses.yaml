@@ -113,10 +113,19 @@ parameters:
   recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
-# TSDB/write-heavy volumes (e.g., Prometheus) — daily snapshot only via longhorn-tsdb-snapshot-job.
-# The Prometheus PVC was moved onto this class in #310; the daily/retain-2 cadence is
-# what keeps its snapshot chain from outrunning cleanup. Use this class (not the
-# *-no-backup ones, which snapshot 6-hourly) for any new continuously-written volume.
+# Continuously-written volumes whose durable copy lives in object storage —
+# Prometheus (Thanos/MinIO) and Loki (MinIO). Daily snapshot only, via
+# longhorn-tsdb-snapshot-job. The Prometheus PVC moved here in #310; the
+# daily/retain-2 cadence is what keeps its snapshot chain from outrunning
+# cleanup. Use this class (not the *-no-backup ones, which snapshot 6-hourly)
+# for any new continuously-written volume.
+#
+# The name describes the access pattern, not strictly the payload: high block
+# churn, local volume as buffer rather than system of record, no Longhorn backup
+# because the real copy is already in MinIO (S3-compatible object storage). It happens to stay literally
+# accurate for Loki too, whose schema is `store: tsdb`. A policy-shaped rename
+# (longhorn-derived or similar) was considered on 2026-07-28 and deliberately
+# deferred — revisit if a third non-metrics workload lands here.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
