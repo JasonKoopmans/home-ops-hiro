@@ -113,7 +113,7 @@ parameters:
 #
 # The name describes the access pattern, not strictly the payload: high block
 # churn, local volume as buffer rather than system of record, no Longhorn backup
-# because the real copy is already in S3/MinIO. It happens to stay literally
+# because the real copy is already in MinIO (S3-compatible object storage). It happens to stay literally
 # accurate for Loki too, whose schema is `store: tsdb`. A policy-shaped rename
 # (longhorn-derived or similar) was considered on 2026-07-28 and deliberately
 # deferred — revisit if a third non-metrics workload lands here.
