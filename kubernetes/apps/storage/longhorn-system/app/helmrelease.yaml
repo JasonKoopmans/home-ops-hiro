@@ -37,7 +37,7 @@ spec:
       orphanAutoDeletion: true
       # Deliberately FALSE (also the Longhorn default; stated explicitly to
       # record the decision). This is the global fallback for volumes whose
-      # `unmapMarkSnapChainRemoved` is `ignored`, i.e. all of them today.
+      # `unmapMarkSnapChainRemoved` is `ignored` (e.g. existing volumes until manually patched).
       #
       # Two separable knobs, do not conflate them:
       #   - a filesystem-trim RecurringJob (see default-jobs.yaml) is always
