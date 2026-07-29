@@ -1,0 +1,110 @@
+---
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+vars:
+  # Quoted at every use site — a checkout path containing a space would
+  # otherwise split into two arguments.
+  CRD_CHECK_SCRIPT: "{{.ROOT_DIR}}/scripts/crd-upgrade-check.sh"
+
+tasks:
+
+  check:
+    desc: Sanity-check CRD chart bumps (helmrelease-crds.yaml) against the baseline branch
+    summary: |
+      Args (all optional):
+        path:     namespace-group/app to check (e.g. monitoring/kube-prometheus-stack).
+                  Omit to check every kubernetes/**/helmrelease-crds.yaml.
+        base:     baseline git ref for the "old" chart version (default: origin/main, then main)
+        mode:     schema | apiserver (default: schema)
+        rendered: path to a pre-rendered cluster manifest, to skip the flux-local render
+        markdown: write the report as Markdown to this path as well
+
+      Tier 1 (CRD removals, dropped served/storage versions, scope/kind changes) and
+      Tier 2 (schema delta) run entirely offline. Tier 3 validates every CR in the
+      rendered cluster manifest against the new CRDs.
+
+      Cluster-dependent checks are opt-in — see `task crd:check:live`.
+      Exits non-zero only on HIGH findings.
+    cmd: >-
+      bash "{{.CRD_CHECK_SCRIPT}}"
+      {{if .path}}--path "{{.path}}"{{end}}
+      {{if .base}}--base "{{.base}}"{{end}}
+      --mode "{{.mode | default "schema"}}"
+      {{if .rendered}}--rendered "{{.rendered}}"{{end}}
+      {{if .markdown}}--markdown "{{.markdown}}"{{end}}
+    preconditions:
+      - { msg: "Missing crd-upgrade-check script", sh: 'test -f "{{.CRD_CHECK_SCRIPT}}"' }
+      - { msg: "Missing helm/yq/jq/git — run 'mise install'", sh: "which helm yq jq git" }
+
+  check:one:
+    desc: Sanity-check a single app's CRD chart bump [path=required]
+    summary: |
+      Args:
+        path: namespace-group/app under kubernetes/apps (required)
+        base, mode, rendered, markdown: as in `task crd:check`
+
+      Identical to `task crd:check path=<group>/<app>`; this form fails fast when
+      the path is forgotten.
+    cmds:
+      - task: check
+        vars:
+          path: "{{.path}}"
+          base: "{{.base}}"
+          mode: "{{.mode}}"
+          rendered: "{{.rendered}}"
+          markdown: "{{.markdown}}"
+    requires:
+      vars: ["path"]
+
+  check:apiserver:
+    desc: CRD chart bump check with CR admission dry-run against a disposable kind cluster
+    summary: |
+      Args: same as `task crd:check`.
+
+      Spins up an ephemeral kind cluster, installs the NEW CRDs the way Flux does
+      (CreateReplace, not client-side apply — the Prometheus CRD is ~834KB and
+      blows the 262144-byte last-applied-configuration annotation limit), then
+      server-dry-runs every rendered CR against it. This is the only mode that
+      evaluates CEL (x-kubernetes-validations) and server-side defaulting.
+
+      The cluster is deleted on exit. The production cluster is never touched.
+    cmds:
+      - task: check
+        vars:
+          path: "{{.path}}"
+          base: "{{.base}}"
+          mode: apiserver
+          rendered: "{{.rendered}}"
+          markdown: "{{.markdown}}"
+    preconditions:
+      - { msg: "kind not found — install it, or use 'task crd:check' (--mode=schema)", sh: "which kind" }
+      # The script drives both kind and flux-local through the `docker` CLI, so
+      # that is the real requirement. Podman satisfies it only when its
+      # docker-compatible shim is on PATH under that name — accepting a bare
+      # `which podman` here would pass the precondition and then SKIP Tier 3
+      # mid-run, which reads as a broken check rather than a missing dependency.
+      - { msg: "docker CLI not found (podman works only via its docker shim) — or use 'task crd:check' (--mode=schema)", sh: "which docker" }
+
+  check:live:
+    desc: CRD chart bump check including the read-only cluster checks
+    summary: |
+      Args: same as `task crd:check`.
+
+      Adds Tier 1C (live status.storedVersions vs the new chart's version list —
+      a stored version the new chart no longer declares makes the apply fail) and
+      validation of CRs that exist in the cluster but not in Git.
+
+      Read-only: only `kubectl get`, every call with an explicit --request-timeout.
+    cmd: >-
+      bash "{{.CRD_CHECK_SCRIPT}}"
+      --live
+      {{if .path}}--path "{{.path}}"{{end}}
+      {{if .base}}--base "{{.base}}"{{end}}
+      --mode "{{.mode | default "schema"}}"
+      {{if .rendered}}--rendered "{{.rendered}}"{{end}}
+      {{if .markdown}}--markdown "{{.markdown}}"{{end}}
+    preconditions:
+      - { msg: "Missing crd-upgrade-check script", sh: 'test -f "{{.CRD_CHECK_SCRIPT}}"' }
+      - { msg: "Missing kubeconfig — use 'task crd:check' for the offline checks", sh: 'test -f "{{.KUBECONFIG}}"' }
+      - { msg: "Missing helm/yq/jq/git/kubectl — run 'mise install'", sh: "which helm yq jq git kubectl" }

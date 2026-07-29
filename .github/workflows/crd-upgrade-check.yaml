@@ -1,0 +1,118 @@
+---
+name: "CRD Upgrade Check"
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths: ["**/helmrelease-crds.yaml"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # No changed-files pre-job: the `paths:` filter above already gates this
+  # workflow on the only files it cares about. (Flux Local needs that pre-job
+  # because it has no `paths:` filter and must decide per-run.)
+  check:
+    name: CRD Upgrade Check
+    runs-on: ubuntu-latest
+    # No kubeconfig and no SOPS age key are provided to this job on purpose:
+    # every check here is either offline or runs against the disposable kind
+    # cluster created below.
+    permissions:
+      contents: read
+    outputs:
+      report: ${{ steps.report.outputs.report }}
+    steps:
+      # Full history: the check resolves the "old" chart version from
+      # origin/main and refuses to run without a baseline.
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup mise
+        uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
+        with:
+          cache: false
+
+      # Disposable apiserver for Tier 3. The script is pointed at this
+      # kubeconfig explicitly so it can never dry-run against anything else.
+      # node_image is deliberately not pinned here: kind-action ships a default
+      # matched to its own release, and Renovate already bumps the action SHA.
+      # Pinning it separately would add a second version string that Renovate
+      # does not track.
+      - name: Create disposable kind cluster
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: crd-upgrade-check
+          wait: 180s
+
+      # Same image and invocation style as the Flux Local workflow. Uses the
+      # `docker://` form rather than `docker run` in a `run:` block so that
+      # Renovate's github-actions manager tracks this pin — otherwise it bumps
+      # flux-local.yaml and silently leaves this copy behind.
+      #
+      # Defaults to --skip-secrets/--skip-crds, so no age key is needed. This
+      # captures the chart-generated PrometheusRules and ServiceMonitors that
+      # raw-file grepping misses.
+      - name: Render Flux manifests (Helm-inflated)
+        uses: docker://ghcr.io/allenporter/flux-local:v8.0.1
+        with:
+          args: >-
+            build all --enable-helm
+            --output-file /github/workspace/rendered.yaml
+            /github/workspace/kubernetes/flux/cluster
+
+      # Report-only on first landing: never fails the build. See
+      # docs/crd-upgrade-check.md for the promotion criterion.
+      - name: Run crd-upgrade-check
+        id: run
+        continue-on-error: true
+        run: |
+          bash scripts/crd-upgrade-check.sh \
+            --base "origin/${{ github.event.repository.default_branch || 'main' }}" \
+            --mode apiserver \
+            --apiserver-kubeconfig "$HOME/.kube/config" \
+            --rendered rendered.yaml \
+            --markdown crd-upgrade-check.md
+
+      - name: Publish summary
+        id: report
+        if: always()
+        run: |
+          if [[ ! -s crd-upgrade-check.md ]]; then
+            {
+              echo "## CRD Upgrade Check"
+              echo ""
+              echo "The check produced no report — it failed before writing one."
+              echo "Inspect the \`Run crd-upgrade-check\` step log."
+            } > crd-upgrade-check.md
+          fi
+          cat crd-upgrade-check.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'report<<CRD_REPORT_EOF'
+            cat crd-upgrade-check.md
+            echo CRD_REPORT_EOF
+          } >> "$GITHUB_OUTPUT"
+
+  comment:
+    name: CRD Upgrade Check Comment
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    if: ${{ github.event_name == 'pull_request' && needs.check.outputs.report != '' }}
+    steps:
+      - name: Add Comment
+        continue-on-error: true
+        uses: mshick/add-pr-comment@ec328af66588ab8f77cdeb2c264f14aba45bbf59 # v3.12
+        with:
+          message-id: "${{ github.event.pull_request.number }}/crd-upgrade-check"
+          message-failure: CRD upgrade check comment could not be posted
+          message: ${{ needs.check.outputs.report }}
