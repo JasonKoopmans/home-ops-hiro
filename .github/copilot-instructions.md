@@ -189,7 +189,7 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 ## Storage
 
 - **Longhorn** is the only storage provisioner. Volumes are backed by dedicated disks on each node (Talos `UserVolumeConfig` in `talos/patches/global/machine-volumes.yaml`).
-- Backups target an S3-compatible endpoint (MinIO) — backup configuration lives in `kubernetes/apps/storage/longhorn-system/`.
+- Backups target **AWS S3** (`s3://hiro-longhorn-backups@us-east-1/`), not the in-cluster MinIO — backup configuration lives in `kubernetes/apps/storage/longhorn-system/app/default-backup-target.yaml`. MinIO is an application object store (Thanos, Loki), not the Longhorn backupstore; do not conflate the two when reasoning about what survives a cluster loss.
 - **Several storage classes exist** (defined in `kubernetes/apps/storage/longhorn-system/app/storageclasses.yaml`). Choose by redundancy and backup needs:
 
   | Class | Replicas | Recurring backups | Use for |
@@ -421,7 +421,8 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 | DNS (internal) | k8s_gateway |
 | TLS | cert-manager, `letsencrypt-production` ClusterIssuer, wildcard cert in `network` ns |
 | Storage | Longhorn (multiple classes: replica count × backup policy) |
-| Object storage | MinIO (`storage` ns) — Thanos, Loki, Longhorn backups |
+| Object storage | MinIO (`storage` ns) — Thanos, Loki. **Not** the Longhorn backup target |
+| Longhorn backups | AWS S3, `s3://hiro-longhorn-backups@us-east-1/` |
 | Secrets | SOPS + age |
 | Dependency updates | Renovate (Saturdays, conventional commits) |
 | CI validation | flux-local (test + diff) |
