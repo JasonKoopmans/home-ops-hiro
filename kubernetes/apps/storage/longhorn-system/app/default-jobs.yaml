@@ -88,8 +88,8 @@ spec:
 # per job. Where a group's class has chain removal enabled, the trim is
 # scheduled BEFORE that group's next snapshot (not after), so the volume is left
 # bare for the shortest possible window: tsdb trims 03:00 against a 04:15
-# snapshot, snapshot-only trims 03:00 Sunday against a 05:00 snapshot. All are
-# clear of the 02:45 backup window.
+# snapshot; snapshot-only trims 03:00 Sunday against a 05:00 snapshot. Trims start
+# after the 02:45 default-group backup, but may overlap if the backup runs long.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
