@@ -28,7 +28,7 @@ spec:
             severity: warning
           annotations:
             summary: n8n container is restarting frequently
-            description: n8n app container has restarted more than 2 times in the last 15 minutes.
+            description: n8n app container has restarted more than 2 times in the last 15 minutes. Restart count now {{ $$value | humanize }}.
 
         - alert: N8nWorkflowErrorRateHigh
           expr: |
@@ -44,7 +44,7 @@ spec:
             severity: warning
           annotations:
             summary: n8n workflow error ratio is elevated
-            description: n8n workflow errors are above 5% over the last 10 minutes.
+            description: n8n workflow errors are above 5% over the last 10 minutes. Current error rate now {{ $$value | humanizePercentage }}.
 
         - alert: N8nWorkflowErrorRateCritical
           expr: |
@@ -60,7 +60,7 @@ spec:
             severity: critical
           annotations:
             summary: n8n workflow error ratio is critical
-            description: n8n workflow errors are above 20% over the last 10 minutes.
+            description: n8n workflow errors are above 20% over the last 10 minutes. Current error rate now {{ $$value | humanizePercentage }}.
 
         - alert: N8nNoRecentWorkflowExecutions
           expr: |

@@ -20,3 +20,14 @@ spec:
             key: bot-token
           chatID: 8854064758
           sendResolved: true
+          parseMode: HTML
+          message: |-
+            {{ if gt (len .Alerts.Firing) 0 }}🔥 <b>FIRING</b>{{ else }}✅ <b>RESOLVED</b>{{ end }} ({{ .Alerts.Firing | len }} firing, {{ .Alerts.Resolved | len }} resolved)
+            {{ range .Alerts.Firing }}
+            {{ if eq .Labels.severity "critical" }}🔴{{ else }}🟠{{ end }} <b>{{ .Labels.alertname }}</b> [{{ .Labels.severity }}]
+            {{ if .Labels.node }}node: <code>{{ .Labels.node }}</code>{{ end }}{{ if .Labels.namespace }} ns: <code>{{ .Labels.namespace }}</code>{{ end }}{{ if .Labels.pod }} pod: <code>{{ .Labels.pod }}</code>{{ end }}{{ if .Labels.instance }} instance: <code>{{ .Labels.instance }}</code>{{ end }}
+            {{ .Annotations.description }}
+            since {{ .StartsAt.Format "15:04 MST" }}
+            {{ end }}{{ range .Alerts.Resolved }}
+            ✅ <b>{{ .Labels.alertname }}</b> resolved{{ if .Labels.node }} — <code>{{ .Labels.node }}</code>{{ end }}{{ if .Labels.pod }} — <code>{{ .Labels.pod }}</code>{{ end }}{{ if .Labels.instance }} — <code>{{ .Labels.instance }}</code>{{ end }} (was {{ .Labels.severity }}, {{ .StartsAt.Format "15:04" }}–{{ .EndsAt.Format "15:04 MST" }})
+            {{ end }}

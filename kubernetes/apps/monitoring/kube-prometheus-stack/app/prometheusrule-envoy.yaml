@@ -28,4 +28,4 @@ spec:
             service: envoy
           annotations:
             summary: Envoy pod restarts detected
-            description: One or more Envoy pods in the network namespace have restarted within the last 30 minutes.
+            description: One or more Envoy pods in the network namespace have restarted within the last 30 minutes. Restart count now {{ $$value | humanize }}.
