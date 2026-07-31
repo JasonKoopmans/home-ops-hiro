@@ -27,3 +27,4 @@ resources:
   - ./changedetection/ks.yaml
   - ./guacamole/ks.yaml
   - ./freecad/ks.yaml
+  - ./audacity/ks.yaml
