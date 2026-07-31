@@ -47,6 +47,35 @@ secret — Claude falls back to `ANTHROPIC_API_KEY` (raw pay-per-token, already 
 Nothing else changes. Do **not** design cron/mission-critical work around OAuth; point
 those at Gemini.
 
+## Web dashboard
+
+Bundled UI for config/API-keys/sessions. Image already ships a supervised
+s6 slot for it (down/no-op unless `HERMES_DASHBOARD` truthy) — no sidecar,
+no second Deployment, just env vars on the existing container.
+
+- Enabled: `HERMES_DASHBOARD=true` in `helmrelease.yaml`, binds `0.0.0.0:9119`.
+- Exposed: `https://hermes.${SECRET_DOMAIN}/dashboard` — same host as the API,
+  routed by path (`PathPrefix /dashboard`, ahead of the API catch-all rule).
+  Envoy sets `X-Forwarded-Prefix: /dashboard` so the SPA reconstructs asset/
+  cookie/redirect URLs correctly (see `hermes_cli/dashboard_auth/prefix.py`).
+- Auth: bundled `basic_auth` provider (no OAuth IDP needed) —
+  `HERMES_DASHBOARD_BASIC_AUTH_USERNAME` / `_PASSWORD_HASH` / `_SECRET` in
+  `secret.sops.yaml`. A non-loopback bind hard-fails closed without a
+  registered auth provider — this is not optional.
+  - `_SECRET` (HMAC session-signing key) is pre-filled with a random value.
+  - `_USERNAME` / `_PASSWORD_HASH` are stored encrypted in `secret.sops.yaml` — set/rotate them via SOPS as needed (avoid sharing plaintext in chat/Git).
+    ```sh
+    kubectl -n default exec -it deploy/hermes-ai-agent -c app -- \
+      python3 -c "from plugins.dashboard_auth.basic import hash_password; import getpass; print(hash_password(getpass.getpass()))"
+    sops set kubernetes/apps/default/hermes-ai-agent/app/secret.sops.yaml \
+      '["stringData"]["HERMES_DASHBOARD_BASIC_AUTH_USERNAME"]' '"<username>"'
+    sops set kubernetes/apps/default/hermes-ai-agent/app/secret.sops.yaml \
+      '["stringData"]["HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH"]' '"<hash>"'
+    git commit && push   # Flux reconciles, reloader restarts the pod
+    ```
+  - Until both are set, the dashboard slot starts but the auth gate has
+    nothing to authenticate against — treat it as **not usable yet**.
+
 ## Locked-down posture (skills & autonomy)
 
 - `approvals.mode: manual`, `approvals.cron_mode: deny` — tool actions require approval; cron can't self-approve.
