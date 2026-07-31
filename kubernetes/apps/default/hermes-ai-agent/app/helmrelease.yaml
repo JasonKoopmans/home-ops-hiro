@@ -40,6 +40,18 @@ spec:
               TZ: ${TIMEZONE}
               API_SERVER_ENABLED: true
               API_SERVER_HOST: 0.0.0.0
+              # Pin the Hermes data/config dir onto the persistent volume.
+              # Holds config.yaml, .env, auth.json, state.db (FTS5 memory),
+              # skills/, cron/, sessions/. Matches the image default today;
+              # pinned so an upstream image change can't silently move it off
+              # the PVC and drop memory/skills on restart.
+              HERMES_HOME: /opt/data
+              # Locked-down posture: confine the agent's write_file/patch tool
+              # to a scratch dir so it can't clobber its own config/skills/DB or
+              # anything else under /opt/data. Result filing to Obsidian/Todoist
+              # goes via their REST APIs (network), not disk, so this doesn't
+              # block dispatch. Widen to /opt/data to relax.
+              HERMES_WRITE_SAFE_ROOT: /opt/data/workspace
             probes:
               liveness:
                 enabled: true
