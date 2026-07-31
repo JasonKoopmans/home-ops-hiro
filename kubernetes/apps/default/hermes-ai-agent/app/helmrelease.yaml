@@ -127,10 +127,17 @@ spec:
         rules:
           # Dashboard mounted at /dashboard on the same host, ahead of the
           # catch-all API rule below (Gateway API evaluates in list order).
-          # The dashboard reconstructs absolute URLs (OAuth redirects, SPA
-          # asset paths, cookie Path) from X-Forwarded-Prefix, so the path
-          # is passed through unrewritten and the header carries the mount
-          # point — see hermes_cli/dashboard_auth/prefix.py.
+          # The app's own auth-gate allowlist (_GATE_PUBLIC_PREFIXES in
+          # hermes_cli/dashboard_auth/middleware.py) matches literal paths
+          # like "/login" with NO prefix awareness — it expects the proxy
+          # to strip the mount prefix before forwarding, and only uses
+          # X-Forwarded-Prefix to reconstruct the prefix back onto outgoing
+          # Location headers / cookie paths / asset URLs (see
+          # hermes_cli/dashboard_auth/prefix.py). Forwarding "/dashboard/login"
+          # unrewritten made every request — including the login page itself —
+          # look non-public, causing a redirect loop. URLRewrite strips the
+          # prefix for the backend; the header lets it add "/dashboard" back
+          # for the browser.
           - matches:
               - path:
                   type: PathPrefix
@@ -141,6 +148,11 @@ spec:
                   set:
                     - name: X-Forwarded-Prefix
                       value: /dashboard
+              - type: URLRewrite
+                urlRewrite:
+                  path:
+                    type: ReplacePrefixMatch
+                    replacePrefixMatch: /
             backendRefs:
               - identifier: app
                 port: *dashboardPort
