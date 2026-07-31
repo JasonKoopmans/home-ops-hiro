@@ -189,7 +189,7 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 ## Storage
 
 - **Longhorn** is the only storage provisioner. Volumes are backed by dedicated disks on each node (Talos `UserVolumeConfig` in `talos/patches/global/machine-volumes.yaml`).
-- Backups target an S3-compatible endpoint (MinIO) — backup configuration lives in `kubernetes/apps/storage/longhorn-system/`.
+- Backups target **AWS S3** (`s3://hiro-longhorn-backups@us-east-1/`), not the in-cluster MinIO — backup configuration lives in `kubernetes/apps/storage/longhorn-system/app/default-backup-target.yaml`. MinIO is an application object store (Thanos, Loki), not the Longhorn backupstore; do not conflate the two when reasoning about what survives a cluster loss.
 - **Several storage classes exist** (defined in `kubernetes/apps/storage/longhorn-system/app/storageclasses.yaml`). Choose by redundancy and backup needs:
 
   | Class | Replicas | Recurring backups | Use for |
@@ -228,6 +228,7 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 |---|---|
 | **Flux Local** | **The primary (and only real) CI gate.** Runs `flux-local test` and posts `flux-local diff` for HelmReleases and Kustomizations on every PR touching `kubernetes/**`. |
 | **Security Scan** | Report-only. Runs KubeLinter (manifest misconfigurations) and Kubescape (NSA framework compliance score) against Helm-rendered manifests, plus gitleaks (accidental plaintext secrets) against the raw repo. On PRs touching `kubernetes/**` and weekly (for score-over-time tracking). Never fails the build — findings post to the run's **step summary**, not a PR comment. |
+| **CRD Upgrade Check** | Report-only. Runs on PRs touching `**/helmrelease-crds.yaml` (the CRD charts that version independently of their operator image). Compares the old and new chart's CRDs for removals, dropped served/storage versions and schema deltas, then dry-runs every rendered CR against a disposable kind cluster running the new CRDs. Posts to the step summary and a PR comment; never fails the build. See `docs/crd-upgrade-check.md`, including the list of things it deliberately does not verify. Local equivalent: `task crd:check`. |
 | **Image Vulnerability Scan** | Report-only. Trivy CVE scan of every container image referenced in the rendered manifests. Weekly + manual dispatch only (not per-PR — image CVEs don't change with unrelated PRs). Results in the step summary. |
 | **e2e** | Template-validation workflow inherited from cluster-template. It is gated to `onedr0p/cluster-template` and **does not run in this repo**. |
 | **Labeler / Label Sync** | PR auto-labeling housekeeping. |
@@ -421,7 +422,8 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 | DNS (internal) | k8s_gateway |
 | TLS | cert-manager, `letsencrypt-production` ClusterIssuer, wildcard cert in `network` ns |
 | Storage | Longhorn (multiple classes: replica count × backup policy) |
-| Object storage | MinIO (`storage` ns) — Thanos, Loki, Longhorn backups |
+| Object storage | MinIO (`storage` ns) — Thanos, Loki. **Not** the Longhorn backup target |
+| Longhorn backups | AWS S3, `s3://hiro-longhorn-backups@us-east-1/` |
 | Secrets | SOPS + age |
 | Dependency updates | Renovate (Saturdays, conventional commits) |
 | CI validation | flux-local (test + diff) |

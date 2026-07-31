@@ -63,6 +63,9 @@ parameters:
   numberOfReplicas: "3"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # Reproducible/bulk data — let filesystem-trim reclaim space pinned behind
+  # snapshots. See default-jobs.yaml and helmrelease.yaml for the trade-off.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
@@ -82,6 +85,9 @@ parameters:
   numberOfReplicas: "1"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # Reproducible/bulk data — let filesystem-trim reclaim space pinned behind
+  # snapshots. See default-jobs.yaml and helmrelease.yaml for the trade-off.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
@@ -101,13 +107,25 @@ parameters:
   numberOfReplicas: "2"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # Reproducible/bulk data — let filesystem-trim reclaim space pinned behind
+  # snapshots. See default-jobs.yaml and helmrelease.yaml for the trade-off.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"snapshot-only","isGroup":true}]'
 
 ---
-# TSDB/write-heavy volumes (e.g., Prometheus) — daily snapshot only via longhorn-tsdb-snapshot-job.
-# The Prometheus PVC was moved onto this class in #310; the daily/retain-2 cadence is
-# what keeps its snapshot chain from outrunning cleanup. Use this class (not the
-# *-no-backup ones, which snapshot 6-hourly) for any new continuously-written volume.
+# Continuously-written volumes whose durable copy lives in object storage —
+# Prometheus (Thanos/MinIO) and Loki (MinIO). Daily snapshot only, via
+# longhorn-tsdb-snapshot-job. The Prometheus PVC moved here in #310; the
+# daily/retain-2 cadence is what keeps its snapshot chain from outrunning
+# cleanup. Use this class (not the *-no-backup ones, which snapshot 6-hourly)
+# for any new continuously-written volume.
+#
+# The name describes the access pattern, not strictly the payload: high block
+# churn, local volume as buffer rather than system of record, no Longhorn backup
+# because the real copy is already in MinIO (S3-compatible object storage). It happens to stay literally
+# accurate for Loki too, whose schema is `store: tsdb`. A policy-shaped rename
+# (longhorn-derived or similar) was considered on 2026-07-28 and deliberately
+# deferred — revisit if a third non-metrics workload lands here.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -124,6 +142,10 @@ parameters:
   numberOfReplicas: "2"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # TSDB churn is exactly the case snapshot-pinned blocks hurt most; the durable
+  # copy lives in object storage, so collapsing local restore points on trim is
+  # an accepted trade. See default-jobs.yaml.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"tsdb","isGroup":true}]'
 
 ---
@@ -132,15 +154,21 @@ parameters:
 # rollback). Single replica: no redundancy value in scratch data, and no reason to
 # pay 2x write cost for it — on node loss the consumer just redownloads/recomputes.
 #
-# recurringJobSelector names a group ("scratch") that has NO RecurringJob targeting
-# it. This is deliberate, not an oversight: per #311, the CSI driver sets the
-# recurring-job-group label purely from this selector at provision time — it does
-# not check whether a job exists for the name. That label's mere presence is what
-# excludes the volume from Longhorn's `default` group (6-hourly snapshot + daily
-# backup) fallback. Since nothing ever targets "scratch", no job ever fires: no
-# snapshots are taken, so there is no chain to bloat — closer in behaviour to
-# emptyDir than to any other class here. Do NOT add a RecurringJob for this group;
-# that would defeat the point.
+# recurringJobSelector names a group ("scratch") with no snapshot or backup
+# RecurringJob targeting it. This is deliberate, not an oversight: per #311, the
+# CSI driver sets the recurring-job-group label purely from this selector at
+# provision time — it does not check whether a job exists for the name. That
+# label's mere presence is what excludes the volume from Longhorn's `default`
+# group (6-hourly snapshot + daily backup) fallback. No chain is ever created, so
+# none can bloat — closer in behaviour to emptyDir than to any other class here.
+# Do NOT add a snapshot or backup RecurringJob for this group; that would defeat
+# the point.
+#
+# The one job that DOES target "scratch" is longhorn-scratch-trim-job
+# (task: filesystem-trim, see default-jobs.yaml). Trim takes no snapshot — it only
+# unmaps blocks the volume has already stopped using — so it reclaims space
+# without reintroducing a chain. thanos-compactor-data was holding 11.9GiB of
+# allocation against 0.4MB of live data before that job existed.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -157,4 +185,6 @@ parameters:
   numberOfReplicas: "1"
   dataLocality: best-effort
   replicaAutoBalance: best-effort
+  # Nothing here is worth a restore point in the first place.
+  unmapMarkSnapChainRemoved: "enabled"
   recurringJobSelector: '[{"name":"scratch","isGroup":true}]'

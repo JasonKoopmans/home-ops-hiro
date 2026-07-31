@@ -26,3 +26,5 @@ resources:
   - ./tika-ner/ks.yaml
   - ./changedetection/ks.yaml
   - ./guacamole/ks.yaml
+  - ./freecad/ks.yaml
+  - ./audacity/ks.yaml

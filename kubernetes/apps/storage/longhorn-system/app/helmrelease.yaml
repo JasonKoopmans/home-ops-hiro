@@ -35,8 +35,51 @@ spec:
       guaranteedReplicaManagerCPU: "10"
       nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
       orphanAutoDeletion: true
+      # Deliberately FALSE (also the Longhorn default; stated explicitly to
+      # record the decision). This is the global fallback for volumes whose
+      # `unmapMarkSnapChainRemoved` is `ignored` (e.g. existing volumes until manually patched).
+      #
+      # Two separable knobs, do not conflate them:
+      #   - a filesystem-trim RecurringJob (see default-jobs.yaml) is always
+      #     safe: it can only unmap blocks nothing references, and can never
+      #     touch a snapshot.
+      #   - snapshot-chain removal is destructive: during a trim Longhorn marks
+      #     the latest snapshot AND ALL ITS ANCESTORS removed, stopping only at
+      #     a snapshot with multiple children. Recurring jobs produce a linear
+      #     chain, so in practice the volume is left with ZERO restore points
+      #     until its next scheduled snapshot.
+      #
+      # Turning that on cluster-wide would strip the chain from all 15 volumes
+      # in the `default` group to reclaim space that has only actually been
+      # measured on four. Enabled per-class instead (see storageclasses.yaml),
+      # for volumes whose contents are reproducible or already durable
+      # elsewhere. Revisit for `default` once the trim-only jobs have run and
+      # there is evidence of bloat there.
+      removeSnapshotsDuringFilesystemTrim: false
       replicaAutoBalance: best-effort
       storageMinimalAvailablePercentage: "1"
+      # Raised from Longhorn's default of 100. Longhorn schedules against a
+      # replica's *allocated* size, never its used bytes, and this cluster is
+      # heavily thin-provisioned -- measured actual vs scheduled per disk when
+      # this was changed: cmp-01 10/42Gi, cmp-02 22/79Gi, cmp-03 57/210Gi,
+      # cmp-04 14/45Gi, cmp-05 35/160Gi. At 100% the scheduler was rejecting
+      # placements the disks had ample real room for.
+      #
+      # Trigger: thanos-compactor-data (30Gi, longhorn-scratch, dataLocality
+      # best-effort) could not place its local replica alongside its pod on
+      # cmp-02 -- 79Gi already scheduled against a 99Gi ceiling left 20Gi of
+      # headroom for a 30Gi replica. The volume sat permanently at
+      # Scheduled=False/LocalReplicaSchedulingFailure with its only replica
+      # running remotely on cmp-05, so every compaction read/write crossed the
+      # network. 150% lifts cmp-02's ceiling to 148Gi and the replica fits.
+      #
+      # 150 and not 200: this keeps a real ceiling rather than removing one.
+      # Over-provisioning is a bet that volumes do not all fill at once, and at
+      # least one here can genuinely reach its full allocation (the compactor
+      # ENOSPC'd at 29.79Gi during a backlog -- see thanos/app/pvc.yaml).
+      # storageMinimalAvailablePercentage above is the backstop: Longhorn still
+      # refuses to schedule onto a disk that is actually near-full.
+      storageOverProvisioningPercentage: "150"
       storageReservedPercentageForDefaultDisk: "5"
     ingress:
       enabled: false
