@@ -28,8 +28,21 @@ should not duplicate managed keys once migration is verified (see "Post-merge").
 
 ## Provider routing
 
-- **Primary / default: Gemini** — `model.provider=gemini`, `model.default=gemini-2.5-flash`.
-  Uses `GOOGLE_API_KEY` (Google AI Pro / AI Studio). This is what unattended cron uses.
+- **Primary / default: Gemini** — `model.provider=gemini`, `model.default=gemini-flash-latest`
+  (alias, not a pinned version — see below). Uses `GOOGLE_API_KEY` (Google AI Pro / AI
+  Studio). This is what unattended cron uses.
+
+  **Why an alias, not a pinned model:** on 2026-07-31, `gemini-2.5-flash` (the original
+  pin) started returning `404: This model ... is no longer available to new users` for
+  this key — Google retires versioned model ids out from under existing keys with no
+  warning. Fallback correctly routed to Claude when this happened (see below), but it's
+  not something to rely on for routine primary-provider availability. `gemini-flash-latest`
+  is Google's floating alias to their current default flash model — it can't go stale the
+  same way, though it means the underlying model can change without a deploy. Verify a
+  candidate resolves before switching pins:
+  `curl -s -X POST -H 'Content-Type: application/json' "https://generativelanguage.googleapis.com/v1beta/models/<id>:generateContent?key=$GOOGLE_API_KEY" -d '{"contents":[{"parts":[{"text":"hi"}]}]}'`
+  — check for a `candidates` response, not just a non-404 status (a bare `-w '%{http_code}'`
+  check without `-H 'Content-Type: application/json'` can itself 404 and mislead).
 - **Fallback: Claude** — resilience only; `fallback_providers` fires on Gemini
   rate-limit/overload/connection errors, **not** on task difficulty.
 - **Claude selectively for hard tasks** — manual `/model claude-sonnet-4-6` in Telegram,
