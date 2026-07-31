@@ -52,6 +52,12 @@ spec:
               # goes via their REST APIs (network), not disk, so this doesn't
               # block dispatch. Widen to /opt/data to relax.
               HERMES_WRITE_SAFE_ROOT: /opt/data/workspace
+              # Web dashboard (config/API-keys/sessions UI). The image already
+              # ships a supervised s6 slot for this — gated by HERMES_DASHBOARD,
+              # a no-op/down slot otherwise. Auth is the bundled basic_auth
+              # provider (HERMES_DASHBOARD_BASIC_AUTH_* in the Secret); a
+              # non-loopback bind hard-fails closed without it.
+              HERMES_DASHBOARD: "true"
             probes:
               liveness:
                 enabled: true
@@ -101,6 +107,8 @@ spec:
         ports:
           http:
             port: *apiPort
+          dashboard:
+            port: &dashboardPort 9119
 
     route:
       app:
@@ -117,6 +125,25 @@ spec:
             namespace: network
             sectionName: https
         rules:
+          # Dashboard mounted at /dashboard on the same host, ahead of the
+          # catch-all API rule below (Gateway API evaluates in list order).
+          # The dashboard reconstructs absolute URLs (OAuth redirects, SPA
+          # asset paths, cookie Path) from X-Forwarded-Prefix, so the path
+          # is passed through unrewritten and the header carries the mount
+          # point — see hermes_cli/dashboard_auth/prefix.py.
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /dashboard
+            filters:
+              - type: RequestHeaderModifier
+                requestHeaderModifier:
+                  set:
+                    - name: X-Forwarded-Prefix
+                      value: /dashboard
+            backendRefs:
+              - identifier: app
+                port: *dashboardPort
           - backendRefs:
               - identifier: app
                 port: *apiPort
