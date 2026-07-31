@@ -137,7 +137,7 @@ kubectl -n default exec deploy/hermes-ai-agent -c app -- sh -c \
 ```sh
 sops kubernetes/apps/default/hermes-ai-agent/app/secret.sops.yaml
 # edit the value, save (re-encrypts in place), then:
-git commit && push   # Flux reconciles; reloader restarts the pod
+git commit && git push   # Flux reconciles; reloader restarts the pod
 ```
 
 `CLAUDE_CODE_OAUTH_TOKEN` is intentionally **empty** until you paste the output of
