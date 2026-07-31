@@ -156,6 +156,28 @@ spec:
             backendRefs:
               - identifier: app
                 port: *dashboardPort
+          # The dashboard's login page (hermes_cli/dashboard_auth/login_page.py)
+          # POSTs via a hardcoded absolute path — fetch('/auth/password-login') —
+          # with no prefix awareness at all (unlike the OAuth redirect_uri/cookie
+          # logic, which does honour X-Forwarded-Prefix). Loaded from
+          # /dashboard/login, that fetch still targets root /auth/password-login,
+          # which would otherwise fall through to the API catch-all below and
+          # 403 (the aiohttp API server on *apiPort has no such route). Root
+          # /auth/* doesn't collide with the API server's routes (/api/*, /v1/*,
+          # /health) so it's safe to send straight to the dashboard, unrewritten.
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /auth
+            filters:
+              - type: RequestHeaderModifier
+                requestHeaderModifier:
+                  set:
+                    - name: X-Forwarded-Prefix
+                      value: /dashboard
+            backendRefs:
+              - identifier: app
+                port: *dashboardPort
           - backendRefs:
               - identifier: app
                 port: *apiPort
