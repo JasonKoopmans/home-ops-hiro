@@ -63,8 +63,7 @@ no second Deployment, just env vars on the existing container.
   `secret.sops.yaml`. A non-loopback bind hard-fails closed without a
   registered auth provider — this is not optional.
   - `_SECRET` (HMAC session-signing key) is pre-filled with a random value.
-  - `_USERNAME` / `_PASSWORD_HASH` are **empty placeholders** — fill them
-    yourself so plaintext never enters chat/Git:
+  - `_USERNAME` / `_PASSWORD_HASH` are stored encrypted in `secret.sops.yaml` — set/rotate them via SOPS as needed (avoid sharing plaintext in chat/Git).
     ```sh
     kubectl -n default exec -it deploy/hermes-ai-agent -c app -- \
       python3 -c "from plugins.dashboard_auth.basic import hash_password; import getpass; print(hash_password(getpass.getpass()))"
