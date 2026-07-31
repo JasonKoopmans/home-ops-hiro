@@ -40,7 +40,7 @@ should not duplicate managed keys once migration is verified (see "Post-merge").
   is Google's floating alias to their current default flash model — it can't go stale the
   same way, though it means the underlying model can change without a deploy. Verify a
   candidate resolves before switching pins:
-  `curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/<id>:generateContent?key=$GOOGLE_API_KEY" -d '{"contents":[{"parts":[{"text":"hi"}]}]}'`
+  `curl -s -X POST -H 'Content-Type: application/json' "https://generativelanguage.googleapis.com/v1beta/models/<id>:generateContent?key=$GOOGLE_API_KEY" -d '{"contents":[{"parts":[{"text":"hi"}]}]}'`
   — check for a `candidates` response, not just a non-404 status (a bare `-w '%{http_code}'`
   check without `-H 'Content-Type: application/json'` can itself 404 and mislead).
 - **Fallback: Claude** — resilience only; `fallback_providers` fires on Gemini
