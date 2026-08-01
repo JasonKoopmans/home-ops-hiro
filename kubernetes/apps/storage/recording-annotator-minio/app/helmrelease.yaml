@@ -1,0 +1,62 @@
+---
+# yaml-language-server: $schema=https://lds-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: recording-annotator-minio
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: minio
+      # renovate: registryUrl=https://charts.min.io/
+      version: "5.4.0"
+      sourceRef:
+        kind: HelmRepository
+        name: recording-annotator-minio
+        namespace: storage
+  values:
+    # Single-node deployment dedicated to RecordingAnnotator (spec section 9) — deliberately separate from
+    # the shared storage/minio instance (Thanos/Loki), which is already capacity-constrained and unrelated
+    # in purpose to this app's recordings.
+    mode: standalone
+
+    existingSecret: recording-annotator-minio-root-credentials
+
+    # Disable the default console user created by chart post-install jobs
+    users: []
+
+    # Pre-create the bucket the app expects (RecordingAnnotator README "Deploy")
+    buckets:
+      - name: recordings
+        policy: none
+        purge: false
+
+    service:
+      type: ClusterIP
+
+    consoleService:
+      type: ClusterIP
+
+    persistence:
+      enabled: true
+      # No Longhorn backup: offsite protection for this bucket is MinIO server-side replication to an
+      # Object-Locked AWS S3 bucket (docs/backup-recovery.md §3 in the app repo), configured out-of-band
+      # per deploy/backup/RUNBOOK.md. A Longhorn backup here would just double the write cost for no
+      # additional protection against the threat that actually matters (ransomware/corruption).
+      storageClass: longhorn-2-no-backup
+      # Start small; grow as real recordings land rather than over-provisioning day one.
+      size: 2Gi
+
+    resources:
+      requests:
+        cpu: 25m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+
+    metrics:
+      serviceMonitor:
+        enabled: true
+        includeNode: true
+        interval: 30s

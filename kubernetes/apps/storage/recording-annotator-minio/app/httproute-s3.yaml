@@ -1,0 +1,37 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/gateway.networking.k8s.io/httproute_v1.json
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: recording-annotator-minio-s3
+spec:
+  # Unlike the shared storage/minio instance (whose S3 API only needs cluster-internal callers — Thanos/Loki),
+  # RecordingAnnotator's browser client plays media back via presigned URLs, so the S3 API itself must be
+  # reachable from LAN clients, not just the admin console. This is Storage__PublicEndpoint in the app config.
+  hostnames: ["recording-annotator-media.${SECRET_DOMAIN}"]
+  parentRefs:
+    - name: envoy-internal
+      namespace: network
+      sectionName: https
+  rules:
+    # Minio serves its metrics endpoints on the same port 9000 as the S3 API, so publishing the S3 API publishes
+    # those too. The chart defaults metrics.serviceMonitor.public=true, i.e. MINIO_PROMETHEUS_AUTH_TYPE=public —
+    # /minio/v2/metrics/* takes no credentials at all and would hand any LAN client the bucket names, object
+    # counts and usage. Prometheus scrapes the in-cluster Service, so nothing legitimate needs this path here.
+    #
+    # /minio/admin/* is deliberately NOT blocked: it is what `mc admin ...` talks to, so blocking it would break
+    # CLI administration from a workstation. Unlike the metrics endpoints it is SigV4-authenticated, and the only
+    # credentials that carry an admin policy are the root ones, which never leave the storage namespace — the
+    # scoped recording-annotator-rw user cannot use it. The web console is a different service on port 9001
+    # (see httproute-console.yaml), not this path.
+    - matches:
+        - path: { type: PathPrefix, value: /minio/v2/metrics }
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            path: { type: ReplaceFullPath, replaceFullPath: / }
+            statusCode: 302
+    - backendRefs:
+        - name: recording-annotator-minio
+          port: 9000
