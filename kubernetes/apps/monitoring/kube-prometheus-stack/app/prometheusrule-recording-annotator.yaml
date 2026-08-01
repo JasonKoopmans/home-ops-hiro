@@ -1,0 +1,158 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: recording-annotator-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: recording-annotator.rules
+      rules:
+        - alert: RecordingAnnotatorIndexBackupJobFailed
+          expr: kube_job_failed{namespace="default", job_name=~"recording-annotator-index-backup-.*"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator hourly index backup Job failed
+            description: The recording-annotator-index-backup CronJob has a failed Job. The offsite index snapshot (docs/backup-recovery.md §5) did not complete this hour.
+
+        - alert: RecordingAnnotatorReconciliationJobFailed
+          expr: kube_job_failed{namespace="default", job_name=~"recording-annotator-reconciliation-.*"} > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: RecordingAnnotator reconciliation audit Job failed
+            description: The recording-annotator-reconciliation CronJob has a failed Job. Index/blob consistency has not been audited today (docs/backup-recovery.md §7).
+
+        - alert: RecordingAnnotatorRestoreDrillJobFailed
+          expr: kube_job_failed{namespace="default", job_name=~"recording-annotator-restore-drill-.*"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator monthly restore drill failed
+            description: The recording-annotator-restore-drill CronJob failed — the offsite index backup could NOT be proven restorable this month (docs/backup-recovery.md §7, §9 phase 4). Treat the index backup as unverified until this is fixed and re-run.
+
+        # Gauges set on the live app process, scraped via the app's ServiceMonitor (spec section 9) — not from
+        # the CronJob trigger containers themselves.
+        - alert: RecordingAnnotatorReconciliationDanglingReferences
+          expr: recording_annotator_reconciliation_dangling_references > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator has dangling artifact references
+            description: "{{ $$value }} artifact(s) reference a MinIO object that does not exist. Write-order (docs/backup-recovery.md §4) makes this impossible in normal operation — treat as a real bug or a replication gap, i.e. broken playback."
+
+        - alert: RecordingAnnotatorOrphanObjectsHigh
+          expr: recording_annotator_reconciliation_orphan_objects > 50
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: RecordingAnnotator has a growing number of orphan blobs
+            description: "{{ $$value }} MinIO objects have no owning artifact past the grace window (docs/backup-recovery.md §7) — expected to be small; a persistently high count is wasted space worth investigating."
+
+        # The `> 0` guard on both staleness rules is load-bearing. AppMetrics declares these with prometheus-net's
+        # Metrics.CreateGauge, which publishes the series immediately at 0 — so a bare
+        # `time() - <gauge> > threshold` evaluates to ~1.7e9 the moment the pod starts and would fire on every
+        # rollout, before the first scheduled run could possibly have happened. The paired *NeverSucceeded rules
+        # close the hole that guard opens: a gauge pinned at 0 means the job has never once succeeded, which must
+        # still page. Those lean on `for:` rather than a range-vector window because `for:` requires the condition
+        # to hold for real elapsed time, which is what makes them behave correctly on a fresh install instead of
+        # firing against a window that is not full yet. Caveat: a Prometheus restart resets `for:` state, so a
+        # long-pending one starts its clock over.
+        - alert: RecordingAnnotatorIndexBackupStale
+          expr: |
+            recording_annotator_index_snapshot_timestamp_seconds > 0
+            and time() - recording_annotator_index_snapshot_timestamp_seconds > 5400
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator index backup has not run recently
+            description: No successful index snapshot in over 90 minutes despite an hourly schedule — the backup pipeline may have silently stopped (docs/backup-recovery.md §5), which is exactly the failure mode an untested backup hides.
+
+        - alert: RecordingAnnotatorIndexBackupNeverSucceeded
+          expr: recording_annotator_index_snapshot_timestamp_seconds == 0
+          for: 3h
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator has never completed an index backup
+            description: The index snapshot timestamp has been zero for 3 hours against an hourly schedule, so no snapshot has ever succeeded on this app instance. Briefly expected right after a first deploy; if it persists, the offsite index backup does not exist at all.
+
+        - alert: RecordingAnnotatorReconciliationStale
+          expr: |
+            recording_annotator_reconciliation_timestamp_seconds > 0
+            and time() - recording_annotator_reconciliation_timestamp_seconds > 129600
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: RecordingAnnotator reconciliation audit has not run recently
+            description: No successful reconciliation audit in over 36 hours despite a daily schedule — the dangling/orphan gauges above are no longer trustworthy (docs/backup-recovery.md §7).
+
+        - alert: RecordingAnnotatorReconciliationNeverSucceeded
+          expr: recording_annotator_reconciliation_timestamp_seconds == 0
+          for: 26h
+          labels:
+            severity: warning
+          annotations:
+            summary: RecordingAnnotator has never completed a reconciliation audit
+            description: The reconciliation timestamp has been zero for 26 hours against a daily schedule, so the audit has never succeeded on this app instance. The dangling-reference and orphan-object gauges read zero because nothing has ever measured them, not because the store is clean.
+
+    # The dedicated Minio instance backing this app. The existing prometheusrule-minio.yaml rules are scoped to
+    # the shared instance (`up{job="minio"}`, `pod=~"minio-.*"`) and do not match `recording-annotator-minio-*`,
+    # so without this group the store holding every recording has no availability or replication alerting at all.
+    - name: recording-annotator-minio.rules
+      rules:
+        - alert: RecordingAnnotatorMinioDown
+          # Job label comes from the chart's Probe (jobName: recording-annotator-minio) and node ServiceMonitor;
+          # confirm against `up{job=~"recording-annotator-minio.*"}` after the first scrape.
+          expr: up{job=~"recording-annotator-minio.*"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator's Minio instance is down
+            description: Target {{ $$labels.instance }} has been unreachable for 10 minutes. Media upload and playback are both broken while this is true.
+
+        - alert: RecordingAnnotatorMinioPodNotReady
+          expr: |
+            sum(kube_pod_status_ready{namespace="storage", condition="true", pod=~"recording-annotator-minio-.*"}) < 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator's Minio pod is not ready
+            description: No ready recording-annotator-minio pod in the storage namespace for 10 minutes.
+
+        # Media has no Longhorn backup by design — server-side replication to the Object-Locked S3 bucket IS the
+        # backup. It is configured imperatively by deploy/backup/configure-minio-replication.sh, so it can be
+        # absent (never run, or lost on a rebuild of this instance) with no other symptom. These two alerts are
+        # the only thing standing between that and silent total loss of the recordings' offsite copy.
+        # Series come from the bucket metrics endpoint, scraped by the probe-bucket-metrics.yaml in that app's
+        # directory. Confirm the exact metric names against the first live scrape before trusting silence here —
+        # Minio has renamed bucket replication series across releases.
+        - alert: RecordingAnnotatorMediaReplicationNotConfigured
+          expr: absent(minio_bucket_replication_failed_count{bucket="recordings"})
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: Minio replication to S3 is not reporting for the recordings bucket
+            description: No replication metrics for the recordings bucket. Either configure-minio-replication.sh was never run against this instance, the rule was removed, or the bucket-metrics scrape is broken. Until this is resolved the recordings have NO offsite copy — the PVC is on longhorn-2-no-backup precisely because replication was meant to cover it.
+
+        - alert: RecordingAnnotatorMediaReplicationFailing
+          expr: minio_bucket_replication_failed_count{bucket="recordings"} > 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: Minio replication to S3 is failing for the recordings bucket
+            description: "{{ $$value }} replication operation(s) have failed for 30 minutes. Newly uploaded recordings are not reaching the Object-Locked S3 bucket; check the replication target credentials and the remote bucket's object-lock configuration."
