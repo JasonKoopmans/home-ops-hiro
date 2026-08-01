@@ -7,3 +7,4 @@ resources:
   - ./pvc.yaml
   - ./recording-annotator-secret.sops.yaml
   - ./recording-annotator-restore-secret.sops.yaml
+  - ./recording-annotator-pullsecret.sops.yaml
