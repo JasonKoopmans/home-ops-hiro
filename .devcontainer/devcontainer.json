@@ -3,7 +3,7 @@
 {
 	"name": "Mise",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "jdxcode/mise",
+	"image": "jdxcode/mise:2026.7.8",
 
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
@@ -19,5 +19,13 @@
 	// "customizations": {},
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	"remoteUser": "root"
+	"remoteUser": "root",
+
+	"mounts": [
+		"source=aws-cli-config,target=/root/.aws,type=volume"
+	],
+
+	"remoteEnv": {
+		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
+	}
 }
