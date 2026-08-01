@@ -9,6 +9,13 @@ spec:
     kind: OCIRepository
     name: recording-annotator
   interval: 1h
+  # Default 5m wait is too tight for this app: the app controller uses strategy: Recreate (RWO PVC), so an
+  # upgrade first fully terminates the old pod, then cold-pulls ghcr.io/jasonkoopmans/recordingannotator on
+  # whatever node it lands on. A cold pull + start that runs past 5m gets marked UpgradeFailed and auto-rolled
+  # back to the last "successful" release even if the pod would have come up seconds later — which is exactly
+  # what caused this app to flap back to a broken pre-fix release repeatedly. 15m matches other image-heavy
+  # apps in this cluster (hermes-ai-agent, freecad, openreel, obsidian).
+  timeout: 15m
   values:
     fullnameOverride: *app
     controllers:
