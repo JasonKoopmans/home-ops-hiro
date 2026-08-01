@@ -1,0 +1,28 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/gateway.networking.k8s.io/httproute_v1.json
+# The Minio web console, for logging in to inspect or diagnose the recordings bucket by hand. Separate service
+# on port 9001, distinct from the S3 API on 9000 (httproute-s3.yaml) — mirrors the shared instance's
+# storage/minio/app/httproute-console.yaml. Login is the root credentials from
+# recording-annotator-minio-root-credentials.sops.yaml.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: recording-annotator-minio-console
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/icon: minio
+    gethomepage.dev/title: Recordings Object Store
+    gethomepage.dev/description: "Minio console for RecordingAnnotator media"
+    gethomepage.dev/group: "Media"
+spec:
+  hostnames:
+    - recording-annotator-minio.${SECRET_DOMAIN}
+  parentRefs:
+    - name: envoy-internal
+      namespace: network
+      sectionName: https
+  rules:
+    - backendRefs:
+        - name: recording-annotator-minio-console
+          namespace: storage
+          port: 9001

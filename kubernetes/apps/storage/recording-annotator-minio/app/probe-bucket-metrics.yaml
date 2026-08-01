@@ -1,0 +1,36 @@
+---
+# The Minio chart's own ServiceMonitor/Probe (enabled via helmrelease.yaml
+# metrics.serviceMonitor) only cover /minio/v2/metrics/cluster and
+# /minio/v2/metrics/node — it doesn't scrape /minio/v2/metrics/bucket, which
+# is the only endpoint exposing the per-bucket series. Mirrors the shared
+# instance's storage/minio/app/probe-bucket-metrics.yaml, including the trick
+# of using Minio itself as the "prober" (it ignores the injected target param
+# and returns the requested path) and relying on MINIO_PROMETHEUS_AUTH_TYPE
+# being "public" so no bearer token is needed.
+#
+# This matters more here than it does for the shared instance. The recordings
+# bucket's ONLY offsite protection is server-side replication to the
+# Object-Locked S3 bucket — the PVC is deliberately longhorn-2-no-backup.
+# Replication is configured imperatively, outside Git, by
+# deploy/backup/configure-minio-replication.sh, so if it is never run, silently
+# misconfigured, or lost when this instance is rebuilt, the media has no backup
+# at all and nothing else would notice. minio_bucket_replication_* comes from
+# this endpoint and is what the RecordingAnnotatorMediaReplication* alerts key
+# off.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: recording-annotator-minio-bucket
+  namespace: storage
+  labels:
+    app: minio
+spec:
+  jobName: recording-annotator-minio-bucket
+  prober:
+    url: recording-annotator-minio.storage:9000
+    path: /minio/v2/metrics/bucket
+    scheme: http
+  targets:
+    staticConfig:
+      static:
+        - recording-annotator-minio.storage

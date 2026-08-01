@@ -1,0 +1,120 @@
+---
+# RecordingAnnotator IAM user bootstrap Job — runs once after Minio is healthy. Creates a Minio user
+# scoped to only the recordings bucket (not the root credentials) and attaches it to the credentials
+# already generated and SOPS-encrypted in recording-annotator-minio-user-credentials.sops.yaml. The app
+# authenticates as this user via kubernetes/apps/default/recording-annotator/app/recording-annotator-secret.sops.yaml,
+# which holds the same accessKey/secretKey pair (Storage__AccessKey/Storage__SecretKey).
+#
+# Mirrors kubernetes/apps/storage/minio/app/thanos-user-bootstrap-job.yaml almost exactly — same shape,
+# same known-good annotations. No DeleteObject in the policy (unlike Thanos/Loki): the app has no v1
+# blob-delete path by design (RecordingAnnotator docs/backup-recovery.md §2), so it's tightened out.
+#
+# Manual equivalent:
+#   mc alias set local http://recording-annotator-minio.storage.svc.cluster.local:9000 <root user> <root password>
+#   mc admin policy create local recording-annotator-rw /tmp/policy.json
+#   mc admin user add local <accessKey> <secretKey>
+#   mc admin policy attach local recording-annotator-rw --user <accessKey>
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: recording-annotator-user-bootstrap
+  namespace: storage
+  annotations:
+    # prune: false prevents Flux from deleting this Job if the pod outlives the reconcile window. To
+    # fully decommission this Job, remove it from
+    # storage/recording-annotator-minio/app/kustomization.yaml — kubectl delete alone won't work because
+    # Flux will recreate it on the next reconcile while it remains in the resources list.
+    kustomize.toolkit.fluxcd.io/prune: "false"
+    # ssa: IfNotPresent tells kustomize-controller to skip applying/dry-running this resource once it
+    # already exists. Without this, a Job's spec.template is immutable and a fresh dry-run apply on every
+    # reconcile fails with "field is immutable" against the live object's controller-added labels — which
+    # permanently flips this Kustomization Ready=False after the Job's first successful run. This bit
+    # storage/minio's sibling bootstrap Jobs (bucket-bootstrap, thanos-user-bootstrap, loki-user-bootstrap,
+    # etc.) on 2026-07-19; applying the fix here from the start rather than rediscovering it.
+    kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              RETRIES=0; MAX_RETRIES=180
+              until mc alias set local http://recording-annotator-minio.storage.svc.cluster.local:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                RETRIES=$((RETRIES + 1))
+                if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
+                  echo "ERROR: minio did not become ready after $((MAX_RETRIES * 5))s, giving up"
+                  exit 1
+                fi
+                echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
+              done
+
+              cat > /tmp/recording-annotator-policy.json <<POLICY
+              {
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+                    "Resource": ["arn:aws:s3:::recordings"]
+                  },
+                  {
+                    "Effect": "Allow",
+                    "Action": ["s3:GetObject", "s3:PutObject"],
+                    "Resource": ["arn:aws:s3:::recordings/*"]
+                  }
+                ]
+              }
+              POLICY
+
+              # Idempotent: create policy only if it does not already exist
+              if ! mc admin policy info local recording-annotator-rw > /dev/null 2>&1; then
+                mc admin policy create local recording-annotator-rw /tmp/recording-annotator-policy.json
+              else
+                echo "policy recording-annotator-rw already exists, skipping"
+              fi
+
+              # Idempotent: create user only if it does not already exist
+              if ! mc admin user info local "$RECORDING_ANNOTATOR_ACCESS_KEY" > /dev/null 2>&1; then
+                mc admin user add local "$RECORDING_ANNOTATOR_ACCESS_KEY" "$RECORDING_ANNOTATOR_SECRET_KEY"
+              else
+                echo "user $RECORDING_ANNOTATOR_ACCESS_KEY already exists, skipping"
+              fi
+
+              mc admin policy attach local recording-annotator-rw --user "$RECORDING_ANNOTATOR_ACCESS_KEY"
+              echo "recording-annotator minio user ready"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: recording-annotator-minio-root-credentials
+                  key: rootUser
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: recording-annotator-minio-root-credentials
+                  key: rootPassword
+            - name: RECORDING_ANNOTATOR_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: recording-annotator-minio-user-credentials
+                  key: accessKey
+            - name: RECORDING_ANNOTATOR_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: recording-annotator-minio-user-credentials
+                  key: secretKey
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
