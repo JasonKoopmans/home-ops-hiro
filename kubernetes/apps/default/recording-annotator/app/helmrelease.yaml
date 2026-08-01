@@ -1,0 +1,334 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app recording-annotator
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: recording-annotator
+  interval: 1h
+  values:
+    fullnameOverride: *app
+    controllers:
+      app:
+        strategy: Recreate   # RWO PVC can't attach to old+new pod at once during rollout (LiteDB is single-file/process)
+        replicas: 1
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/jasonkoopmans/recordingannotator
+              tag: v0.1.0
+            env:
+              Storage__Provider: Minio
+              Storage__Endpoint: recording-annotator-minio.storage.svc.cluster.local:9000
+              # Browser-reachable endpoint for presigned playback URLs — NOT the cluster-internal address above.
+              Storage__PublicEndpoint: recording-annotator-media.${SECRET_DOMAIN}
+              Storage__Bucket: recordings
+              Storage__UseSsl: false
+              Storage__PublicUseSsl: true
+              LiteDb__DataDirectory: /data
+              # Deliberate deviation from upstream, which puts staging under /data on the same PVC as the LiteDB
+              # file. Staging holds whole in-flight recordings — routinely larger than the entire index — and has
+              # no GC for abandoned .part files (IUploadStagingStore.DiscardAsync only runs on an explicit
+              # discard). On a shared volume one abandoned multi-GB upload fills /data and LiteDB can no longer
+              # write, turning a failed upload into an outage on the crown-jewel data. Splitting it caps the
+              # blast radius at the upload itself. Safe to move: the staging store never crosses the volume
+              # boundary — it appends to .part here, streams it to Minio via OpenReadAsync, then deletes it.
+              # Cost of the split: staging no longer survives a pod restart, so an upload interrupted by a
+              # restart restarts instead of resuming. Acceptable for a single-user LAN app; revisit if uploads
+              # get big enough that losing one hurts.
+              Upload__StagingDirectory: /staging
+              Backup__Provider: S3
+              Backup__Endpoint: s3.us-east-1.amazonaws.com
+              Backup__Region: us-east-1
+              Backup__Bucket: hiro-recording-annotator-index-backup
+              Backup__Prefix: index
+              Backup__RetentionDays: 30
+              Backup__QuiesceTimeoutSeconds: 30
+              # RAISE THIS ONCE REAL RECORDINGS EXIST. It is the restore drill's only assertion that a snapshot
+              # has content: RestoreDrillService fails the drill when the restored artifact count is below it.
+              # At 0 the drill passes on a snapshot that opens and Rebuild()s cleanly but is completely empty —
+              # exactly the silent backup-rot the monthly drill exists to catch. 0 is correct only for a
+              # pre-launch install, where a real floor would false-alarm on every run.
+              Backup__MinArtifacts: 0
+              Reconciliation__OrphanGraceMinutes: 60
+              Storage__AccessKey:
+                secretKeyRef:
+                  name: recording-annotator-secret
+                  key: Storage__AccessKey
+              Storage__SecretKey:
+                secretKeyRef:
+                  name: recording-annotator-secret
+                  key: Storage__SecretKey
+              Backup__AccessKey:
+                secretKeyRef:
+                  name: recording-annotator-secret
+                  key: Backup__AccessKey
+              Backup__SecretKey:
+                secretKeyRef:
+                  name: recording-annotator-secret
+                  key: Backup__SecretKey
+            probes:
+              # No dependency checks — restarting the pod won't fix a downstream MinIO/S3 outage.
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: &port 8080
+                  initialDelaySeconds: 10
+                  periodSeconds: 15
+              # Gates traffic on LiteDB open + MinIO reachable; also creates the bucket on first success.
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /readyz
+                    port: *port
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+            securityContext:
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+                ephemeral-storage: 1Gi
+              limits:
+                memory: 512Mi
+                # Covers the staging emptyDir (8Gi) plus /tmp and logs. Sized so the emptyDir's own sizeLimit
+                # trips first on a single runaway upload; this is the backstop that keeps the pod from eating
+                # into a node's ephemeral storage. Sanity-check it against actual node disk before raising.
+                ephemeral-storage: 9Gi
+        pod:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654   # the image's $APP_UID
+            runAsGroup: 1654
+            fsGroup: 1654     # makes the mounted PVC writable by the non-root user
+
+      index-backup:
+        type: cronjob
+        cronjob:
+          schedule: "0 * * * *"   # top of every hour — meets the 1h index RPO (docs/backup-recovery.md §5)
+          concurrencyPolicy: Forbid   # a snapshot holds the write quiesce; never run two at once
+          startingDeadlineSeconds: 300
+          activeDeadlineSeconds: 300
+          backoffLimit: 2
+          successfulJobsHistory: 3
+          failedJobsHistory: 3
+        pod:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            runAsGroup: 1654
+        containers:
+          trigger:
+            image:
+              repository: curlimages/curl
+              tag: "8.11.1"
+            command:
+              - curl
+              - -fsS
+              - --max-time
+              - "240"
+              - -X
+              - POST
+              - http://recording-annotator:8080/internal/backup/index
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 32Mi
+
+      reconciliation:
+        type: cronjob
+        cronjob:
+          schedule: "17 3 * * *"   # daily, off the top-of-hour index-backup cadence (docs/backup-recovery.md §7)
+          concurrencyPolicy: Forbid
+          startingDeadlineSeconds: 300
+          activeDeadlineSeconds: 600
+          backoffLimit: 2
+          successfulJobsHistory: 3
+          failedJobsHistory: 3
+        pod:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            runAsGroup: 1654
+        containers:
+          trigger:
+            image:
+              repository: curlimages/curl
+              tag: "8.11.1"
+            command:
+              - curl
+              - -fsS
+              - --max-time
+              - "540"
+              - -X
+              - POST
+              - http://recording-annotator:8080/internal/reconcile
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 32Mi
+
+      restore-drill:
+        type: cronjob
+        cronjob:
+          schedule: "0 4 1 * *"   # monthly, 1st of the month (docs/backup-recovery.md §7, §9 phase 4)
+          concurrencyPolicy: Forbid
+          startingDeadlineSeconds: 600
+          activeDeadlineSeconds: 1800
+          backoffLimit: 1
+          successfulJobsHistory: 3
+          failedJobsHistory: 3
+        pod:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654
+            runAsGroup: 1654
+            fsGroup: 1654
+        containers:
+          restore-drill:
+            # Same image as the app controller; "restore-verify" selects the console drill entrypoint (pulls
+            # the latest index snapshot, Rebuild()s it, reads row counts back) instead of the web host. Never
+            # touches the live PVC — only a temp download into its own emptyDir below.
+            image:
+              repository: ghcr.io/jasonkoopmans/recordingannotator
+              tag: v0.1.0
+            args: ["restore-verify"]
+            env:
+              Backup__Provider: S3
+              Backup__Endpoint: s3.us-east-1.amazonaws.com
+              Backup__Region: us-east-1
+              Backup__Bucket: hiro-recording-annotator-index-backup
+              Backup__Prefix: index
+              # READ-only creds — deliberately NOT recording-annotator-secret's write-only ones.
+              Backup__AccessKey:
+                secretKeyRef:
+                  name: recording-annotator-restore-secret
+                  key: Backup__AccessKey
+              Backup__SecretKey:
+                secretKeyRef:
+                  name: recording-annotator-restore-secret
+                  key: Backup__SecretKey
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+                ephemeral-storage: 512Mi
+              limits:
+                memory: 512Mi
+                # Peak /tmp is ~2x the snapshot (Rebuild() writes a second copy beside the download). Bound to
+                # THIS pod so an oversized snapshot evicts the drill instead of pressuring node neighbours.
+                ephemeral-storage: 4Gi
+
+    persistence:
+      data:
+        existingClaim: recording-annotator-data
+        advancedMounts:
+          app:
+            app:
+              - path: /data
+      # readOnlyRootFilesystem leaves .NET with nowhere to put its diagnostic IPC socket (/tmp/.dotnet) or the
+      # DataProtection key ring, both of which degrade to warnings rather than failing — but the fallback is
+      # silent, so give it a real scratch dir. Uploads themselves stream from Request.Body as octet-stream
+      # (not multipart), so Kestrel never spools a body here; small is fine.
+      app-tmp:
+        type: emptyDir
+        sizeLimit: 128Mi
+        advancedMounts:
+          app:
+            app:
+              - path: /tmp
+      # In-flight upload staging, split off the LiteDB PVC (see Upload__StagingDirectory above). sizeLimit caps
+      # one abandoned upload at 8Gi; the container's matching ephemeral-storage limit is what actually gets it
+      # evicted, so a runaway upload takes out this pod rather than the node's other tenants. fsGroup 1654 on the
+      # pod makes the volume group-writable, and the staging store creates the directory itself on startup.
+      staging:
+        type: emptyDir
+        sizeLimit: 8Gi
+        advancedMounts:
+          app:
+            app:
+              - path: /staging
+      tmp:
+        type: emptyDir
+        sizeLimit: 4Gi
+        advancedMounts:
+          restore-drill:
+            restore-drill:
+              - path: /tmp
+
+    service:
+      app:
+        controller: app
+        ports:
+          http:
+            port: *port
+
+    route:
+      app:
+        hostnames: ["recordings.${SECRET_DOMAIN}"]
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: sh-recordings
+          gethomepage.dev/title: Recording Annotator
+          gethomepage.dev/description: "Time-coded comments on meeting recordings"
+          gethomepage.dev/group: "Media"
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          # /internal/* and /metrics are unauthenticated in v1 (BackupController and ReconciliationController
+          # carry no [Authorize]), so they must not be reachable through the gateway. A LAN client POSTing
+          # /internal/backup/index in a loop would quiesce writes AND mint S3 objects under COMPLIANCE-mode
+          # object lock, which nobody — including the account root — can delete for Backup__RetentionDays.
+          # The three CronJobs call the Service directly (http://recording-annotator:8080), never through the
+          # gateway, so bouncing these paths here costs nothing. Prometheus likewise scrapes via the Service.
+          # A longer path prefix wins over the catch-all rule below by Gateway API match precedence, which is
+          # specificity-based rather than list-order-based — the ordering here is only for readability.
+          - matches:
+              - path: { type: PathPrefix, value: /internal }
+              - path: { type: PathPrefix, value: /metrics }
+            filters:
+              - type: RequestRedirect
+                requestRedirect:
+                  scheme: https
+                  path: { type: ReplaceFullPath, replaceFullPath: / }
+                  statusCode: 302
+          - backendRefs:
+              - identifier: app
+                port: *port
+
+    serviceMonitor:
+      app:
+        endpoints:
+          - port: http

@@ -1,0 +1,17 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/api/core/v1/persistentvolumeclaim_v1.json
+# LiteDB index file + upload staging directory (RecordingAnnotator docs/backup-recovery.md §2, §9). RWO is
+# sufficient: LiteDB is single-file, single-process, matching the single-replica Deployment. Longhorn (3
+# replica + backup) is belt-and-suspenders under the app's own independent hourly S3 index export — starting
+# small (2Gi) and growing as real recordings land rather than over-provisioning day one.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: recording-annotator-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 2Gi

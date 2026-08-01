@@ -28,3 +28,4 @@ resources:
   - ./guacamole/ks.yaml
   - ./freecad/ks.yaml
   - ./audacity/ks.yaml
+  - ./recording-annotator/ks.yaml
