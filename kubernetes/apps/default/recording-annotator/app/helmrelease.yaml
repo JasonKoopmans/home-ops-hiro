@@ -21,7 +21,7 @@ spec:
           app:
             image:
               repository: ghcr.io/jasonkoopmans/recordingannotator
-              tag: v0.1.0
+              tag: "0.1.0"
             env:
               Storage__Provider: Minio
               Storage__Endpoint: recording-annotator-minio.storage.svc.cluster.local:9000
@@ -110,6 +110,8 @@ spec:
                 # into a node's ephemeral storage. Sanity-check it against actual node disk before raising.
                 ephemeral-storage: 9Gi
         pod:
+          imagePullSecrets:
+            - name: recording-annotator-pullsecret
           securityContext:
             runAsNonRoot: true
             runAsUser: 1654   # the image's $APP_UID
@@ -205,6 +207,8 @@ spec:
           successfulJobsHistory: 3
           failedJobsHistory: 3
         pod:
+          imagePullSecrets:
+            - name: recording-annotator-pullsecret
           securityContext:
             runAsNonRoot: true
             runAsUser: 1654
@@ -217,7 +221,7 @@ spec:
             # touches the live PVC — only a temp download into its own emptyDir below.
             image:
               repository: ghcr.io/jasonkoopmans/recordingannotator
-              tag: v0.1.0
+              tag: "0.1.0"
             args: ["restore-verify"]
             env:
               Backup__Provider: S3
