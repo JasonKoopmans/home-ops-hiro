@@ -20,6 +20,7 @@ resources:
   - ./prometheusrule-opnsense.yaml
   - ./prometheusrule-envoy.yaml
   - ./prometheusrule-pod-limit-pressure.yaml
+  - ./prometheusrule-recording-annotator.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml
