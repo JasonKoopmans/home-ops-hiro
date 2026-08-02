@@ -45,7 +45,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # manager matches `# renovate: …` followed by a `KEY=value` line and captures
 # \S+ as the version, so a quoted "image:tag" would capture the quotes too.
 # renovate: datasource=docker depName=ghcr.io/allenporter/flux-local
-FLUX_LOCAL_VERSION=v8.0.1
+FLUX_LOCAL_VERSION=v8.4.0
 FLUX_LOCAL_IMAGE="ghcr.io/allenporter/flux-local:${FLUX_LOCAL_VERSION}"
 # renovate: datasource=docker depName=kindest/node
 KIND_NODE_VERSION=v1.34.0
