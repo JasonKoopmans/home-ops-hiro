@@ -28,7 +28,7 @@ spec:
           app:
             image:
               repository: ghcr.io/jasonkoopmans/recordingannotator
-              tag: "0.1.0"
+              tag: "0.1.1"
             env:
               Storage__Provider: Minio
               Storage__Endpoint: recording-annotator-minio.storage.svc.cluster.local:9000
@@ -228,7 +228,7 @@ spec:
             # touches the live PVC — only a temp download into its own emptyDir below.
             image:
               repository: ghcr.io/jasonkoopmans/recordingannotator
-              tag: "0.1.0"
+              tag: "0.1.1"
             args: ["restore-verify"]
             env:
               Backup__Provider: S3
