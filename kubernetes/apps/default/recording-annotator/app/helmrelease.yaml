@@ -144,7 +144,7 @@ spec:
           trigger:
             image:
               repository: curlimages/curl
-              tag: "8.11.1"
+              tag: "8.21.0"
             command:
               - curl
               - -fsS
@@ -183,7 +183,7 @@ spec:
           trigger:
             image:
               repository: curlimages/curl
-              tag: "8.11.1"
+              tag: "8.21.0"
             command:
               - curl
               - -fsS
