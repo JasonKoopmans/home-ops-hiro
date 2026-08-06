@@ -31,6 +31,18 @@ spec:
     remediation:
       retries: 3
   values:
+    prometheusOperator:
+      admissionWebhooks:
+        # Covers both the admission-create and admission-patch hook Jobs —
+        # kube-webhook-certgen, one-shot per install/upgrade.
+        patch:
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+
     # Talos Linux: disable kube-proxy monitoring (Cilium handles kube-proxy functionality)
     kubeProxy:
       enabled: false

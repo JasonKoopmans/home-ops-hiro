@@ -50,6 +50,12 @@ spec:
               PUID: "1001"
               PGID: "1001"
 
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
 
           gluetun:
             image:
@@ -73,6 +79,17 @@ spec:
             envFrom:
               - secretRef:
                   name: gluetun-secret
+
+            # Sidecar carries the whole pod's network path. Sized off a measured
+            # 14d peak of ~103Mi (Thanos, container_memory_working_set_bytes):
+            # request covers the observed high-water mark, limit leaves 2.5x for
+            # reconnect bursts the 30s scrape interval can't see.
+            resources:
+              requests:
+                cpu: 25m
+                memory: 128Mi
+              limits:
+                memory: 256Mi
 
           main:
             image:

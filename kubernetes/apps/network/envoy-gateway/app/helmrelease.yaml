@@ -11,6 +11,15 @@ spec:
   values:
     global:
       imageRegistry: mirror.gcr.io
+    # Hook Job that mints the webhook serving cert; runs once per install/upgrade
+    certgen:
+      job:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
     config:
       envoyGateway:
         provider:
