@@ -24,12 +24,16 @@ spec:
             # envFrom:
             #   - secretRef:
             #       name: homepage-secret
+            # OOMKilled within the 14d window ending 2026-08-06 despite a
+            # measured peak of 126.2Mi against the previous 200Mi limit. Steady
+            # state is ~113Mi, so the kill came from a spike the 30s scrape
+            # never sampled — headroom that looks sufficient on paper isn't.
             resources:
               requests:
                 memory: 10Mi
                 cpu: 10m
               limits:
-                memory: 200Mi
+                memory: 384Mi
 
     serviceAccount:
       homepage: {}

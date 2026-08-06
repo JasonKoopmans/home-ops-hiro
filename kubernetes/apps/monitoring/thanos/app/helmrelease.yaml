@@ -61,12 +61,16 @@ spec:
                   periodSeconds: 15
                   timeoutSeconds: 5
                   failureThreshold: 3
+            # OOMKilled within the 14d window ending 2026-08-06: measured peak
+            # was 491.9Mi against the previous 512Mi limit (4% headroom), while
+            # the 14d average is only ~20Mi — query bursts are sharp and the 30s
+            # scrape can't see their true crest. 1Gi gives ~2x the observed peak.
             resources:
               requests:
                 cpu: 50m
                 memory: 128Mi
               limits:
-                memory: 512Mi
+                memory: 1Gi
 
       storegateway:
         pod:
@@ -115,12 +119,16 @@ spec:
                   periodSeconds: 15
                   timeoutSeconds: 5
                   failureThreshold: 3
+            # OOMKilled within the 14d window ending 2026-08-06: measured peak
+            # was 500.5Mi against the previous 512Mi limit — 2% headroom. 14d
+            # average is ~220Mi, so this one runs hot continuously rather than
+            # in bursts. 1Gi gives ~2x the observed peak.
             resources:
               requests:
                 cpu: 50m
                 memory: 128Mi
               limits:
-                memory: 512Mi
+                memory: 1Gi
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:
