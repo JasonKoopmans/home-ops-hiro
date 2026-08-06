@@ -366,7 +366,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 
 ## Development Environment
 
-- **mise** (`.mise.toml`) manages CLI tool versions (kubectl, flux, talosctl, sops, kustomize, kubeconform, etc.) and sets `KUBECONFIG`, `SOPS_AGE_KEY_FILE`, and `TALOSCONFIG` to repo-local paths. Also pins the security scanning toolchain used by the Security Scan / Image Vulnerability Scan workflows: `kube-linter`, `trivy`, `gitleaks`, `kubescape`, `conftest` (the last is available for future OPA/Rego policy checks but isn't wired into CI).
+- **mise** (`.mise.toml`) manages CLI tool versions (kubectl, flux, talosctl, sops, kustomize, kubeconform, etc.) and sets `KUBECONFIG`, `SOPS_AGE_KEY_FILE`, and `TALOSCONFIG` to repo-local paths. Also pins the security scanning toolchain used by the Security Scan / Image Vulnerability Scan workflows: `kube-linter`, `trivy`, `gitleaks`, `conftest` (the last is available for future OPA/Rego policy checks but isn't wired into CI). **Kubescape is the exception** — aqua's registry has no linux/arm64 build, which broke `mise install` in the arm64 devcontainer, so it's installed inline in `security-scan.yaml` (still via mise/aqua, just scoped to that CI job) instead of living in the shared `.mise.toml`.
 - A `.devcontainer/` config is provided for VS Code / Codespaces.
 - **Task** (`Taskfile.yaml` + `.taskfiles/`) provides common workflows:
   - `task reconcile` — force Flux to sync from Git
