@@ -48,6 +48,17 @@ jobs:
         with:
           cache: false
 
+      # Kubescape isn't in the shared .mise.toml — aqua's registry has no
+      # linux/arm64 build for it, which broke `mise install` in the arm64
+      # devcontainer. This runner is amd64-only, so install it here instead,
+      # scoped to this workflow. Still goes through mise/aqua (checksum +
+      # attestation verified) rather than a raw curl-to-shell script.
+      - name: Install Kubescape (CI-only)
+        run: |
+          # renovate: datasource=github-releases depName=kubescape/kubescape
+          KUBESCAPE_VERSION=4.0.11
+          mise use --global "aqua:kubescape/kubescape@${KUBESCAPE_VERSION}"
+
       # Runs before rendering so it only ever sees committed repo content —
       # once flux-local writes rendered.yaml into the working tree, `gitleaks
       # dir .` would scan that generated artifact too (checksum/* annotations
