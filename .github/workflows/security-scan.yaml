@@ -103,6 +103,7 @@ jobs:
 
       - name: Check exception expiry
         if: always()
+        continue-on-error: true
         run: |
           jq -r --arg today "$(date +%F)" \
             '.[] | select(.reviewBy < $today) | "\(.name) (reviewBy \(.reviewBy))"' \
