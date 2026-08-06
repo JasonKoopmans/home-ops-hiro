@@ -1,0 +1,109 @@
+[
+  {
+    "name": "C-0270-cpu-limits-repo-convention",
+    "reviewBy": "2027-02-01",
+    "reason": "CPU is compressible; a limit only adds CFS throttling risk, not a security boundary. Nodes are CPU-asymmetric (2-3 cores) and run Longhorn/Envoy on the latency path. default/echo already omits CPU limits as the repo's deliberate convention. See PR #401 discussion.",
+    "policyType": "postureExceptionPolicy",
+    "actions": ["alertOnly"],
+    "resources": [
+      { "designatorType": "Attributes", "attributes": { "namespace": ".*" } }
+    ],
+    "posturePolicies": [
+      { "controlID": "C-0270" }
+    ]
+  },
+  {
+    "name": "C-0012-credential-pattern-false-positives",
+    "reviewBy": "2027-02-01",
+    "reason": "Manually triaged 2026-08-06: env/config keys matched by name, not value. FB_NOAUTH is a boolean feature flag, HTTP_AUTH_HEADER/WEBHOOK_SECRET_NAME are header/secret-object names not secret material, cilium-config keys are policy-engine toggles, MINIO_PROMETHEUS_AUTH_TYPE=public is a metrics-auth-mode enum. None of these values are credentials.",
+    "policyType": "postureExceptionPolicy",
+    "actions": ["alertOnly"],
+    "resources": [
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "guacamole", "namespace": "default" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "qbittorrent", "namespace": "default" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "scanner-files", "namespace": "default" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "operator-webhook", "namespace": "knative-serving" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "ConfigMap", "name": "cilium-config", "namespace": "kube-system" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "minio", "namespace": "storage" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "recording-annotator-minio", "namespace": "storage" } }
+    ],
+    "posturePolicies": [
+      { "controlID": "C-0012" }
+    ]
+  },
+  {
+    "name": "C-0271-scratch-test-workloads",
+    "reviewBy": "2026-11-01",
+    "reason": "Committed scratch/smoke-test workloads (AGENTS.md: default/test is explicitly not a pattern to extend or replicate). Not production, low priority.",
+    "policyType": "postureExceptionPolicy",
+    "actions": ["alertOnly"],
+    "resources": [
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "test", "namespace": "default" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Pod", "name": "multus-test-pod", "namespace": "default" } }
+    ],
+    "posturePolicies": [
+      { "controlID": "C-0271" }
+    ]
+  },
+  {
+    "name": "C-0271-cni-dataplane-daemons",
+    "reviewBy": "2026-11-01",
+    "reason": "Deferred: Cilium CNI/dataplane and multus install DaemonSets. Upstream-chart-owned, node-critical hot path; sizing needs vendor guidance plus measured data before overriding, not yet done.",
+    "policyType": "postureExceptionPolicy",
+    "actions": ["alertOnly"],
+    "resources": [
+      { "designatorType": "Attributes", "attributes": { "kind": "DaemonSet", "name": "cilium", "namespace": "kube-system" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "DaemonSet", "name": "cilium-envoy", "namespace": "kube-system" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "cilium-operator", "namespace": "kube-system" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "DaemonSet", "name": "kube-multus-ds", "namespace": "network" } }
+    ],
+    "posturePolicies": [
+      { "controlID": "C-0271" }
+    ]
+  },
+  {
+    "name": "C-0271-longhorn-and-spegel",
+    "reviewBy": "2026-11-01",
+    "reason": "Deferred: Longhorn storage daemons/one-shot upgrade-uninstall Jobs and spegel image-mirror cleanup. Upstream-owned; the upgrade/uninstall Jobs run too briefly for cadvisor to ever sample, so limits here are judgment, not measurement -- needs a deliberate pass, not a default.",
+    "policyType": "postureExceptionPolicy",
+    "actions": ["alertOnly"],
+    "resources": [
+      { "designatorType": "Attributes", "attributes": { "kind": "DaemonSet", "name": "longhorn-manager", "namespace": "storage" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "longhorn-driver-deployer", "namespace": "storage" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "longhorn-ui", "namespace": "storage" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Job", "name": "longhorn-post-upgrade", "namespace": "storage" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Job", "name": "longhorn-pre-upgrade", "namespace": "storage" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Job", "name": "longhorn-uninstall", "namespace": "storage" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "DaemonSet", "name": "spegel-cleanup", "namespace": "kube-system" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Pod", "name": "spegel-cleanup-wait", "namespace": "kube-system" } }
+    ],
+    "posturePolicies": [
+      { "controlID": "C-0271" }
+    ]
+  },
+  {
+    "name": "C-0271-monitoring-stack-sidecars",
+    "reviewBy": "2026-11-01",
+    "reason": "Deferred: kube-prometheus-stack/grafana/loki/alloy sidecars and operators, k8s-gateway, reloader, mariadb-operator. Upstream-chart-owned; needs the same measured-peak treatment as thanos/homepage (PR #401) before setting real limits.",
+    "policyType": "postureExceptionPolicy",
+    "actions": ["alertOnly"],
+    "resources": [
+      { "designatorType": "Attributes", "attributes": { "kind": "DaemonSet", "name": "alloy", "namespace": "monitoring" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "kube-prometheus-stack-grafana", "namespace": "monitoring" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "kube-prometheus-stack-operator", "namespace": "monitoring" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "DaemonSet", "name": "loki-canary", "namespace": "monitoring" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "loki-gateway", "namespace": "monitoring" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "StatefulSet", "name": "loki-chunks-cache", "namespace": "monitoring" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "StatefulSet", "name": "loki-results-cache", "namespace": "monitoring" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "StatefulSet", "name": "loki", "namespace": "monitoring" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "k8s-gateway", "namespace": "network" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "reloader", "namespace": "kube-system" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator", "namespace": "database" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator-cert-controller", "namespace": "database" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator-webhook", "namespace": "database" } }
+    ],
+    "posturePolicies": [
+      { "controlID": "C-0271" }
+    ]
+  }
+]

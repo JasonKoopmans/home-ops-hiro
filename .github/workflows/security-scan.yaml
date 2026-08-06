@@ -96,7 +96,24 @@ jobs:
         # None of those kinds carry a pod spec, so no NSA control applies to them
         # anyway; raising the log threshold drops the noise without touching the
         # actual scan results.
-        run: kubescape scan framework nsa rendered.yaml --logger error 2>&1 | tee kubescape-results.txt
+        # --exceptions: triaged findings (false positives, deliberate repo
+        # conventions, deferred work) in security/kubescape-exceptions.json —
+        # see docs/kubescape-exceptions.md.
+        run: kubescape scan framework nsa rendered.yaml --exceptions security/kubescape-exceptions.json --logger error 2>&1 | tee kubescape-results.txt
+
+      - name: Check exception expiry
+        if: always()
+        continue-on-error: true
+        run: |
+          jq -r --arg today "$(date +%F)" \
+            '.[] | select(.reviewBy < $today) | "\(.name) (reviewBy \(.reviewBy))"' \
+            security/kubescape-exceptions.json > expired-exceptions.txt
+          if [ -s expired-exceptions.txt ]; then
+            echo "## :warning: Expired Kubescape exceptions — needs re-review" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat expired-exceptions.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Publish summary
         if: always()
