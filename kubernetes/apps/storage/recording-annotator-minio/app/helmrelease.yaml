@@ -26,6 +26,17 @@ spec:
     # Disable the default console user created by chart post-install jobs
     users: []
 
+    # Post-install hook Job that creates the bucket below. Overriding
+    # `resources` replaces the chart default wholesale, so the 128Mi request
+    # is restated here rather than inherited.
+    makeBucketJob:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 128Mi
+        limits:
+          memory: 256Mi
+
     # Pre-create the bucket the app expects (RecordingAnnotator README "Deploy")
     buckets:
       - name: recordings

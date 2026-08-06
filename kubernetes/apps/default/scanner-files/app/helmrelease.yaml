@@ -42,6 +42,12 @@ spec:
               FB_PORT: &port 8080
               PUID: 0
               GUID: 0
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
 
     service:
       app:
