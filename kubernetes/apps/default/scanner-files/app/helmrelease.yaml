@@ -31,23 +31,43 @@ spec:
                 memory: 512Mi
           browser:
             image:
-              repository: docker.io/filebrowser/filebrowser
-              tag: v2.63.23
+              repository: docker.io/library/caddy
+              tag: 2.11.4-alpine
             env:
               TZ: "${TIMEZONE}"
-              FB_DATABASE: /config/filebrowser.db
-              FB_ROOT: /srv
-              FB_LOG: stdout
-              FB_NOAUTH: true
-              FB_PORT: &port 8080
-              PUID: 0
-              GUID: 0
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+                add: [NET_BIND_SERVICE]
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 65534
+              runAsGroup: 65534
             resources:
               requests:
                 cpu: 10m
-                memory: 64Mi
+                memory: 32Mi
               limits:
-                memory: 256Mi
+                memory: 128Mi
+
+    defaultPodOptions:
+      securityContext:
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+
+    configMaps:
+      browser-caddyfile:
+        data:
+          Caddyfile: |-
+            {
+            	admin off
+            }
+
+            :8080 {
+            	root * /srv
+            	file_server browse
+            }
 
     service:
       app:
@@ -61,7 +81,7 @@ spec:
       browser:
         ports:
           http:
-            port: *port
+            port: &port 8080
 
     route:
       app:
@@ -97,3 +117,29 @@ spec:
     persistence:
       srv:
         existingClaim: scanner-files
+      browser-caddyfile:
+        type: configMap
+        identifier: browser-caddyfile
+        advancedMounts:
+          main:
+            browser:
+              - path: /etc/caddy
+                readOnly: true
+      browser-data:
+        type: emptyDir
+        advancedMounts:
+          main:
+            browser:
+              - path: /data
+      browser-config:
+        type: emptyDir
+        advancedMounts:
+          main:
+            browser:
+              - path: /config
+      browser-tmp:
+        type: emptyDir
+        advancedMounts:
+          main:
+            browser:
+              - path: /tmp
