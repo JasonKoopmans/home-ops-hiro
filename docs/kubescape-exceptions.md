@@ -37,6 +37,28 @@ for the full spec. Two conventions on top of the standard schema:
 | `C-0271-longhorn-and-spegel` | C-0271 | Longhorn daemons + one-shot upgrade Jobs — too short-lived to measure |
 | `C-0271-monitoring-stack-sidecars` | C-0271 | kube-prometheus-stack/loki/alloy/k8s-gateway/mariadb-operator — deferred pending the same measured-peak treatment PR #401 gave thanos/homepage |
 
+## KubeLinter is a separate tool — not covered by this file
+
+The Security Scan job also runs KubeLinter, which has its own
+`unset-memory-requirements` check and no concept of this exceptions file.
+KubeLinter's only per-resource suppression mechanism is an annotation on the
+object itself (`ignore-check.kube-linter.io/<check-name>`) — there's no
+config-level equivalent of "exclude this check for resources X, Y, Z"; the
+config-file `checks.exclude` is repo-wide.
+
+That annotation is only addable for resources whose manifest we author
+directly: `default/test`, `default/multus-test-pod`, and
+`network/kube-multus-ds` carry it. The other ~23 resources covered by the
+`C-0271-*` Kubescape exceptions are templated by upstream charts (cilium,
+longhorn, loki, kube-prometheus-stack, mariadb-operator, reloader, spegel,
+k8s-gateway, alloy) — whether their chart exposes an `annotations` values hook
+hasn't been checked chart-by-chart, and a blanket `checks.exclude` would also
+silence the check for future workloads that genuinely forget memory limits.
+So KubeLinter's raw output for those 23 remains unfiltered by design — treat
+Kubescape's exceptions file as the curated compliance signal, and KubeLinter's
+list as an unfiltered second opinion until/unless someone does that
+chart-by-chart pass.
+
 ## Adding an exception
 
 1. Confirm the finding is a false positive or a deliberate, documented

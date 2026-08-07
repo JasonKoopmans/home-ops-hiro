@@ -12,6 +12,8 @@ spec:
     controllers:
       test:
         strategy: Recreate
+        annotations:
+          ignore-check.kube-linter.io/unset-memory-requirements: "committed scratch/smoke-test app, not production (see AGENTS.md); tracked in security/kubescape-exceptions.json"
         containers:
           app:
             image:

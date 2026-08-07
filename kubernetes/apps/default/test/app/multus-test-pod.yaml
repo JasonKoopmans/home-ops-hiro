@@ -3,6 +3,7 @@ kind: Pod
 metadata:
   name: multus-test-pod
   annotations:
+    ignore-check.kube-linter.io/unset-memory-requirements: "committed scratch/smoke-test pod, not production (see AGENTS.md); tracked in security/kubescape-exceptions.json"
     k8s.v1.cni.cncf.io/networks: |
       [
         {
