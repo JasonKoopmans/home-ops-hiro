@@ -24,8 +24,8 @@
       { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "scanner-files", "namespace": "default" } },
       { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "operator-webhook", "namespace": "knative-serving" } },
       { "designatorType": "Attributes", "attributes": { "kind": "ConfigMap", "name": "cilium-config", "namespace": "kube-system" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "minio", "namespace": "storage" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "recording-annotator-minio", "namespace": "storage" } }
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "minio" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "recording-annotator-minio" } }
     ],
     "posturePolicies": [
       { "controlID": "C-0012" }
@@ -96,11 +96,11 @@
       { "designatorType": "Attributes", "attributes": { "kind": "StatefulSet", "name": "loki-chunks-cache", "namespace": "monitoring" } },
       { "designatorType": "Attributes", "attributes": { "kind": "StatefulSet", "name": "loki-results-cache", "namespace": "monitoring" } },
       { "designatorType": "Attributes", "attributes": { "kind": "StatefulSet", "name": "loki", "namespace": "monitoring" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "k8s-gateway", "namespace": "network" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "k8s-gateway" } },
       { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "reloader", "namespace": "kube-system" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator", "namespace": "database" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator-cert-controller", "namespace": "database" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator-webhook", "namespace": "database" } }
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator-cert-controller" } },
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "mariadb-operator-webhook" } }
     ],
     "posturePolicies": [
       { "controlID": "C-0271" }

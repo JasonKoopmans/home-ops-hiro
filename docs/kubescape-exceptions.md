@@ -17,6 +17,7 @@ for the full spec. Two conventions on top of the standard schema:
 
 - **`controlID`, not `controlName`** — control names get reworded across
   kubescape releases; the ID is stable.
+- **Omit `namespace` unless you've confirmed it's stamped.** flux-local's Helm render only sets `metadata.namespace` on the top-level `HelmRelease`/`Kustomization`/`OCIRepository` objects, not on the chart's own templated Deployments/DaemonSets/Jobs — those come out with `namespace: null` (namespace is applied for real only at `helm install -n <ns>` / kustomize-transformer time, which doesn't happen in a static render). An exception with `"namespace": "storage"` silently fails to match a resource whose rendered manifest has no namespace at all. Match on `kind`+`name` only unless you've checked the actual render. Bit us in #402 (mariadb-operator, k8s-gateway, minio) — Kubescape's own compliance table doesn't say *why* a resource didn't match, it just still fails.
 - **`reviewBy` (custom field, `YYYY-MM-DD`)** — kubescape has no native
   expiration mechanism (checked 2026-08-06 against the upstream docs); this
   field is our own, ignored by kubescape itself, and enforced by the
