@@ -17,6 +17,8 @@ for the full spec. Two conventions on top of the standard schema:
 
 - **`controlID`, not `controlName`** — control names get reworded across
   kubescape releases; the ID is stable.
+- **Omit `namespace` unless you've confirmed it's stamped.** flux-local's Helm render only sets `metadata.namespace` on the top-level `HelmRelease`/`Kustomization`/`OCIRepository` objects, not on the chart's own templated Deployments/DaemonSets/Jobs — those come out with `namespace: null` (namespace is applied for real only at `helm install -n <ns>` / kustomize-transformer time, which doesn't happen in a static render). An exception with `"namespace": "storage"` silently fails to match a resource whose rendered manifest has no namespace at all. Match on `kind`+`name` only unless you've checked the actual render. Bit us in #402 (mariadb-operator, k8s-gateway, minio) — Kubescape's own compliance table doesn't say *why* a resource didn't match, it just still fails.
+- **Verify against Kubescape's actual rule, not a hand-rolled guess at what it checks.** The original C-0012 triage (#402) used a custom grep-style script to spot "credential-shaped" env vars, and got it wrong in both directions: several resources it flagged (`guacamole`'s `HTTP_AUTH_HEADER`, `qbittorrent`/`scanner-files`'s `FB_NOAUTH`, `minio`'s `MINIO_PROMETHEUS_AUTH_TYPE`) don't contain any of Kubescape's actual `rule-credentials-in-env-var` keywords (`secret`/`key`/`password`/`pwd`/`token`/`jwt`/`bearer`/`credential`) and were never real findings — while the real failures (`homepage`, `n8n`, `changedetection`, `rsvp-reader`, `recording-annotator-app`) went completely untriaged. Root cause of those real failures, found 2026-08-07 (#403): this scan never decrypts SOPS, so `${SECRET_DOMAIN}` renders unresolved, and the variable *name* contains the substring `SECRET` — which trips the same keyword match on every app that puts a hostname in an env var. Fixed by neutralizing that substring in the rendered manifest before either scanner runs (see the `Neutralize unresolved postBuild variable names` step in `security-scan.yaml`), not by chasing five apps individually. Before adding or trusting a C-0012 exception, dry-run `kubescape scan ... --format json` locally and read the actual `rule-credentials-in-env-var` result for that resource — don't infer from a private script.
 - **`reviewBy` (custom field, `YYYY-MM-DD`)** — kubescape has no native
   expiration mechanism (checked 2026-08-06 against the upstream docs); this
   field is our own, ignored by kubescape itself, and enforced by the
@@ -30,11 +32,33 @@ for the full spec. Two conventions on top of the standard schema:
 | Name | Control | Why |
 |---|---|---|
 | `C-0270-cpu-limits-repo-convention` | C-0270 | Repo-wide: CPU is compressible, not a security boundary; see PR #401 |
-| `C-0012-credential-pattern-false-positives` | C-0012 | 7 resources, manually triaged — flag names/enum values, not secrets |
+| `C-0012-credential-pattern-false-positives` | C-0012 | `operator-webhook`, `cilium-config`, `loki` — key names containing "secret", not secret material |
 | `C-0271-scratch-test-workloads` | C-0271 | `default/test`, multus test pod — committed scratch apps, not production |
 | `C-0271-cni-dataplane-daemons` | C-0271 | Cilium + multus — node-critical, needs vendor guidance before sizing |
 | `C-0271-longhorn-and-spegel` | C-0271 | Longhorn daemons + one-shot upgrade Jobs — too short-lived to measure |
 | `C-0271-monitoring-stack-sidecars` | C-0271 | kube-prometheus-stack/loki/alloy/k8s-gateway/mariadb-operator — deferred pending the same measured-peak treatment PR #401 gave thanos/homepage |
+
+## KubeLinter is a separate tool — not covered by this file
+
+The Security Scan job also runs KubeLinter, which has its own
+`unset-memory-requirements` check and no concept of this exceptions file.
+KubeLinter's only per-resource suppression mechanism is an annotation on the
+object itself (`ignore-check.kube-linter.io/<check-name>`) — there's no
+config-level equivalent of "exclude this check for resources X, Y, Z"; the
+config-file `checks.exclude` is repo-wide.
+
+That annotation is only addable for resources whose manifest we author
+directly: `default/test`, `default/multus-test-pod`, and
+`network/kube-multus-ds` carry it. The other ~23 resources covered by the
+`C-0271-*` Kubescape exceptions are templated by upstream charts (cilium,
+longhorn, loki, kube-prometheus-stack, mariadb-operator, reloader, spegel,
+k8s-gateway, alloy) — whether their chart exposes an `annotations` values hook
+hasn't been checked chart-by-chart, and a blanket `checks.exclude` would also
+silence the check for future workloads that genuinely forget memory limits.
+So KubeLinter's raw output for those 23 remains unfiltered by design — treat
+Kubescape's exceptions file as the curated compliance signal, and KubeLinter's
+list as an unfiltered second opinion until/unless someone does that
+chart-by-chart pass.
 
 ## Adding an exception
 

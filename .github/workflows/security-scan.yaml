@@ -82,6 +82,17 @@ jobs:
           echo "Resource kinds found:"
           grep -E '^kind:' rendered.yaml | sort | uniq -c | sort -rn
 
+      # This job never decrypts SOPS (no age key here), so Flux postBuild vars
+      # like ${SECRET_DOMAIN} render unresolved -- and the variable *name*
+      # contains "SECRET", which trips Kubescape's naive keyword match on env
+      # var values (C-0012) for every app that puts a hostname in an env var.
+      # Confirmed 2026-08-07 (#403): 5 of 6 C-0012 failures on one run were
+      # this artifact, not real findings. Neutralize before either scanner
+      # sees it -- this can't hide a real secret, since a real secret value is
+      # never present in this render to begin with.
+      - name: Neutralize unresolved postBuild variable names
+        run: sed -i 's/SECRET_DOMAIN/REDACTED_DOMAIN_VAR/g' rendered.yaml
+
       - name: Run KubeLinter
         id: kube-linter
         continue-on-error: true

@@ -131,6 +131,8 @@ metadata:
     tier: node
     app: multus
     name: multus
+  annotations:
+    ignore-check.kube-linter.io/unset-memory-requirements: "vendored multus quickstart manifest; needs vendor guidance before sizing the CNI hot path, tracked in security/kubescape-exceptions.json"
 spec:
   selector:
     matchLabels:
