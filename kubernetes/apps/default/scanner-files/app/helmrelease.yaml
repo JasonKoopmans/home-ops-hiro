@@ -61,12 +61,12 @@ spec:
         data:
           Caddyfile: |-
             {
-            	admin off
+              admin off
             }
 
             :8080 {
-            	root * /srv
-            	file_server browse
+              root * /srv
+              file_server browse
             }
 
     service:

@@ -124,12 +124,12 @@ spec:
         data:
           Caddyfile: |-
             {
-            	admin off
+              admin off
             }
 
             :8081 {
-            	root * /downloads
-            	file_server browse
+              root * /downloads
+              file_server browse
             }
 
     service:
