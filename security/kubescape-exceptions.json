@@ -15,17 +15,13 @@
   {
     "name": "C-0012-credential-pattern-false-positives",
     "reviewBy": "2027-02-01",
-    "reason": "Manually triaged 2026-08-06: env/config keys matched by name, not value. FB_NOAUTH is a boolean feature flag, HTTP_AUTH_HEADER/WEBHOOK_SECRET_NAME are header/secret-object names not secret material, cilium-config keys are policy-engine toggles, MINIO_PROMETHEUS_AUTH_TYPE=public is a metrics-auth-mode enum. None of these values are credentials.",
+    "reason": "Re-triaged 2026-08-07 against Kubescape's actual rule-credentials-in-env-var (see #403 -- the original 2026-08-06 triage used a different, hand-rolled matcher and mislabeled which resources really trip Kubescape's rule; 5 previously-listed resources were removed here because they never matched it at all). WEBHOOK_SECRET_NAME (operator-webhook) is a Kubernetes Secret object's *name*, not its contents. cilium-config's flagged keys (*-secrets-namespace, mesh-auth-*) are policy-engine feature toggles. loki's access_key_id/secret_access_key are structural field names mandated by the S3-client config schema (objstore.yml) -- the actual values come from the loki-objstore-config Secret, SOPS-encrypted and never decrypted by this report-only scan. None of these values are credentials.",
     "policyType": "postureExceptionPolicy",
     "actions": ["alertOnly"],
     "resources": [
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "guacamole", "namespace": "default" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "qbittorrent", "namespace": "default" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "scanner-files", "namespace": "default" } },
       { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "operator-webhook", "namespace": "knative-serving" } },
       { "designatorType": "Attributes", "attributes": { "kind": "ConfigMap", "name": "cilium-config", "namespace": "kube-system" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "minio" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "recording-annotator-minio" } }
+      { "designatorType": "Attributes", "attributes": { "kind": "ConfigMap", "name": "loki", "namespace": "monitoring" } }
     ],
     "posturePolicies": [
       { "controlID": "C-0012" }
