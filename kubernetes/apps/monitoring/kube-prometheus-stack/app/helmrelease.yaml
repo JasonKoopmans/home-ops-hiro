@@ -107,6 +107,36 @@ spec:
           - action: drop
             sourceLabels: [__name__]
             regex: etcd_request_duration_seconds_bucket
+          # apiserver's own readiness-probe histogram and the client-go feature-gate
+          # gauge — internal bookkeeping, not consumed by any dashboard or rule.
+          #
+          # workqueue_{work,queue}_duration_seconds_bucket: client-go workqueue
+          # instrumentation, one series set per controller name. No consumer found
+          # (grep kubernetes/apps/); _count/_sum are not dropped so rate/avg still work.
+          - action: drop
+            sourceLabels: [__name__]
+            regex: prober_probe_duration_seconds_bucket|kubernetes_feature_enabled|workqueue_work_duration_seconds_bucket|workqueue_queue_duration_seconds_bucket
+
+    # Not otherwise customized — chart defaults for scrape config are fine. This
+    # block exists only to drop the same client-go workqueue/feature-gate series
+    # kubeApiServer drops above; kube-scheduler emits them too under its own job,
+    # so the apiserver-scoped rule above does not catch them (see the 192-series
+    # leak noted in #358 for the same class of gap on the etcd/apiserver drops).
+    kubeScheduler:
+      serviceMonitor:
+        metricRelabelings:
+          - action: drop
+            sourceLabels: [__name__]
+            regex: kubernetes_feature_enabled|workqueue_work_duration_seconds_bucket|workqueue_queue_duration_seconds_bucket
+
+    # See kubeScheduler above — same client-go workqueue/feature-gate series,
+    # emitted by kube-controller-manager under its own job.
+    kubeControllerManager:
+      serviceMonitor:
+        metricRelabelings:
+          - action: drop
+            sourceLabels: [__name__]
+            regex: kubernetes_feature_enabled|workqueue_work_duration_seconds_bucket|workqueue_queue_duration_seconds_bucket
 
     alertmanager:
       alertmanagerSpec:

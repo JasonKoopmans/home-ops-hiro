@@ -16,3 +16,11 @@ spec:
   endpoints:
     - port: manager
       interval: 30s
+      metricRelabelings:
+        # longhorn-manager's internal REST client histograms (calls between
+        # manager instances, plus its own workqueue instrumentation) — not
+        # consumed by any dashboard or PrometheusRule (see #358).
+        # _count/_sum are not dropped, so rate/avg queries still work.
+        - action: drop
+          sourceLabels: [__name__]
+          regex: longhorn_rest_client_rate_limiter_latency_seconds_bucket|longhorn_rest_client_request_latency_seconds_bucket|longhorn_workqueue_work_duration_seconds_bucket|longhorn_workqueue_queue_duration_seconds_bucket

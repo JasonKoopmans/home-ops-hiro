@@ -21,6 +21,12 @@ spec:
             - envoy_cluster_name
             - socket_match_name
           regex: envoy_cluster_total_match_count;httproute/default/knative-smoke;default
+        # Per-cluster config-update-duration histogram — not consumed by any
+        # dashboard or PrometheusRule (see #358). _count/_sum are not dropped,
+        # so rate/avg queries still work.
+        - action: drop
+          sourceLabels: [__name__]
+          regex: envoy_cluster_update_duration_bucket
   selector:
     matchLabels:
       app.kubernetes.io/component: proxy
