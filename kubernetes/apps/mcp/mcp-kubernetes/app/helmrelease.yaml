@@ -12,8 +12,12 @@ spec:
   values:
     controllers:
       main:
-        # Streamable HTTP sessions are stateful and pinned to a pod; a second
-        # replica would need sticky sessions the gateway doesn't provide.
+        # This server runs Streamable HTTP statelessly (sessionIdGenerator is
+        # undefined upstream, so every request gets a fresh transport), so it
+        # would scale horizontally. One replica because the load doesn't justify
+        # more — not because sessions pin to a pod. Don't copy this as a
+        # constraint: an MCP server that issues session IDs *would* need sticky
+        # sessions the gateway doesn't provide.
         replicas: 1
         strategy: Recreate
         containers:
@@ -30,13 +34,25 @@ spec:
               HOST: 0.0.0.0
               PORT: &port 3000
               # Second lock on the read-only door: even if the ServiceAccount
-              # were widened by mistake, the server refuses write tools.
+              # were widened by mistake, the server refuses write tools. Leaves
+              # kubectl_get, kubectl_describe, kubectl_logs, kubectl_context,
+              # kubectl_reconnect, explain_resource, list_api_resources, ping —
+              # dropping kubectl_generic, apply/create/patch/scale/rollout, the
+              # Helm tools and port-forward. Note this is stricter than
+              # ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS, which still permits writes.
+              # Those survivors are generic over resource type, so rbac.yaml is
+              # what actually bounds this server's reach.
               ALLOW_ONLY_READONLY_TOOLS: "true"
               MASK_SECRETS: "true"
-              # Rejects requests whose Host header isn't listed. This is the
-              # gateway hostname. Cluster-DNS callers send
-              # mcp-kubernetes.mcp.svc.cluster.local instead — UNVERIFIED
-              # whether that path is accepted or whether this var takes a list.
+              # Holds exactly ONE host and replaces the default allow-list —
+              # upstream wraps it as [value], with no comma splitting. The SDK
+              # compares the Host header by exact string (port included) and
+              # answers 403 "Invalid Host header" on a miss.
+              # Consequence: every client must reach this through the gateway
+              # hostname. Calling the Service directly at
+              # mcp-kubernetes.mcp.svc.cluster.local:3000 is rejected, so
+              # in-cluster clients (n8n, Hermes) hairpin out through
+              # envoy-internal like the external ones. One URL for all clients.
               DNS_REBINDING_ALLOWED_HOST: mcp-kubernetes.${SECRET_DOMAIN}
               # The server shells out to kubectl, which writes a discovery cache
               # under $HOME/.kube. Pointing HOME at the emptyDir below is what

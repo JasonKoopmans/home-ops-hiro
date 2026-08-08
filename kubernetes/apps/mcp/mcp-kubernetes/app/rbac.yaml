@@ -1,19 +1,43 @@
 ---
 # Read-only cluster access for the Kubernetes MCP server.
 #
-# get/list/watch only, cluster-wide. Deliberate omissions, so a future reader
-# knows these were decided rather than forgotten:
-#   secrets      the server masks values, but the token shouldn't read them at
-#                all. Side effect: Helm stores release metadata in Secrets, so
-#                the server's Helm tools won't work. Accepted.
-#   pods/exec    exec runs arbitrary code as the target pod, which would make
-#                this role's ceiling the most privileged pod in the cluster.
-#   rbac.*       no privilege enumeration.
-#   write verbs  the cluster is GitOps-managed; writes get reverted by Flux or
-#                cause drift.
+# In readonly mode this server's tools are generic — kubectl_get,
+# kubectl_describe, kubectl_logs, explain_resource, list_api_resources — and
+# operate on any resource type. So this RBAC *is* the server's capability
+# surface, not a supplement to a fixed tool list. Anything omitted here comes
+# back as Forbidden.
 #
-# Adding an API group here widens the blast radius of any prompt injection that
-# reaches this server. Add per demonstrated need, not speculatively.
+# Scope is built in two layers:
+#   1. the built-in `view` ClusterRole (bound below). Aggregated, get/list/watch
+#      only, and verified to exclude secrets, pods/exec, pods/attach and
+#      pods/portforward. Covers most namespaced resources including the Flux,
+#      Knative, MariaDB and cert-manager CRDs, whose charts ship
+#      aggregate-to-view roles.
+#   2. the ClusterRole below, for what `view` cannot reach: cluster-scoped
+#      kinds, and operator CRD groups whose charts ship no aggregate-to-view
+#      role (Longhorn, Cilium, Prometheus, Envoy Gateway, …).
+#
+# Deliberate omissions, so a future reader knows these were decided rather than
+# forgotten:
+#   secrets            never; the token should not read them at all.
+#   pods/exec          exec runs arbitrary code as the target pod, which would
+#   pods/attach        make this role's ceiling the most privileged pod in the
+#   pods/portforward   cluster.
+#   rbac.*             no privilege enumeration.
+#   write verbs        the cluster is GitOps-managed; writes get reverted by
+#                      Flux or cause drift.
+#
+# Accepted trade-off of layer 1: `view` widens on its own when a newly installed
+# operator ships an aggregate-to-view ClusterRole, so read access can grow
+# without a PR in this repo. Chosen over hand-enumerating ~20 API groups that
+# would go stale on every operator install.
+#
+# Convention when copying this for the next MCP server: always name apiGroups
+# explicitly, never `*`. Within a single named group, `resources: ["*"]` is fine
+# when the whole group is in scope — used below for vendor CRD groups, whose
+# resource lists churn with every chart bump. Built-in Kubernetes groups stay
+# enumerated: they are short and stable, and each addition widens the blast
+# radius of any prompt injection that reaches this server.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -22,111 +46,79 @@ metadata:
     app.kubernetes.io/instance: *app
     app.kubernetes.io/name: *app
 rules:
+  # Cluster-scoped core kinds. `view` is namespaced-only, so it has neither.
   - apiGroups:
       - ""
     resources:
-      - configmaps
-      - endpoints
-      - events
-      - limitranges
-      - namespaces
       - nodes
-      - persistentvolumeclaims
       - persistentvolumes
-      - pods
-      - pods/log
-      - replicationcontrollers
-      - resourcequotas
-      - serviceaccounts
-      - services
     verbs: &readonly
       - get
       - list
       - watch
-  - apiGroups:
-      - apps
-    resources:
-      - daemonsets
-      - deployments
-      - replicasets
-      - statefulsets
-    verbs: *readonly
-  - apiGroups:
-      - batch
-    resources:
-      - cronjobs
-      - jobs
-    verbs: *readonly
-  - apiGroups:
-      - autoscaling
-    resources:
-      - horizontalpodautoscalers
-    verbs: *readonly
-  - apiGroups:
-      - policy
-    resources:
-      - poddisruptionbudgets
-    verbs: *readonly
-  - apiGroups:
-      - networking.k8s.io
-    resources:
-      - ingresses
-      - networkpolicies
-    verbs: *readonly
-  - apiGroups:
-      - gateway.networking.k8s.io
-    resources:
-      - gateways
-      - grpcroutes
-      - httproutes
-    verbs: *readonly
+  # Storage topology — the other half of any "why is this volume unhealthy"
+  # question, alongside the longhorn.io group below.
   - apiGroups:
       - storage.k8s.io
     resources:
+      - csidrivers
+      - csinodes
+      - csistoragecapacities
       - storageclasses
       - volumeattachments
     verbs: *readonly
+  # Lets explain_resource and list_api_resources describe CRDs, not just
+  # built-in kinds.
   - apiGroups:
       - apiextensions.k8s.io
     resources:
       - customresourcedefinitions
     verbs: *readonly
+  # cert-manager ships an aggregate-to-view role, but it covers only the
+  # namespaced kinds. ClusterIssuer is where letsencrypt-production lives.
   - apiGroups:
-      - metrics.k8s.io
+      - cert-manager.io
     resources:
-      - nodes
-      - pods
+      - clusterissuers
     verbs: *readonly
-  # Flux state — "why hasn't my change landed" is the question this server will
-  # field most in a GitOps cluster. Enumerated rather than wildcarded so the
-  # grant stays legible when this file is copied for the next MCP server.
+  # Vendor CRD groups with no aggregate-to-view role of their own. Whole group
+  # in scope, still read-only — see the `resources: ["*"]` note in the header.
   - apiGroups:
-      - source.toolkit.fluxcd.io
+      - cilium.io
+      - externaldns.k8s.io
+      - fluxcd.controlplane.io   # FluxInstance / FluxReport — cluster-wide Flux status
+      - gateway.envoyproxy.io
+      - gateway.networking.k8s.io
+      - k8s.cni.cncf.io
+      - longhorn.io
+      - monitoring.coreos.com
+      - monitoring.grafana.com
+      - operator.knative.dev
     resources:
-      - buckets
-      - gitrepositories
-      - helmcharts
-      - helmrepositories
-      - ocirepositories
-    verbs: *readonly
-  - apiGroups:
-      - kustomize.toolkit.fluxcd.io
-    resources:
-      - kustomizations
-    verbs: *readonly
-  - apiGroups:
-      - helm.toolkit.fluxcd.io
-    resources:
-      - helmreleases
-    verbs: *readonly
-  - apiGroups:
-      - notification.toolkit.fluxcd.io
-    resources:
-      - alerts
-      - providers
-      - receivers
+      - "*"
     verbs: *readonly
 ---
+# Layer 1: the built-in read-only role. Bound separately from the supplement so
+# `kubectl describe clusterrolebinding mcp-kubernetes-view` names its source.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-kubernetes-view
+  labels:
+    app.kubernetes.io/instance: mcp-kubernetes
+    app.kubernetes.io/name: mcp-kubernetes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: mcp-kubernetes
+    # keep — ClusterRoleBinding is cluster-scoped, so the Flux Kustomization's
+    # targetNamespace does not rewrite this field.
+    namespace: mcp
+---
+# Layer 2: the supplement defined at the top of this file.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -141,6 +133,5 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: *app
-    # keep — ClusterRoleBinding is cluster-scoped, so the Flux Kustomization's
-    # targetNamespace does not rewrite this field.
+    # keep — see note above.
     namespace: mcp
