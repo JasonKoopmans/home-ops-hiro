@@ -1,0 +1,61 @@
+---
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+vars:
+  # Quoted at every use site — a checkout path containing a space would
+  # otherwise split into two arguments.
+  MCP_NEW_SCRIPT: "{{.ROOT_DIR}}/scripts/mcp-new.sh"
+  MCP_PROBE_SCRIPT: "{{.ROOT_DIR}}/scripts/mcp-probe.sh"
+  MCP_APPS_DIR: "{{.ROOT_DIR}}/kubernetes/apps/mcp"
+
+tasks:
+
+  new:
+    desc: Scaffold a new MCP server app under kubernetes/apps/mcp
+    summary: |
+      Args:
+        name:      app name (required). The mcp- prefix is added if absent, so
+                   `name=proxmox` and `name=mcp-proxmox` both yield mcp-proxmox.
+        archetype: native-http (default) or stdio.
+                   native-http — the upstream image speaks Streamable HTTP.
+                   stdio       — supergateway wraps a stdio-only server.
+                                 UNVERIFIED; no app uses it yet.
+
+      Generates the app directory and registers it in the namespace group.
+      The result is not deployable as-is: every TODO marker must be resolved
+      first. See docs/mcp-onboarding.md.
+
+      Examples:
+        task mcp:new name=proxmox
+        task mcp:new name=playwright archetype=stdio
+    requires:
+      vars: [name]
+    cmd: bash "{{.MCP_NEW_SCRIPT}}" "{{.name}}" "{{.archetype | default `native-http`}}" "{{.ROOT_DIR}}"
+    preconditions:
+      - { msg: "Missing scaffold script", sh: 'test -f "{{.MCP_NEW_SCRIPT}}"' }
+      - { msg: "Missing mcp namespace group", sh: 'test -d "{{.MCP_APPS_DIR}}"' }
+
+  todo:
+    desc: List unresolved TODO markers across MCP apps
+    summary: |
+      Scaffolded apps ship with TODO markers for the things that cannot be
+      filled in from the desk — image tag, transport env vars, and the UID pin
+      that is only knowable after the first deploy. This finds the stragglers.
+    cmd: grep -rn "TODO" "{{.MCP_APPS_DIR}}" || echo "No TODO markers — all MCP apps are fully configured."
+
+  probe:
+    desc: Check every MCP endpoint in the cluster over its in-cluster Service
+    summary: |
+      Runs a throwaway curl pod and calls tools/list on each MCP Service, which
+      exercises DNS, the Service, the transport and the server's own health in
+      one shot. Uses Service DNS rather than the gateway hostname because
+      in-cluster pods cannot resolve internal-only hostnames — CoreDNS forwards
+      to public resolvers and those records live only in k8s_gateway.
+
+      Expects HTTP 200 from each. A 406 means the Accept header was lost; a 403
+      means a host allow-list is rejecting the Service DNS name.
+    cmd: bash "{{.MCP_PROBE_SCRIPT}}"
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: 'test -f "{{.KUBECONFIG}}"' }
+      - { msg: "Missing probe script", sh: 'test -f "{{.MCP_PROBE_SCRIPT}}"' }

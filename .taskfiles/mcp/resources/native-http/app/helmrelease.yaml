@@ -1,0 +1,131 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# MCP server, "native HTTP" archetype: the upstream image speaks Streamable
+# HTTP itself. Reference implementation: kubernetes/apps/mcp/mcp-kubernetes.
+# Read docs/mcp-onboarding.md before editing — the port, path and hostname are
+# a contract shared by every MCP server, not per-app choices.
+#
+# TODO markers below are the ones you cannot fill in from the desk; each says
+# how to resolve it.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app __APP__
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        # One replica by default because MCP traffic is low, not because of a
+        # transport constraint. Check before raising it: a server that issues
+        # session IDs needs sticky sessions the gateway does not provide, while
+        # a stateless one (fresh transport per request) scales fine.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              # TODO: pin a specific tag, never `latest` — Renovate tracks tags.
+              repository: TODO
+              tag: TODO
+            env:
+              # The contract: HTTP on 3000, MCP at /mcp. Keep these three even
+              # if upstream defaults match — they document the contract, and
+              # they are what the probes, Service and route below anchor to.
+              HOST: 0.0.0.0
+              PORT: &port 3000
+              TZ: ${TIMEZONE}
+              # TODO: whatever the image needs to select Streamable HTTP and
+              # its path. Names vary wildly between servers — read the image's
+              # source, don't assume. Watch for two traps seen already:
+              #   * a "host allow-list" / DNS-rebinding check that accepts only
+              #     ONE value. It cannot cover both the gateway hostname and
+              #     <svc>.mcp.svc.cluster.local, so it locks out either the
+              #     workstation clients or the in-cluster ones. Envoy's
+              #     HTTPRoute hostname matching already rejects the attack it
+              #     defends against, so turning it off is usually correct.
+              #   * a read-only / non-destructive toggle. Prefer the strictest
+              #     one; they are not synonyms.
+            probes:
+              # TCP by default: MCP servers rarely document a health path, and
+              # /mcp itself is a POST endpoint that 406s a bare GET. Swap to
+              # httpGet once you have confirmed a real health path exists.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+
+    defaultPodOptions:
+      # No ServiceAccount token unless the server actually calls the Kubernetes
+      # API. If it does, add rbac.yaml and set this true.
+      automountServiceAccountToken: false
+      # TODO: pin the image's UID after the first deploy. Do NOT guess — a wrong
+      # value yields a pod that never starts. Deploy without this block, then:
+      #   kubectl -n mcp exec deploy/__APP__ -- id
+      # and fill in the reported uid/gid:
+      # securityContext:
+      #   runAsNonRoot: true
+      #   runAsUser: <uid>
+      #   runAsGroup: <gid>
+      #   fsGroup: <gid>
+      #   fsGroupChangePolicy: OnRootMismatch
+
+    persistence:
+      # Writable scratch so readOnlyRootFilesystem can stay true. app-template
+      # mounts an unqualified volume at /<name>, so this lands on /tmp. If the
+      # server crashes on a read-only filesystem, find the path it wanted and
+      # mount that as well — never flip readOnlyRootFilesystem to false.
+      tmp:
+        type: emptyDir
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        # Single-label hostname is required, not stylistic: the wildcard cert is
+        # ["${SECRET_DOMAIN}", "*.${SECRET_DOMAIN}"] and does not cover a second
+        # label, so __APP__.mcp.${SECRET_DOMAIN} fails TLS in every client.
+        hostnames: ["__APP__.${SECRET_DOMAIN}"]
+        parentRefs:
+          # envoy-internal unless the server is deliberately public. Anything on
+          # envoy-external must carry auth first — see the ladder in
+          # docs/mcp-onboarding.md.
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          # Path-scoped: phase-1 endpoints are unauthenticated, so only the MCP
+          # endpoint should be reachable. Widen only for a client that needs
+          # /.well-known OAuth discovery.
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: *port
