@@ -149,11 +149,49 @@ environments where local `kubectl` cannot.
 
 ### Claude Desktop
 
-Settings → Connectors → Add custom connector, with the same
-`https://mcp-<name>.${SECRET_DOMAIN}/mcp` URL. No config file to edit and no
-bridge process — but only while the endpoint stays unauthenticated. The
-connector UI has no custom-header field, so **step 2 of the auth ladder breaks
-it** and it needs an `mcp-remote` bridge from then on.
+**The Settings → Connectors UI cannot reach these endpoints at all.** Use an
+`mcp-remote` bridge in `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "kubernetes": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp-kubernetes.koopmans.co/mcp"]
+    }
+  }
+}
+```
+
+Restart Desktop after editing, and remove any failed custom connector from the
+UI or it keeps erroring alongside the working one.
+
+The reason is a third DNS position, distinct from the two in the table above:
+**a custom connector is fetched by Anthropic's servers, not by the Mac.** These
+hostnames route through `envoy-internal`, so external-dns never publishes them
+to Cloudflare and they resolve only in k8s_gateway:
+
+```
+dig @1.1.1.1 mcp-kubernetes.${SECRET_DOMAIN}   ->  NXDOMAIN
+dig @1.1.1.1 workflow.${SECRET_DOMAIN}         ->  172.66.40.203   (envoy-external, for contrast)
+```
+
+The bridge works because it is an ordinary local Node subprocess using the
+system resolver — the same path `curl` takes from the Mac.
+
+**The error message actively misleads.** It reads `Couldn't register with … sign-in
+service. You can try again, or add an OAuth Client ID`, which sounds like an auth
+problem and invites an afternoon of OAuth configuration. There is no OAuth here:
+the server 404s both `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server` and never returns a `401` or a
+`WWW-Authenticate` challenge, so a client has nothing to trigger a flow. It is a
+name that does not resolve. Confirm with `dig` against a public resolver before
+believing any auth-shaped error from a client you don't control.
+
+Consequence for the auth ladder: Desktop needs the bridge from **step 1**, not
+step 2. That turns out not to cost anything extra later — `mcp-remote` is also
+what carries a custom header at step 2, so this is the configuration it would
+have ended up with regardless.
 
 ### Hermes
 
@@ -177,8 +215,9 @@ Each step is an added file, not a redesign. Nothing about phase 1 forecloses the
 1. **None.** Internal-only, path-scoped route. Where we are.
 2. **App-level token.** Most servers support one (`MCP_AUTH_TOKEN` +
    `X-MCP-AUTH` in `mcp-server-kubernetes`), read from a SOPS secret.
-   **Claude Desktop breaks here** — its connector UI has no custom-header field,
-   so it needs an `mcp-remote` bridge from this step on.
+   Claude Desktop already runs through an `mcp-remote` bridge for reachability
+   reasons (see above), so it carries the header via `--header` and costs
+   nothing extra at this step.
 3. **Envoy `SecurityPolicy`** targeting the HTTPRoute (apiKeyAuth / JWT / OIDC /
    extAuth). Moves auth off the app and in front of it.
 4. **`envoy-external` + Cloudflare Access.** See
