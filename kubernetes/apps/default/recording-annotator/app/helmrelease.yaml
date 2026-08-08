@@ -135,6 +135,12 @@ spec:
           backoffLimit: 2
           successfulJobsHistory: 3
           failedJobsHistory: 3
+          # failedJobsHistory alone retains failed Jobs *forever* — it caps how many are kept, not how long.
+          # Three transient failures on 2026-08-01 therefore sat in the cluster until deleted by hand a week
+          # later. TTL deletes the Job and its pods (so the logs go too), which is why it is scaled to the
+          # schedule: long enough to diagnose after the fact, short enough that stale objects don't accumulate.
+          # Hourly job — a day is several dozen runs' worth of context.
+          ttlSecondsAfterFinished: 86400   # 24h
         pod:
           securityContext:
             runAsNonRoot: true
@@ -174,6 +180,9 @@ spec:
           backoffLimit: 2
           successfulJobsHistory: 3
           failedJobsHistory: 3
+          # See the index-backup controller above for why this is set. Daily job — two days keeps the previous
+          # run's context around while you look at the failed one.
+          ttlSecondsAfterFinished: 172800   # 48h
         pod:
           securityContext:
             runAsNonRoot: true
@@ -213,6 +222,10 @@ spec:
           backoffLimit: 1
           successfulJobsHistory: 3
           failedJobsHistory: 3
+          # See the index-backup controller above. Longest window of the three: this runs monthly, so a failure
+          # may not be looked at for days, and it is the job that proves the backup is restorable at all. Matches
+          # the 7d recency bound on RecordingAnnotatorRestoreDrillJobFailed.
+          ttlSecondsAfterFinished: 604800   # 7d
         pod:
           imagePullSecrets:
             - name: recording-annotator-pullsecret
