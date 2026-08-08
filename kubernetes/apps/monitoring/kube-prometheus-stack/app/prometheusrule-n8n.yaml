@@ -12,11 +12,12 @@ spec:
       rules:
         # Metric names below are taken from n8n 2.33.3's compiled metrics services,
         # not from documentation:
-        #   - event-bus counters are `${prefix}${event}_total` with dots replaced by
-        #     underscores, so n8n.workflow.failed -> n8n_workflow_failed_total.
-        #     The emitted events are started/success/failed/cancelled — there is no
-        #     `error` event, so the n8n_workflow_error_total these rules previously
-        #     used never existed.
+        #   - event-bus counters are named from the metrics prefix plus the event
+        #     name with dots replaced by underscores and a _total suffix, so
+        #     n8n.workflow.failed becomes n8n_workflow_failed_total. The emitted
+        #     events are started/success/failed/cancelled — there is no `error`
+        #     event, so the n8n_workflow_error_total these rules previously used
+        #     never existed.
         #   - the active-workflow gauge is n8n_active_workflow_count (not
         #     n8n_active_workflows).
         # All of the above except active_workflow_count require
@@ -78,8 +79,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: n8n workflow error ratio is elevated
-            description: n8n workflow errors are above 5% over the last 10 minutes. Current error rate now {{ $$value | humanizePercentage }}.
+            summary: n8n workflow failure ratio is elevated
+            description: n8n workflow failures are above 5% of executions over the last 10 minutes. Current failure ratio now {{ $$value | humanizePercentage }}.
 
         - alert: N8nWorkflowErrorRateCritical
           expr: |
@@ -94,8 +95,8 @@ spec:
           labels:
             severity: critical
           annotations:
-            summary: n8n workflow error ratio is critical
-            description: n8n workflow errors are above 20% over the last 10 minutes. Current error rate now {{ $$value | humanizePercentage }}.
+            summary: n8n workflow failure ratio is critical
+            description: n8n workflow failures are above 20% of executions over the last 10 minutes. Current failure ratio now {{ $$value | humanizePercentage }}.
 
         - alert: N8nNoRecentWorkflowExecutions
           expr: |

@@ -109,11 +109,11 @@ data:
         {
           "id": 5,
           "type": "timeseries",
-          "title": "Workflow Success/Error Rate",
+          "title": "Workflow Success/Failure Rate",
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
           "targets": [
             {"expr": "sum(rate(n8n_workflow_success_total[5m]))", "legendFormat": "success"},
-            {"expr": "sum(rate(n8n_workflow_failed_total[5m]))", "legendFormat": "error"}
+            {"expr": "sum(rate(n8n_workflow_failed_total[5m]))", "legendFormat": "failed"}
           ],
           "fieldConfig": {
             "defaults": {"min": 0, "unit": "ops", "custom": {"lineWidth": 2, "fillOpacity": 10}},
