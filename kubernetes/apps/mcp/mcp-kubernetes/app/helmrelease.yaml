@@ -84,18 +84,30 @@ spec:
               limits:
                 memory: 256Mi
 
-    # Creates the ServiceAccount named `mcp-kubernetes`; rbac.yaml binds it to a
-    # read-only ClusterRole. The mounted token is the server's credential — it
-    # uses in-cluster auth, which outranks every KUBECONFIG_* / K8S_* source.
+    # Creates the ServiceAccount named `mcp-kubernetes`; rbac.yaml binds it to
+    # the built-in `view` role plus a read-only supplement. The mounted token is
+    # the server's credential — it uses in-cluster auth, which outranks every
+    # KUBECONFIG_* / K8S_* source.
     serviceAccount:
       mcp-kubernetes: {}
 
     defaultPodOptions:
       automountServiceAccountToken: true
-      # runAsNonRoot is not set: the image's UID is unverified, and guessing
-      # wrong yields a pod that never starts. Resolve on first deploy with
-      #   kubectl -n mcp exec deploy/mcp-kubernetes -- id
-      # then pin runAsUser/runAsGroup here.
+      securityContext:
+        # UID/GID read off the running pod rather than guessed —
+        # `kubectl -n mcp exec deploy/mcp-kubernetes -- id` reports
+        # uid=1001(appuser) gid=1001(appuser). This is the image's own USER, so
+        # pinning it changes nothing at runtime; it just stops the pod from
+        # being *able* to start as root if a future image tag drops its USER.
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        # Not needed by the /tmp emptyDir, which kubelet already creates
+        # writable. Set so that a copy of this template which swaps in a PVC
+        # gets a mount the non-root user can write to without a second debug
+        # round-trip.
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
 
     persistence:
       # Writable scratch for the kubectl discovery cache (see HOME above).
