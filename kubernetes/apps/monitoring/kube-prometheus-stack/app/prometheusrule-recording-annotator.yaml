@@ -10,26 +10,52 @@ spec:
   groups:
     - name: recording-annotator.rules
       rules:
-        - alert: RecordingAnnotatorIndexBackupJobFailed
-          expr: kube_job_failed{namespace="default", job_name=~"recording-annotator-index-backup-.*"} > 0
-          for: 5m
-          labels:
-            severity: critical
-          annotations:
-            summary: RecordingAnnotator hourly index backup Job failed
-            description: The recording-annotator-index-backup CronJob has a failed Job. The offsite index snapshot (docs/backup-recovery.md §5) did not complete this hour.
-
-        - alert: RecordingAnnotatorReconciliationJobFailed
-          expr: kube_job_failed{namespace="default", job_name=~"recording-annotator-reconciliation-.*"} > 0
+        # These rules used to be `kube_job_failed{job_name=~"...-.*"} > 0`, which keys on the *existence* of a
+        # failed Job object rather than on any recent event. Combined with failedJobsHistory: 3 and no
+        # ttlSecondsAfterFinished, Kubernetes retained the failed Jobs indefinitely, so the alerts latched on
+        # permanently: three transient failures on 2026-08-01 kept a critical firing for a week and it could only
+        # be cleared by deleting the Job objects by hand. An alert that cannot resolve itself trains you to ignore
+        # the channel. Both replacements below are self-clearing, and neither depends on the TTL now set on the
+        # CronJobs for its correctness.
+        #
+        # index-backup and reconciliation are re-keyed onto kube_cronjob_status_last_successful_time — the
+        # CronJob's own status, via kube-state-metrics. That is a deliberately *different* data path from the
+        # `recording_annotator_*_timestamp_seconds` app gauges that the *Stale rules below read: those gauges come
+        # from the app's own ServiceMonitor, and if that scrape breaks the *Stale expressions go empty and stop
+        # alerting silently. Thresholds here are looser and severities lower than the paired *Stale rule on
+        # purpose — the app gauge stays the primary signal, this is the independent corroboration that keeps
+        # working when the app gauge does not.
+        - alert: RecordingAnnotatorIndexBackupNotSucceeding
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="default", cronjob="recording-annotator-index-backup"} > 10800
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: RecordingAnnotator reconciliation audit Job failed
-            description: The recording-annotator-reconciliation CronJob has a failed Job. Index/blob consistency has not been audited today (docs/backup-recovery.md §7).
+            summary: RecordingAnnotator index backup CronJob has no recent successful run
+            description: The recording-annotator-index-backup CronJob has not recorded a successful Job in over 3 hours against an hourly schedule (docs/backup-recovery.md §5). If RecordingAnnotatorIndexBackupStale is silent while this fires, suspect the app's metrics scrape rather than the backup itself.
 
+        - alert: RecordingAnnotatorReconciliationNotSucceeding
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="default", cronjob="recording-annotator-reconciliation"} > 172800
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: RecordingAnnotator reconciliation CronJob has no recent successful run
+            description: The recording-annotator-reconciliation CronJob has not recorded a successful Job in over 48 hours against a daily schedule (docs/backup-recovery.md §7).
+
+        # restore-drill deliberately keeps the failed-Job expression. It is monthly and has never once succeeded,
+        # so kube_cronjob_status_last_successful_time does not exist for it at all — a last-success-age rule would
+        # evaluate empty and never fire, silently removing the only coverage this job has (it has no paired
+        # *Stale / *NeverSucceeded app-gauge rules the way the two above do). The `kube_job_created` clause bounds
+        # it by recency instead, so it self-clears 7 days after the failure whether or not the Job object is still
+        # around. 7 days suits a monthly cadence: long enough to be seen, short enough to stop nagging.
         - alert: RecordingAnnotatorRestoreDrillJobFailed
-          expr: kube_job_failed{namespace="default", job_name=~"recording-annotator-restore-drill-.*"} > 0
+          expr: |
+            kube_job_failed{namespace="default", job_name=~"recording-annotator-restore-drill-.*"} > 0
+            and on (namespace, job_name)
+            (time() - kube_job_created{namespace="default", job_name=~"recording-annotator-restore-drill-.*"} < 604800)
           for: 5m
           labels:
             severity: critical
