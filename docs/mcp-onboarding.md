@@ -85,10 +85,82 @@ gets `NXDOMAIN`.
 | Client | URL |
 |---|---|
 | n8n, Hermes (in-cluster) | `http://mcp-<name>.mcp.svc.cluster.local:3000/mcp` |
-| Claude Desktop, devcontainer (LAN) | `https://mcp-<name>.${SECRET_DOMAIN}/mcp` |
+| Claude Desktop, Claude Code, devcontainer (LAN) | `https://mcp-<name>.${SECRET_DOMAIN}/mcp` |
 
 Service DNS in-cluster matches what every other service-to-service call in this
 repo already does — there are 20+ instances and no exceptions.
+
+### n8n
+
+No repo change — n8n's node config lives in its PVC, so this is a click-path.
+Verified against the running 2.33.3 image; re-check after a major bump.
+
+n8n ships two MCP nodes in `@n8n/n8n-nodes-langchain`:
+
+| Node | Internal name | Use |
+|---|---|---|
+| **MCP Client Tool** | `mcpClientTool` (v1.4) | Hands the whole toolset to an AI Agent. **Must be connected to an agent** — it has no standalone output |
+| **MCP Client** | `mcpClient` (v1.1) | Calls one named tool from an ordinary workflow, no agent involved |
+
+Both take the same three fields:
+
+- **Server Transport** — `HTTP Streamable`. Already the default on these
+  versions; the other option is labelled `Server Sent Events (Deprecated)`.
+- **Endpoint** — `http://mcp-<name>.mcp.svc.cluster.local:3000/mcp`
+- **Authentication** — `None`, which is also the default. Phase 1 servers are
+  unauthenticated, so no credential object is needed. At step 2 of the auth
+  ladder this becomes `Header Auth` (`X-MCP-AUTH`) or `Bearer Auth`.
+
+MCP Client Tool also has a **Tools to Include** selector (`All` / `Selected` /
+`All Except`). Worth narrowing when a server exposes tools an agent shouldn't
+reach for — cheaper than an RBAC change and it shrinks the agent's prompt.
+
+### Claude Code and devcontainers
+
+Checked in at the repo root, so a fresh clone gets it:
+
+```json
+// .mcp.json
+{
+  "mcpServers": {
+    "kubernetes": {
+      "type": "http",
+      "url": "https://mcp-kubernetes.koopmans.co/mcp"
+    }
+  }
+}
+```
+
+The literal domain is fine here — this file is read by Claude Code, not by Flux,
+so `${SECRET_DOMAIN}` would not be substituted. `Taskfile.yaml` hardcodes it for
+the same reason.
+
+`.claude/settings.json` carries `enabledMcpjsonServers: ["kubernetes"]`, which
+pre-approves it. Without that, every session prompts on first use — fine
+interactively, a hang anywhere non-interactive. Adding a server to `.mcp.json`
+therefore means adding its name there too; that second step is deliberate, so a
+new endpoint is an explicit decision rather than an inherited one.
+
+This is redundant with the `Bash(kubectl get:*)` allow-list **only when the local
+kubeconfig exists**. It does not in a fresh clone or a git worktree — the paths
+`.mise.toml` exports point at files that were never checked in. The MCP server
+carries its own in-cluster ServiceAccount, so it answers in exactly the
+environments where local `kubectl` cannot.
+
+### Claude Desktop
+
+Settings → Connectors → Add custom connector, with the same
+`https://mcp-<name>.${SECRET_DOMAIN}/mcp` URL. No config file to edit and no
+bridge process — but only while the endpoint stays unauthenticated. The
+connector UI has no custom-header field, so **step 2 of the auth ladder breaks
+it** and it needs an `mcp-remote` bridge from then on.
+
+### Hermes
+
+**Not wired up, and not yet established that it can be.** Whether its build
+speaks Streamable HTTP MCP at all is unverified — settle that before designing
+anything around it. Like n8n, its config is mutable PVC state rather than Git,
+so the outcome is a runbook step, not a manifest change.
 
 ## Security posture
 

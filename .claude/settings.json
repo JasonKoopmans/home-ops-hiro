@@ -1,4 +1,7 @@
 {
+  "enabledMcpjsonServers": [
+    "kubernetes"
+  ],
   "permissions": {
     "allow": [
       "Bash(kubectl get:*)",
