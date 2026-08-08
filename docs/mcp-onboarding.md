@@ -85,10 +85,120 @@ gets `NXDOMAIN`.
 | Client | URL |
 |---|---|
 | n8n, Hermes (in-cluster) | `http://mcp-<name>.mcp.svc.cluster.local:3000/mcp` |
-| Claude Desktop, devcontainer (LAN) | `https://mcp-<name>.${SECRET_DOMAIN}/mcp` |
+| Claude Desktop, Claude Code, devcontainer (LAN) | `https://mcp-<name>.${SECRET_DOMAIN}/mcp` |
 
 Service DNS in-cluster matches what every other service-to-service call in this
 repo already does — there are 20+ instances and no exceptions.
+
+### n8n
+
+No repo change — n8n's node config lives in its PVC, so this is a click-path.
+Verified against the running 2.33.3 image; re-check after a major bump.
+
+n8n ships two MCP nodes in `@n8n/n8n-nodes-langchain`:
+
+| Node | Internal name | Use |
+|---|---|---|
+| **MCP Client Tool** | `mcpClientTool` (v1.4) | Hands the whole toolset to an AI Agent. **Must be connected to an agent** — it has no standalone output |
+| **MCP Client** | `mcpClient` (v1.1) | Calls one named tool from an ordinary workflow, no agent involved |
+
+Both take the same three fields:
+
+- **Server Transport** — `HTTP Streamable`. Already the default on these
+  versions; the other option is labelled `Server Sent Events (Deprecated)`.
+- **Endpoint** — `http://mcp-<name>.mcp.svc.cluster.local:3000/mcp`
+- **Authentication** — `None`, which is also the default. Phase 1 servers are
+  unauthenticated, so no credential object is needed. At step 2 of the auth
+  ladder this becomes `Header Auth` (`X-MCP-AUTH`) or `Bearer Auth`.
+
+MCP Client Tool also has a **Tools to Include** selector (`All` / `Selected` /
+`All Except`). Worth narrowing when a server exposes tools an agent shouldn't
+reach for — cheaper than an RBAC change and it shrinks the agent's prompt.
+
+### Claude Code and devcontainers
+
+Checked in at the repo root, so a fresh clone gets it:
+
+```json
+// .mcp.json
+{
+  "mcpServers": {
+    "kubernetes": {
+      "type": "http",
+      "url": "https://mcp-kubernetes.koopmans.co/mcp"
+    }
+  }
+}
+```
+
+The literal domain is fine here — this file is read by Claude Code, not by Flux,
+so `${SECRET_DOMAIN}` would not be substituted. `Taskfile.yaml` hardcodes it for
+the same reason.
+
+`.claude/settings.json` carries `enabledMcpjsonServers: ["kubernetes"]`, which
+pre-approves it. Without that, every session prompts on first use — fine
+interactively, a hang anywhere non-interactive. Adding a server to `.mcp.json`
+therefore means adding its name there too; that second step is deliberate, so a
+new endpoint is an explicit decision rather than an inherited one.
+
+This is redundant with the `Bash(kubectl get:*)` allow-list **only when the local
+kubeconfig exists**. It does not in a fresh clone or a git worktree — the paths
+`.mise.toml` exports point at files that were never checked in. The MCP server
+carries its own in-cluster ServiceAccount, so it answers in exactly the
+environments where local `kubectl` cannot.
+
+### Claude Desktop
+
+**The Settings → Connectors UI cannot reach these endpoints at all.** Use an
+`mcp-remote` bridge in `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "kubernetes": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp-kubernetes.koopmans.co/mcp"]
+    }
+  }
+}
+```
+
+Restart Desktop after editing, and remove any failed custom connector from the
+UI or it keeps erroring alongside the working one.
+
+The reason is a third DNS position, distinct from the two in the table above:
+**a custom connector is fetched by Anthropic's servers, not by the Mac.** These
+hostnames route through `envoy-internal`, so external-dns never publishes them
+to Cloudflare and they resolve only in k8s_gateway:
+
+```
+dig @1.1.1.1 mcp-kubernetes.${SECRET_DOMAIN}   ->  NXDOMAIN
+dig @1.1.1.1 workflow.${SECRET_DOMAIN}         ->  172.66.40.203   (envoy-external, for contrast)
+```
+
+The bridge works because it is an ordinary local Node subprocess using the
+system resolver — the same path `curl` takes from the Mac.
+
+**The error message actively misleads.** It reads `Couldn't register with … sign-in
+service. You can try again, or add an OAuth Client ID`, which sounds like an auth
+problem and invites an afternoon of OAuth configuration. There is no OAuth here:
+the server 404s both `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server` and never returns a `401` or a
+`WWW-Authenticate` challenge, so a client has nothing to trigger a flow. It is a
+name that does not resolve. Confirm with `dig` against a public resolver before
+believing any auth-shaped error from a client you don't control.
+
+Consequence for the auth ladder: Desktop needs the bridge from **step 1**, not
+step 2. That turns out not to cost anything extra later — `mcp-remote` is also
+what carries a custom header at step 2, so this is the configuration it would
+have ended up with regardless.
+
+### Hermes
+
+**Not wired up, and not yet established that it can be.** Whether its build
+speaks Streamable HTTP MCP at all is unverified — settle that before designing
+anything around it. Like n8n, its config is mutable PVC state rather than Git,
+so the outcome is a runbook step, not a manifest change.
 
 ## Security posture
 
@@ -105,8 +215,9 @@ Each step is an added file, not a redesign. Nothing about phase 1 forecloses the
 1. **None.** Internal-only, path-scoped route. Where we are.
 2. **App-level token.** Most servers support one (`MCP_AUTH_TOKEN` +
    `X-MCP-AUTH` in `mcp-server-kubernetes`), read from a SOPS secret.
-   **Claude Desktop breaks here** — its connector UI has no custom-header field,
-   so it needs an `mcp-remote` bridge from this step on.
+   Claude Desktop already runs through an `mcp-remote` bridge for reachability
+   reasons (see above), so it carries the header via `--header` and costs
+   nothing extra at this step.
 3. **Envoy `SecurityPolicy`** targeting the HTTPRoute (apiKeyAuth / JWT / OIDC /
    extAuth). Moves auth off the app and in front of it.
 4. **`envoy-external` + Cloudflare Access.** See
