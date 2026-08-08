@@ -10,6 +10,18 @@ spec:
   groups:
     - name: n8n.rules
       rules:
+        # Metric names below are taken from n8n 2.33.3's compiled metrics services,
+        # not from documentation:
+        #   - event-bus counters are `${prefix}${event}_total` with dots replaced by
+        #     underscores, so n8n.workflow.failed -> n8n_workflow_failed_total.
+        #     The emitted events are started/success/failed/cancelled — there is no
+        #     `error` event, so the n8n_workflow_error_total these rules previously
+        #     used never existed.
+        #   - the active-workflow gauge is n8n_active_workflow_count (not
+        #     n8n_active_workflows).
+        # All of the above except active_workflow_count require
+        # N8N_METRICS_INCLUDE_MESSAGE_EVENT_BUS_METRICS on the n8n HelmRelease.
+
         - alert: N8nPodNotReady
           expr: |
             sum(kube_pod_status_ready{namespace="default", condition="true", pod=~"n8n-.*"}) < 1
@@ -30,15 +42,38 @@ spec:
             summary: n8n container is restarting frequently
             description: n8n app container has restarted more than 2 times in the last 15 minutes. Restart count now {{ $$value | humanize }}.
 
+        # Per-workflow failure notification. Fires as soon as any individual workflow
+        # records a failed execution, and names it via the workflow_info join so the
+        # Telegram message identifies the workflow rather than an opaque ID.
+        #
+        # Caveat worth knowing: the counter series is created lazily on a workflow's
+        # first failure and is first exposed already at 1, so increase() sees no delta
+        # and the very first failure of a never-before-failed workflow can be missed
+        # (subsequent ones, and everything after an n8n restart, are caught normally).
+        # n8n's own Error Workflow / Error Trigger is the per-execution notifier that
+        # has no such gap — this alert is the safety net around it, and the two are
+        # meant to run together.
+        - alert: N8nWorkflowFailed
+          expr: |
+            (
+              sum by (workflow_id) (increase(n8n_workflow_failed_total[10m])) > 0
+            )
+            * on (workflow_id) group_left (workflow_name) n8n_workflow_info
+          labels:
+            severity: warning
+          annotations:
+            summary: n8n workflow "{{ $$labels.workflow_name }}" failed
+            description: Workflow "{{ $$labels.workflow_name }}" (id {{ $$labels.workflow_id }}) recorded {{ $$value | humanize }} failed execution(s) in the last 10 minutes.
+
         - alert: N8nWorkflowErrorRateHigh
           expr: |
             (
-              sum(rate(n8n_workflow_error_total[10m]))
+              sum(rate(n8n_workflow_failed_total[10m]))
               /
-              clamp_min(sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_error_total[10m])), 0.001)
+              clamp_min(sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_failed_total[10m])), 0.001)
             ) > 0.05
             and
-            (sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_error_total[10m]))) > 0.01
+            (sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_failed_total[10m]))) > 0.01
           for: 10m
           labels:
             severity: warning
@@ -49,12 +84,12 @@ spec:
         - alert: N8nWorkflowErrorRateCritical
           expr: |
             (
-              sum(rate(n8n_workflow_error_total[10m]))
+              sum(rate(n8n_workflow_failed_total[10m]))
               /
-              clamp_min(sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_error_total[10m])), 0.001)
+              clamp_min(sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_failed_total[10m])), 0.001)
             ) > 0.20
             and
-            (sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_error_total[10m]))) > 0.01
+            (sum(rate(n8n_workflow_success_total[10m])) + sum(rate(n8n_workflow_failed_total[10m]))) > 0.01
           for: 10m
           labels:
             severity: critical
@@ -64,12 +99,37 @@ spec:
 
         - alert: N8nNoRecentWorkflowExecutions
           expr: |
-            sum(n8n_active_workflows) > 0
+            sum(n8n_active_workflow_count) > 0
             and
-            sum(increase(n8n_workflow_success_total[2h]) + increase(n8n_workflow_error_total[2h])) == 0
+            sum(increase(n8n_workflow_success_total[2h]) + increase(n8n_workflow_failed_total[2h])) == 0
           for: 30m
           labels:
             severity: warning
           annotations:
             summary: n8n has active workflows but no recent executions
             description: n8n reports active workflows, but no workflow executions were observed in the past 2 hours. Tune this alert window for low-frequency jobs.
+
+        # Deadman's switch for the alerts above. Every workflow rule here depends on
+        # metrics that are individually gated by N8N_METRICS_INCLUDE_* env vars, and a
+        # PromQL expression over a series that does not exist evaluates to empty rather
+        # than erroring — which is exactly how the previous n8n_workflow_error_total /
+        # n8n_active_workflows typos went unnoticed: green dashboards, silent alerts.
+        #
+        # n8n_active_workflow_count is registered unconditionally whenever N8N_METRICS
+        # is on, and n8n_workflow_info is what N8nWorkflowFailed joins against, so
+        # losing either means the workflow alerting above is degraded or dead.
+        #
+        # Gated on n8n actually being up so this stays quiet during a genuine outage —
+        # N8nPodNotReady already covers that case and there is no value in two alerts
+        # for one event.
+        - alert: N8nWorkflowMetricsMissing
+          expr: |
+            (absent(n8n_active_workflow_count) or absent(n8n_workflow_info))
+            and on ()
+            (sum(kube_pod_status_ready{namespace="default", condition="true", pod=~"n8n-.*"}) > 0)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: n8n workflow metrics are missing while n8n is up
+            description: n8n is running but is not exposing n8n_active_workflow_count and/or n8n_workflow_info. The n8n workflow failure alerts cannot fire in this state — check the N8N_METRICS_INCLUDE_* env vars on the n8n HelmRelease and the ServiceMonitor scrape target.

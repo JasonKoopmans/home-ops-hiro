@@ -43,7 +43,7 @@ data:
           "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
           "targets": [
             {
-              "expr": "sum(rate(n8n_workflow_success_total[15m])) / clamp_min(sum(rate(n8n_workflow_success_total[15m])) + sum(rate(n8n_workflow_error_total[15m])), 0.001)",
+              "expr": "sum(rate(n8n_workflow_success_total[15m])) / clamp_min(sum(rate(n8n_workflow_success_total[15m])) + sum(rate(n8n_workflow_failed_total[15m])), 0.001)",
               "legendFormat": "success"
             }
           ],
@@ -72,7 +72,7 @@ data:
           "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
           "targets": [
             {
-              "expr": "sum(rate(n8n_workflow_success_total[15m])) + sum(rate(n8n_workflow_error_total[15m]))",
+              "expr": "sum(rate(n8n_workflow_success_total[15m])) + sum(rate(n8n_workflow_failed_total[15m]))",
               "legendFormat": "exec/s"
             }
           ],
@@ -113,7 +113,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
           "targets": [
             {"expr": "sum(rate(n8n_workflow_success_total[5m]))", "legendFormat": "success"},
-            {"expr": "sum(rate(n8n_workflow_error_total[5m]))", "legendFormat": "error"}
+            {"expr": "sum(rate(n8n_workflow_failed_total[5m]))", "legendFormat": "error"}
           ],
           "fieldConfig": {
             "defaults": {"min": 0, "unit": "ops", "custom": {"lineWidth": 2, "fillOpacity": 10}},
@@ -127,7 +127,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
           "targets": [
             {
-              "expr": "sum(rate(n8n_workflow_success_total[5m])) / clamp_min(sum(rate(n8n_workflow_success_total[5m])) + sum(rate(n8n_workflow_error_total[5m])), 0.001)",
+              "expr": "sum(rate(n8n_workflow_success_total[5m])) / clamp_min(sum(rate(n8n_workflow_success_total[5m])) + sum(rate(n8n_workflow_failed_total[5m])), 0.001)",
               "legendFormat": "ratio"
             }
           ],
@@ -151,11 +151,11 @@ data:
         {
           "id": 7,
           "type": "table",
-          "title": "Top Erroring Workflows (1h)",
+          "title": "Top Failing Workflows (1h)",
           "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
           "targets": [
             {
-              "expr": "topk(10, sum by (workflow_name) (increase(n8n_workflow_error_total[1h])))",
+              "expr": "topk(10, sum by (workflow_name) (sum by (workflow_id) (increase(n8n_workflow_failed_total[1h])) * on (workflow_id) group_left (workflow_name) n8n_workflow_info))",
               "format": "table",
               "instant": true,
               "legendFormat": ""
