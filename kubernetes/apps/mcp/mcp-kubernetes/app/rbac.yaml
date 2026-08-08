@@ -1,0 +1,146 @@
+---
+# Read-only cluster access for the Kubernetes MCP server.
+#
+# get/list/watch only, cluster-wide. Deliberate omissions, so a future reader
+# knows these were decided rather than forgotten:
+#   secrets      the server masks values, but the token shouldn't read them at
+#                all. Side effect: Helm stores release metadata in Secrets, so
+#                the server's Helm tools won't work. Accepted.
+#   pods/exec    exec runs arbitrary code as the target pod, which would make
+#                this role's ceiling the most privileged pod in the cluster.
+#   rbac.*       no privilege enumeration.
+#   write verbs  the cluster is GitOps-managed; writes get reverted by Flux or
+#                cause drift.
+#
+# Adding an API group here widens the blast radius of any prompt injection that
+# reaches this server. Add per demonstrated need, not speculatively.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: &app mcp-kubernetes
+  labels:
+    app.kubernetes.io/instance: *app
+    app.kubernetes.io/name: *app
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - endpoints
+      - events
+      - limitranges
+      - namespaces
+      - nodes
+      - persistentvolumeclaims
+      - persistentvolumes
+      - pods
+      - pods/log
+      - replicationcontrollers
+      - resourcequotas
+      - serviceaccounts
+      - services
+    verbs: &readonly
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - deployments
+      - replicasets
+      - statefulsets
+    verbs: *readonly
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs: *readonly
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs: *readonly
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs: *readonly
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: *readonly
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - gateways
+      - grpcroutes
+      - httproutes
+    verbs: *readonly
+  - apiGroups:
+      - storage.k8s.io
+    resources:
+      - storageclasses
+      - volumeattachments
+    verbs: *readonly
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs: *readonly
+  - apiGroups:
+      - metrics.k8s.io
+    resources:
+      - nodes
+      - pods
+    verbs: *readonly
+  # Flux state — "why hasn't my change landed" is the question this server will
+  # field most in a GitOps cluster. Enumerated rather than wildcarded so the
+  # grant stays legible when this file is copied for the next MCP server.
+  - apiGroups:
+      - source.toolkit.fluxcd.io
+    resources:
+      - buckets
+      - gitrepositories
+      - helmcharts
+      - helmrepositories
+      - ocirepositories
+    verbs: *readonly
+  - apiGroups:
+      - kustomize.toolkit.fluxcd.io
+    resources:
+      - kustomizations
+    verbs: *readonly
+  - apiGroups:
+      - helm.toolkit.fluxcd.io
+    resources:
+      - helmreleases
+    verbs: *readonly
+  - apiGroups:
+      - notification.toolkit.fluxcd.io
+    resources:
+      - alerts
+      - providers
+      - receivers
+    verbs: *readonly
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: &app mcp-kubernetes
+  labels:
+    app.kubernetes.io/instance: *app
+    app.kubernetes.io/name: *app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: *app
+subjects:
+  - kind: ServiceAccount
+    name: *app
+    # keep — ClusterRoleBinding is cluster-scoped, so the Flux Kustomization's
+    # targetNamespace does not rewrite this field.
+    namespace: mcp
