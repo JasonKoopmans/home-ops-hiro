@@ -123,10 +123,14 @@ spec:
             # was 500.5Mi against the previous 512Mi limit — 2% headroom. 14d
             # average is ~220Mi, so this one runs hot continuously rather than
             # in bursts. 1Gi gives ~2x the observed peak.
+            # Request was still 128Mi — well under the ~220Mi average, so the
+            # scheduler was under-booking this node's memory for a pod that
+            # runs hot continuously. Bumped to 256Mi for average+headroom
+            # (2026-08-08).
             resources:
               requests:
                 cpu: 50m
-                memory: 128Mi
+                memory: 256Mi
               limits:
                 memory: 1Gi
             securityContext:
