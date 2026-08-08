@@ -36,6 +36,29 @@ spec:
               EXECUTIONS_DATA_PRUNE_MAX_COUNT: 10000
               GENERIC_TIMEZONE: ${TIMEZONE}
               N8N_METRICS: "true"
+              # N8N_METRICS alone only serves the endpoint with process/default
+              # metrics. The workflow success/failure counters come from n8n's
+              # internal event bus, which is gated separately and defaults to off.
+              # Without this the n8n PrometheusRule and dashboards query series that
+              # never exist — and an alert on an absent series does not error, it
+              # silently never fires. Verified against n8n 2.33.3's
+              # PrometheusMetricsConfig (includeMessageEventBusMetrics, default false).
+              N8N_METRICS_INCLUDE_MESSAGE_EVENT_BUS_METRICS: "true"
+              # Attributes a failure to a specific workflow. Adds workflow_id to the
+              # event-bus counters (one series per workflow — cheap) and also to the
+              # n8n_workflow_execution_duration_seconds histogram (16 buckets x 2
+              # statuses x mode per workflow — the costly one). If that histogram's
+              # cardinality ever needs trimming, drop its _bucket series with a
+              # metricRelabeling on the ServiceMonitor rather than unsetting this:
+              # _count/_sum keep working and per-workflow attribution is the point.
+              N8N_METRICS_INCLUDE_WORKFLOW_ID_LABEL: "true"
+              # Publishes n8n_workflow_info / n8n_active_workflow_info — a
+              # workflow_id -> workflow_name gauge the rules and dashboards join
+              # against. Deliberately used INSTEAD of
+              # N8N_METRICS_INCLUDE_WORKFLOW_NAME_LABEL: stamping the user-editable
+              # name onto every counter means renaming a workflow orphans its old
+              # series and splits its history. The join keeps names in one place.
+              N8N_METRICS_INCLUDE_WORKFLOW_INFO: "true"
               N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: false
               N8N_PROTOCOL: "https"
               N8N_PORT: &port 443

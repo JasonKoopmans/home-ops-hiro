@@ -383,7 +383,7 @@ data:
           "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
           "targets": [
             {
-              "expr": "sum(rate(n8n_workflow_success_total[5m])) / clamp_min(sum(rate(n8n_workflow_success_total[5m])) + sum(rate(n8n_workflow_error_total[5m])), 0.001)",
+              "expr": "sum(rate(n8n_workflow_success_total[5m])) / clamp_min(sum(rate(n8n_workflow_success_total[5m])) + sum(rate(n8n_workflow_failed_total[5m])), 0.001)",
               "legendFormat": "ratio"
             }
           ],
