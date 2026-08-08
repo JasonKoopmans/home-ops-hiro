@@ -44,16 +44,26 @@ spec:
               # what actually bounds this server's reach.
               ALLOW_ONLY_READONLY_TOOLS: "true"
               MASK_SECRETS: "true"
-              # Holds exactly ONE host and replaces the default allow-list —
-              # upstream wraps it as [value], with no comma splitting. The SDK
-              # compares the Host header by exact string (port included) and
-              # answers 403 "Invalid Host header" on a miss.
-              # Consequence: every client must reach this through the gateway
-              # hostname. Calling the Service directly at
-              # mcp-kubernetes.mcp.svc.cluster.local:3000 is rejected, so
-              # in-cluster clients (n8n, Hermes) hairpin out through
-              # envoy-internal like the external ones. One URL for all clients.
-              DNS_REBINDING_ALLOWED_HOST: mcp-kubernetes.${SECRET_DOMAIN}
+              # The server's Host allow-list holds exactly one value upstream
+              # (DNS_REBINDING_ALLOWED_HOST is wrapped as [value], no comma
+              # splitting), so it cannot cover both the gateway hostname and
+              # <svc>.<ns>.svc.cluster.local. This repo addresses every
+              # service-to-service call by Service DNS, and in-cluster pods
+              # can't resolve the gateway name anyway — CoreDNS forwards to
+              # 1.1.1.1/8.8.8.8, and internal-only hostnames exist only in
+              # k8s_gateway. So a single-value allow-list locks out n8n and
+              # Hermes no matter which value it holds.
+              #
+              # Turned off rather than worked around, because the check is
+              # redundant exactly where the threat is real: a rebinding attack
+              # arrives with Host: attacker.com, matches no HTTPRoute, and Envoy
+              # 404s it before this server sees the request. Pod IPs and
+              # ClusterIPs aren't reachable from a LAN browser at all. Envoy's
+              # hostname matching is the enforcement point; this was a second
+              # copy of it that only ever rejected legitimate callers.
+              #
+              # The server logs a startup warning about this. Expected.
+              DNS_REBINDING_PROTECTION: "false"
               # The server shells out to kubectl, which writes a discovery cache
               # under $HOME/.kube. Pointing HOME at the emptyDir below is what
               # lets readOnlyRootFilesystem stay true. In-cluster credentials
