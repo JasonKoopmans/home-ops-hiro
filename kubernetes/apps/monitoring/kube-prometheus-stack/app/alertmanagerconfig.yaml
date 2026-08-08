@@ -12,6 +12,21 @@ spec:
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 4h
+    # Required companion to alertmanagerConfigMatcherStrategy.type: None on the
+    # HelmRelease. Without that setting this route also carried an injected
+    # namespace="monitoring" matcher, which happened to exclude Watchdog. With
+    # the injection gone the route has no matchers left, so it matches
+    # everything — and because the operator inserts CR routes *before* the
+    # chart's own routes and sets continue: true, Watchdog would match here
+    # first and only then reach the chart's Watchdog-to-null route.
+    #
+    # Watchdog is the deadman's switch: it fires permanently by design. Left
+    # unmatched it would send a Telegram message every repeatInterval (4h),
+    # forever. Drop it explicitly.
+    matchers:
+      - name: alertname
+        value: Watchdog
+        matchType: "!="
   receivers:
     - name: telegram
       telegramConfigs:

@@ -111,6 +111,25 @@ spec:
     alertmanager:
       alertmanagerSpec:
         replicas: 1
+        # Without this, the operator defaults to OnNamespace and silently
+        # injects a namespace="monitoring" matcher into every route our
+        # AlertmanagerConfig CR contributes. Alerts are then only deliverable
+        # if they carry that exact label — which excludes every alert about a
+        # workload outside the monitoring namespace, and every alert whose
+        # expression aggregates the label away (all of prometheusrule-n8n.yaml
+        # uses sum() / sum by (workflow_id), so none of those alerts have a
+        # namespace label at all). Everything else fell through to the chart's
+        # root "null" receiver and was dropped. Verified 2026-08-08: all 10
+        # active alerts were reporting receivers: [null].
+        #
+        # This is a silent failure mode — Alertmanager reports no error, and
+        # the homelab-alerts Grafana dashboard still shows the alerts, so the
+        # path looks alive. To re-check delivery:
+        #   kubectl -n monitoring get --raw "/api/v1/namespaces/monitoring/\
+        #     services/kube-prometheus-stack-alertmanager:http-web/proxy/api/v2/alerts"
+        # Any alert listing receivers: [null] is being blackholed.
+        alertmanagerConfigMatcherStrategy:
+          type: None
         # Disable the chart's own podAntiAffinity convenience default (it
         # defaults to "soft" and renders its own podAntiAffinity block under
         # the same affinity key as our custom one below, which is a duplicate
