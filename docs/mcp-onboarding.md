@@ -215,9 +215,12 @@ proven rather than assumed.
 
 Three things that cost time:
 
-- **`hermes mcp add` is interactive and has no non-interactive flag.** It
-  cancels rather than defaulting when there is no TTY, so it needs `exec -i`
-  with piped answers. Hence the `printf` above.
+- **`hermes mcp add` is interactive and has no non-interactive flag** — the
+  global `--yolo` does not bypass it either. What it needs is answers on
+  **stdin**, not a TTY: the command above has no TTY and works, whereas a plain
+  `kubectl exec` without `-i` leaves the prompts unanswered and cancels *after*
+  it has already connected and discovered every tool. Hence `exec -i` and the
+  `printf`.
 - **The authentication prompt defaults to yes.** Left to its default it attaches
   an empty bearer token. The `n` in that `printf` is the answer to it; the `y`
   enables all discovered tools. `hermes mcp test` prints `Auth: none` when it
@@ -225,9 +228,10 @@ Three things that cost time:
 - **Use the FQDN.** The `obsidian` entry gets away with a bare Service name
   because it shares the `default` namespace; anything in `mcp` does not.
 
-On success it reports saving to `~/./config.yaml`, which is misleading — `HOME`
-is `/root` but the file goes to `$HERMES_HOME`, i.e. `/opt/data/config.yaml` on
-the Longhorn PVC, which is what makes it survive a restart. Confirm with
+On success it prints `~/./config.yaml` — quoted verbatim, the odd `/./` is its
+output and not a typo here — which is misleading. `HOME` is `/root`, but the
+file goes to `$HERMES_HOME`, i.e. `/opt/data/config.yaml` on the Longhorn PVC,
+which is what makes it survive a restart. Confirm with
 `grep -l mcp-kubernetes /opt/data/config.yaml` rather than trusting the message.
 Existing Hermes sessions do not pick up new tools; new ones do.
 
