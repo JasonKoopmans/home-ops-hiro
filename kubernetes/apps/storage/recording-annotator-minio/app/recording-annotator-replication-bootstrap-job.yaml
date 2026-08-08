@@ -76,28 +76,37 @@ spec:
               # enabling Object Lock at bucket creation implies versioning.
               mc version enable local/"$SOURCE_BUCKET"
 
-              # Percent-encode for the credential URL below. AWS secret keys are base64 and routinely contain
-              # '/', '+' and '=', which would otherwise terminate the userinfo field early.
+              # The credentials must be passed RAW inside a URL, and consequently must not contain '+' or '/'.
+              # This is a hard mc/Minio constraint, not a preference — all four alternatives were tested against
+              # this exact client and server (mc RELEASE.2025-08-13, Minio RELEASE.2024-12-18):
               #
-              # Encoding every byte rather than only the reserved ones is deliberate: it is valid (%41 decodes
-              # to 'A'), and it avoids the per-character substring loop the upstream script uses. That loop
-              # needs braced parameter expansion (substring and string-length), and braced expansions are
-              # exactly what Flux's postBuild envsubst rewrites before the shell ever sees them — including
-              # inside a comment, since kustomize does not strip comments from a command body. Designing them
-              # out removes the whole class of bug. It also relies only on od and tr: the mc image ships no
-              # grep, awk or sed.
-              urlencode() {
-                printf '%s' "$1" | od -An -v -tx1 | tr -d '\n' | tr -s ' ' '%'
-              }
-              ENC_AK=$(urlencode "$BACKUP_ACCESS_KEY")
-              ENC_SK=$(urlencode "$BACKUP_SECRET_KEY")
+              #   raw creds containing '+'   -> URL parse fails; "Remote service endpoint  not available"
+              #                                 (note the empty endpoint where the host should be)
+              #   percent-encode everything  -> Minio uses the escapes LITERALLY; the server reports
+              #                                 "credentials: %41KIAR54... invalid / Access Denied", proving it
+              #                                 never decodes the userinfo
+              #   percent-encode only '+/='  -> same, the secret arrives mangled
+              #   --remote-bucket <alias>/<b>-> same empty-endpoint failure; mc builds the same URL internally,
+              #                                 so it inherits the identical parse problem
+              #
+              # So there is NO encoding that works. The only fix is a key whose secret is free of '+' and '/'.
+              # AWS secrets are base64, so roughly one generated key in four qualifies; rotate until clean.
+              # ('=' is legal unencoded in a URL userinfo per RFC 3986 and is fine.)
+              #
+              # Fail loudly and immediately on a bad key rather than letting the operator debug the cryptic
+              # empty-endpoint error, which gives no hint that the credential is at fault.
+              case "$BACKUP_ACCESS_KEY$BACKUP_SECRET_KEY" in
+                *[+/]*)
+                  echo "ERROR: the replication credentials contain '+' or '/'."
+                  echo "  mc embeds them in a URL and Minio does not decode percent-escapes, so this key can"
+                  echo "  never authenticate. Rotate the IAM key for the replication user until the secret"
+                  echo "  contains neither character, then update"
+                  echo "  recording-annotator-s3-replication-credentials.sops.yaml."
+                  exit 1
+                  ;;
+              esac
 
-              # The remote target MUST be given as a credential URL. Passing an mc alias
-              # (--remote-bucket s3backup/bucket) is only supported for MinIO-to-MinIO site replication: against
-              # AWS S3 the endpoint is never transmitted and the server rejects it with
-              #   "Remote service connection error (Remote service endpoint  not available ...)"
-              # — note the empty endpoint. Verified against this exact mc release and bucket.
-              REMOTE_URL="https://$ENC_AK:$ENC_SK@$AWS_S3_HOST/$BACKUP_BUCKET"
+              REMOTE_URL="https://$BACKUP_ACCESS_KEY:$BACKUP_SECRET_KEY@$AWS_S3_HOST/$BACKUP_BUCKET"
 
               # Idempotent without grep: POSIX case does the substring match as a shell builtin. `mc replicate
               # ls` exits non-zero with "replication configuration not set" when no rule exists, hence the
