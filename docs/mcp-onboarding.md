@@ -195,10 +195,45 @@ have ended up with regardless.
 
 ### Hermes
 
-**Not wired up, and not yet established that it can be.** Whether its build
-speaks Streamable HTTP MCP at all is unverified — settle that before designing
-anything around it. Like n8n, its config is mutable PVC state rather than Git,
-so the outcome is a runbook step, not a manifest change.
+Wired up and verified. Like n8n this is PVC state, so it is a runbook step
+rather than a manifest change:
+
+```sh
+printf 'n\ny\n' | kubectl -n default exec -i deploy/hermes-ai-agent -c app -- \
+  hermes mcp add kubernetes \
+    --url http://mcp-kubernetes.mcp.svc.cluster.local:3000/mcp \
+    --connect-timeout 30
+
+kubectl -n default exec deploy/hermes-ai-agent -c app -- hermes mcp test kubernetes
+```
+
+`hermes mcp` also has `list`, `remove` and `serve` (the last exposes Hermes
+itself as an MCP server — not used here). `--url` takes an HTTP endpoint;
+`--command`/`--args` is the stdio path. Hermes already ran one HTTP MCP server
+before this (`obsidian` at `http://obsidian:27124/mcp`), so the pattern was
+proven rather than assumed.
+
+Three things that cost time:
+
+- **`hermes mcp add` is interactive and has no non-interactive flag** — the
+  global `--yolo` does not bypass it either. What it needs is answers on
+  **stdin**, not a TTY: the command above has no TTY and works, whereas a plain
+  `kubectl exec` without `-i` leaves the prompts unanswered and cancels *after*
+  it has already connected and discovered every tool. Hence `exec -i` and the
+  `printf`.
+- **The authentication prompt defaults to yes.** Left to its default it attaches
+  an empty bearer token. The `n` in that `printf` is the answer to it; the `y`
+  enables all discovered tools. `hermes mcp test` prints `Auth: none` when it
+  is right.
+- **Use the FQDN.** The `obsidian` entry gets away with a bare Service name
+  because it shares the `default` namespace; anything in `mcp` does not.
+
+On success it prints `~/./config.yaml` — quoted verbatim, the odd `/./` is its
+output and not a typo here — which is misleading. `HOME` is `/root`, but the
+file goes to `$HERMES_HOME`, i.e. `/opt/data/config.yaml` on the Longhorn PVC,
+which is what makes it survive a restart. Confirm with
+`grep -l mcp-kubernetes /opt/data/config.yaml` rather than trusting the message.
+Existing Hermes sessions do not pick up new tools; new ones do.
 
 ## Security posture
 
