@@ -1,0 +1,132 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app mcp-kubernetes
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        # This server runs Streamable HTTP statelessly (sessionIdGenerator is
+        # undefined upstream, so every request gets a fresh transport), so it
+        # would scale horizontally. One replica because the load doesn't justify
+        # more — not because sessions pin to a pod. Don't copy this as a
+        # constraint: an MCP server that issues session IDs *would* need sticky
+        # sessions the gateway doesn't provide.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: flux159/mcp-server-kubernetes
+              tag: v4.1.3
+            env:
+              # Upstream labels the HTTP transports "unsafe" because the server
+              # ships no authn. Internal-only and unauthenticated is the phase-1
+              # choice; MCP_AUTH_TOKEN (X-MCP-AUTH header) is the seam for
+              # adding auth later without touching anything else here.
+              ENABLE_UNSAFE_STREAMABLE_HTTP_TRANSPORT: "1"
+              HOST: 0.0.0.0
+              PORT: &port 3000
+              # Second lock on the read-only door: even if the ServiceAccount
+              # were widened by mistake, the server refuses write tools. Leaves
+              # kubectl_get, kubectl_describe, kubectl_logs, kubectl_context,
+              # kubectl_reconnect, explain_resource, list_api_resources, ping —
+              # dropping kubectl_generic, apply/create/patch/scale/rollout, the
+              # Helm tools and port-forward. Note this is stricter than
+              # ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS, which still permits writes.
+              # Those survivors are generic over resource type, so rbac.yaml is
+              # what actually bounds this server's reach.
+              ALLOW_ONLY_READONLY_TOOLS: "true"
+              MASK_SECRETS: "true"
+              # Holds exactly ONE host and replaces the default allow-list —
+              # upstream wraps it as [value], with no comma splitting. The SDK
+              # compares the Host header by exact string (port included) and
+              # answers 403 "Invalid Host header" on a miss.
+              # Consequence: every client must reach this through the gateway
+              # hostname. Calling the Service directly at
+              # mcp-kubernetes.mcp.svc.cluster.local:3000 is rejected, so
+              # in-cluster clients (n8n, Hermes) hairpin out through
+              # envoy-internal like the external ones. One URL for all clients.
+              DNS_REBINDING_ALLOWED_HOST: mcp-kubernetes.${SECRET_DOMAIN}
+              # The server shells out to kubectl, which writes a discovery cache
+              # under $HOME/.kube. Pointing HOME at the emptyDir below is what
+              # lets readOnlyRootFilesystem stay true. In-cluster credentials
+              # outrank ~/.kube/config, so this doesn't affect auth.
+              HOME: /tmp
+            probes:
+              # Health/readiness paths are undocumented upstream, so probe the
+              # socket rather than guess a URL. Swap to httpGet once confirmed.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+
+    # Creates the ServiceAccount named `mcp-kubernetes`; rbac.yaml binds it to a
+    # read-only ClusterRole. The mounted token is the server's credential — it
+    # uses in-cluster auth, which outranks every KUBECONFIG_* / K8S_* source.
+    serviceAccount:
+      mcp-kubernetes: {}
+
+    defaultPodOptions:
+      automountServiceAccountToken: true
+      # runAsNonRoot is not set: the image's UID is unverified, and guessing
+      # wrong yields a pod that never starts. Resolve on first deploy with
+      #   kubectl -n mcp exec deploy/mcp-kubernetes -- id
+      # then pin runAsUser/runAsGroup here.
+
+    persistence:
+      # Writable scratch for the kubectl discovery cache (see HOME above).
+      # No globalMounts needed — app-template mounts an unqualified volume at
+      # /<name>, so this lands on /tmp.
+      tmp:
+        type: emptyDir
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        # Single-label hostname on purpose: the wildcard cert is
+        # ["${SECRET_DOMAIN}", "*.${SECRET_DOMAIN}"] and does not cover a second
+        # label, so mcp-kubernetes.mcp.${SECRET_DOMAIN} would fail TLS.
+        hostnames: ["mcp-kubernetes.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          # Path-scoped so only the MCP endpoint is reachable through the
+          # gateway. Widen if a client needs /.well-known OAuth discovery.
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: *port
