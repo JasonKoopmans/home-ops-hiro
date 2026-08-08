@@ -125,7 +125,8 @@ spec:
             # in bursts. 1Gi gives ~2x the observed peak.
             # Request was still 128Mi — well under the ~220Mi average, so the
             # scheduler was under-booking this node's memory for a pod that
-            # runs hot continuously. Bumped to match the average (2026-08-08).
+            # runs hot continuously. Bumped to 256Mi for average+headroom
+            # (2026-08-08).
             resources:
               requests:
                 cpu: 50m
