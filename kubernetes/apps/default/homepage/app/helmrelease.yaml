@@ -28,9 +28,13 @@ spec:
             # measured peak of 126.2Mi against the previous 200Mi limit. Steady
             # state is ~113Mi, so the kill came from a spike the 30s scrape
             # never sampled — headroom that looks sufficient on paper isn't.
+            # Request was still 10Mi (pre-measurement placeholder) — far below
+            # steady state, under-booking the node's schedulable memory and
+            # leaving the pod first in line for eviction under pressure.
+            # Bumped to match steady state (2026-08-08).
             resources:
               requests:
-                memory: 10Mi
+                memory: 128Mi
                 cpu: 10m
               limits:
                 memory: 384Mi
