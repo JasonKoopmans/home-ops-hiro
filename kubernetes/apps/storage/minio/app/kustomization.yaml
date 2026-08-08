@@ -10,7 +10,14 @@ resources:
   - ./bucket-quota-bootstrap-job.yaml
   - ./bucket-lifecycle-bootstrap-job.yaml
   - ./probe-bucket-metrics.yaml
-  - ./heal-cronjob.yaml
+  # heal-cronjob.yaml removed: `mc admin heal` is rejected outright by
+  # mode-server-xl-single (single-drive, no erasure coding), and moving to a
+  # multi-drive topology was already declined as a disruptive re-provision that
+  # would only stack Minio EC parity on top of Longhorn's replication. The job's
+  # graceful "unsupported, exit 0" path did not work either — it shells out to
+  # grep, which is not in the mc image, so every weekly run failed on
+  # `grep: command not found` and latched KubeJobFailed. Bitrot is still caught
+  # on read: Minio verifies each object's checksum whenever a client reads it.
   - ./thanos-user-credentials.sops.yaml
   - ./thanos-user-bootstrap-job.yaml
   - ./loki-user-credentials.sops.yaml
