@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kubernetes": {
+      "type": "http",
+      "url": "https://mcp-kubernetes.koopmans.co/mcp"
+    }
+  }
+}
