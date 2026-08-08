@@ -1,0 +1,134 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# MCP server, "stdio bridged" archetype: the upstream server speaks stdio only,
+# so supergateway fronts it with Streamable HTTP.
+#
+# UNVERIFIED ARCHETYPE. No app in this repo uses it yet. The flags below are
+# taken from supergateway's README, but nothing here has been run against a
+# real server — expect to debug the first one, and update this template with
+# what you learn. The native-HTTP archetype is the proven one.
+#
+# supergateway is NOT a sidecar. It launches the stdio server as a child
+# process inside its own container, because stdio cannot cross a container
+# boundary. Two consequences worth understanding before choosing this path:
+#   * `npx -y pkg@ver` fetches from npmjs.org at pod start, so cold starts
+#     depend on an external registry being up, and a crashloop can turn into a
+#     download loop.
+#   * the version pin lives inside an argument string, not an image tag, so
+#     Renovate does not see it. Pin it and bump it by hand.
+# If either bites, build a thin per-server image instead (see the containers/
+# directory pattern) and use the native-http archetype against it.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app __APP__
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        # Real constraint here, unlike the native-http template: --stateful
+        # makes supergateway keep per-session state in memory, so a second
+        # replica would need sticky sessions the gateway does not provide.
+        # Drop --stateful below if the wrapped server tolerates it, and this
+        # becomes a load decision again.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/supercorp-ai/supergateway
+              # TODO: pin a real tag. Renovate tracks this one.
+              tag: TODO
+            args:
+              # TODO: the wrapped server and its pinned version. Renovate cannot
+              # see this string — bump it by hand.
+              - --stdio
+              - "npx -y @modelcontextprotocol/server-TODO@0.0.0"
+              - --outputTransport
+              - streamableHttp
+              # Both are supergateway defaults; stated explicitly because they
+              # are the cluster-wide MCP contract, not this app's preference.
+              - --streamableHttpPath
+              - /mcp
+              - --port
+              - "3000"
+              - --stateful
+            env:
+              TZ: ${TIMEZONE}
+              # npx writes into $HOME/.npm at startup. Both must point at the
+              # emptyDir below or the container dies immediately under
+              # readOnlyRootFilesystem — this is the single most likely reason
+              # a first deploy of this archetype crashloops.
+              HOME: /tmp
+              npm_config_cache: /tmp/.npm
+            probes:
+              # Startup is slow and variable here: the npm download happens
+              # before anything listens. Generous failureThreshold on the
+              # liveness probe so a slow registry doesn't cause a restart loop.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: &port 3000
+                  initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 6
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                # Higher floor than native-http: a node runtime plus an npm
+                # install at boot needs more than a compiled server does.
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+
+    defaultPodOptions:
+      automountServiceAccountToken: false
+      # TODO: pin after first deploy — `kubectl -n mcp exec deploy/__APP__ -- id`
+      # securityContext:
+      #   runAsNonRoot: true
+      #   runAsUser: <uid>
+      #   runAsGroup: <gid>
+      #   fsGroup: <gid>
+      #   fsGroupChangePolicy: OnRootMismatch
+
+    persistence:
+      # Holds both $HOME and the npm cache (see env above).
+      tmp:
+        type: emptyDir
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        # Single-label hostname is required — the wildcard cert does not cover
+        # a second label. See the native-http template for the full note.
+        hostnames: ["__APP__.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: *port
