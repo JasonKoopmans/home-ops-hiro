@@ -55,7 +55,7 @@ spec:
           expr: |
             kube_job_failed{namespace="default", job_name=~"recording-annotator-restore-drill-.*"} > 0
             and on (namespace, job_name)
-            (time() - kube_job_created{namespace="default"} < 604800)
+            (time() - kube_job_created{namespace="default", job_name=~"recording-annotator-restore-drill-.*"} < 604800)
           for: 5m
           labels:
             severity: critical
