@@ -41,8 +41,8 @@ spec:
   timeZone: ${TIMEZONE}
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 600
-  successfulJobsHistory: 3
-  failedJobsHistory: 3
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 2

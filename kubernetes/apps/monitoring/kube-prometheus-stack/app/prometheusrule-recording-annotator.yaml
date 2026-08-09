@@ -158,25 +158,12 @@ spec:
             summary: RecordingAnnotator's Minio pod is not ready
             description: No ready recording-annotator-minio pod in the storage namespace for 10 minutes.
 
-        # Media has no Longhorn backup by design — server-side replication to the Object-Locked S3 bucket IS the
-        # backup. It is configured imperatively by deploy/backup/configure-minio-replication.sh, so it can be
-        # absent (never run, or lost on a rebuild of this instance) with no other symptom. These two alerts are
-        # the only thing standing between that and silent total loss of the recordings' offsite copy.
-        # Series come from the bucket metrics endpoint, scraped by the probe-bucket-metrics.yaml in that app's
-        # directory. Confirm the exact metric names against the first live scrape before trusting silence here —
-        # Minio has renamed bucket replication series across releases.
-        # These replaced a pair keyed on minio_bucket_replication_*, which could never have fired: those series
-        # only exist when Minio server-side replication is configured, and it cannot be configured against AWS S3
-        # at all. Minio validates a new remote target by probing it for /minio/health/live, a Minio-only admin
-        # endpoint, so an S3 target always fails with "Health check timed out after 3 seconds"
-        # (cmd/bucket-targets.go, still true on master as of 2026-02). `mc batch` replicate is not a way around it
-        # either — it accepts an S3 target and reports "completed" while transferring nothing, because S3 demands
-        # a checksum header on multipart parts when Object Lock is enabled and the batch handler omits it. The
-        # media is therefore mirrored by a client-side CronJob, and these alerts watch that instead.
+        # Media has no Longhorn backup by design — the hourly `mc mirror` CronJob
+        # (recording-annotator-mirror-cronjob.yaml) is the only offsite protection. Both rules below key on the
+        # CronJob's last-success timestamp via kube-state-metrics so a stuck or never-run mirror is caught early.
         #
-        # An alert keyed on absence would have been the wrong shape anyway: absent() on a metric that never
-        # exists fires forever and cannot self-clear, which is exactly the failure the comment at the top of this
-        # file describes. Both rules below key on the CronJob's own last-success time via kube-state-metrics.
+        # An alert keyed on absence would have been the wrong shape: absent() on a metric that never exists fires
+        # forever and cannot self-clear. Both rules use kube_cronjob_status_last_successful_time instead.
         - alert: RecordingAnnotatorMediaMirrorNotSucceeding
           expr: |
             time() - kube_cronjob_status_last_successful_time{namespace="storage", cronjob="recording-annotator-media-mirror"} > 10800
