@@ -1,0 +1,140 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app mcp-prometheus
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        # A load decision, not a transport constraint — same as mcp-kubernetes.
+        # PROMETHEUS_MCP_STATELESS_HTTP below makes every request carry its own
+        # transport, so nothing pins a client to a pod. Note this is version
+        # dependent: on 1.4.2 that flag had no effect and a session-less request
+        # was rejected outright, which would have made replicas:1 mandatory.
+        # Re-test with `tools/list` and no mcp-session-id header before assuming
+        # it still holds after a bump.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/pab1it0/prometheus-mcp-server
+              tag: 1.6.2
+            env:
+              # Points at Thanos Query, not at Prometheus itself. Thanos serves
+              # the same Prometheus HTTP API but fronts the local TSDB *and* the
+              # historical blocks in MinIO, so a question like "what did memory
+              # do last month" is answerable. Swap to
+              # kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+              # to scope queries to local retention only.
+              PROMETHEUS_URL: http://thanos-query.monitoring.svc.cluster.local:10902
+              # Selects Streamable HTTP. The default is stdio, which would come
+              # up healthy on the TCP probe and never serve a request.
+              PROMETHEUS_MCP_SERVER_TRANSPORT: http
+              # The cluster-wide MCP contract: listen on 3000, serve /mcp. The
+              # path is not configurable on this image — FastMCP's default is
+              # /mcp, which is what the contract asks for anyway. Confirmed from
+              # the container's own startup line:
+              #   Starting MCP server 'Prometheus MCP' with transport 'http' on
+              #   http://0.0.0.0:3000/mcp
+              PROMETHEUS_MCP_BIND_HOST: 0.0.0.0
+              PROMETHEUS_MCP_BIND_PORT: &port 3000
+              # Fresh transport per request instead of a server-held session.
+              # Keeps replicas a free choice and stops a pod restart from
+              # stranding a client mid-session. Works as of 1.6.2; it was inert
+              # on 1.4.2 — see the replicas comment above.
+              PROMETHEUS_MCP_STATELESS_HTTP: "true"
+              # Strips the Prometheus UI links this server otherwise appends to
+              # every response. They point at a host no client here can resolve,
+              # and they cost context on every single tool result.
+              PROMETHEUS_DISABLE_LINKS: "true"
+              TZ: ${TIMEZONE}
+              # No host allow-list to disable, unlike mcp-kubernetes: verified
+              # that a request carrying a foreign Host header still returns 200,
+              # so Service DNS and the gateway hostname both work as-is.
+            probes:
+              # TCP, matching mcp-kubernetes: this image documents no health
+              # path, and /mcp is POST-only. The health_check tool is MCP-level,
+              # not an HTTP endpoint, so it can't back a probe.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                # Measured, not copied: 1.6.2 sits at ~80Mi after serving real
+                # queries, so the template's 64Mi default would have been under
+                # steady-state usage from the first second. The limit is
+                # deliberately loose because a wide execute_range_query against
+                # Thanos can pull a large result set into memory.
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+
+    defaultPodOptions:
+      # This server talks to Thanos over HTTP and never calls the Kubernetes
+      # API, so it gets no ServiceAccount token — hence no rbac.yaml either.
+      automountServiceAccountToken: false
+      securityContext:
+        # Read off the image rather than guessed, before deploying:
+        #   docker run --rm --entrypoint sh ghcr.io/pab1it0/prometheus-mcp-server:1.6.2 -c id
+        #   uid=1000(app) gid=1000(app)
+        # This is the image's own USER, so pinning changes nothing at runtime;
+        # it stops the pod being *able* to run as root if a future tag drops it.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+
+    # No persistence block on purpose. The scratch emptyDir most MCP apps carry
+    # is not needed here: this image serves requests with a wholly read-only
+    # filesystem and no tmpfs at all (`docker run --read-only`, no `--tmpfs`),
+    # and every tool is an outbound HTTP call that writes nothing. Add one back
+    # only if a future version actually crashes for want of a writable path —
+    # never by flipping readOnlyRootFilesystem.
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        # Single-label hostname on purpose: the wildcard cert is
+        # ["${SECRET_DOMAIN}", "*.${SECRET_DOMAIN}"] and does not cover a second
+        # label, so mcp-prometheus.mcp.${SECRET_DOMAIN} would fail TLS.
+        hostnames: ["mcp-prometheus.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          # Path-scoped so only the MCP endpoint is reachable through the
+          # gateway, since phase-1 endpoints carry no auth.
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: *port

@@ -9,6 +9,13 @@
 # real server — expect to debug the first one, and update this template with
 # what you learn. The native-HTTP archetype is the proven one.
 #
+# First, make sure you actually need this. A README showing `docker run -i` is
+# evidence the README was written for Claude Desktop, not that the server lacks
+# an HTTP mode. Run the server's --help and look for --port / --transport /
+# --host or a *_TRANSPORT env var; of the seven servers queued for this cluster,
+# six turned out to speak HTTP already. See "Check for an HTTP mode before
+# assuming stdio" in docs/mcp-onboarding.md.
+#
 # supergateway is NOT a sidecar. It launches the stdio server as a child
 # process inside its own container, because stdio cannot cross a container
 # boundary. Two consequences worth understanding before choosing this path:

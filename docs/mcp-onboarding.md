@@ -12,9 +12,12 @@ copy from, and every claim in this document was verified against it running.
 ## Quickstart
 
 ```sh
-task mcp:new name=proxmox                    # native-http archetype (default)
-task mcp:new name=playwright archetype=stdio # supergateway-wrapped stdio server
+task mcp:new name=proxmox                # native-http archetype (default)
+task mcp:new name=gmail archetype=stdio  # supergateway-wrapped stdio server
 ```
+
+Reach for `stdio` far less often than the flag's existence suggests — see
+[Archetypes](#archetypes) before choosing it.
 
 That scaffolds `kubernetes/apps/mcp/mcp-<name>/` and registers it in the
 namespace group. The result is **not deployable as-is** — it ships `TODO`
@@ -66,6 +69,29 @@ choosing it:
 
 If either bites, build a thin per-server image (see the `containers/` pattern)
 and use `native-http` against it instead.
+
+### Check for an HTTP mode before assuming `stdio`
+
+"The README shows `docker run -i`" is not evidence that a server is stdio-only —
+it is evidence that the README was written for Claude Desktop. Most actively
+maintained MCP servers grew a Streamable HTTP mode during 2025–26 and simply
+kept the stdio example at the top. Surveying the seven servers queued for this
+cluster (2026-08-08) found exactly one that genuinely cannot speak HTTP:
+
+| Server | Verdict |
+|---|---|
+| Prometheus (`pab1it0/prometheus-mcp-server`) | HTTP — `PROMETHEUS_MCP_SERVER_TRANSPORT=http`, ships its own Helm chart |
+| Grafana (`grafana/mcp-grafana`) | HTTP — `-t streamable-http`, `--endpoint-path` already defaults to `/mcp` |
+| Proxmox (`RekklesNA/ProxmoxMCP-Plus`) | HTTP — the maintained fork; `canvrno/ProxmoxMCP` has been stale since Feb 2025 |
+| Playwright (`@playwright/mcp`) | HTTP — `--port`/`--host`. Also needs browser binaries, so it wants a real image, not `npx` |
+| HuggingFace | **No deploy at all** — `https://huggingface.co/mcp` is hosted and answers `initialize`. Client config only |
+| Gmail (`GongRzhe/Gmail-MCP-Server`) | stdio only — the real `stdio` candidate, and it needs auth-ladder step 2 for its OAuth credentials |
+| Excalidraw (`excalidraw-mcp`) | stdio only, but the HTTP branch in its source is a literal placeholder that falls back to stdio. Low value; skip |
+
+Two habits follow. First, run `--help` (or read the transport branch in the
+source) before picking an archetype — a `--port`, `--transport`, `--host`, or
+`*_TRANSPORT` env var means `native-http`. Second, check whether the thing needs
+to run here at all: a hosted endpoint is strictly less to operate.
 
 ## Client wiring
 
@@ -334,7 +360,30 @@ a discovery cache under `$HOME/.kube`; `persistence.tmp: {type: emptyDir}` plus
 leaves `sessionIdGenerator` undefined, so it is stateless and would scale
 horizontally; `replicas: 1` there is a load decision. supergateway with
 `--stateful` is the opposite — one replica is a real constraint. Verify per image
-rather than copying either comment.
+rather than copying either comment, **and re-verify after a version bump**:
+`prometheus-mcp-server` rejected a session-less request on 1.4.2 with
+`PROMETHEUS_MCP_STATELESS_HTTP=true` set, and honours the same flag on 1.6.2. The
+one-line test is `tools/list` with no `mcp-session-id` header.
+
+**`/v2/<image>/tags/list` is paginated, and the truncation is silent.** GHCR
+returns 100 tags by default with no marker in the body that more exist — reading
+the tail of that page as "the newest tag" produced a confident, wrong conclusion
+that this project had stopped publishing semver images. Pass `?n=1000`, or just
+ask for the tag you want directly:
+
+```sh
+curl -sI -H "Authorization: Bearer $TOKEN" \
+  https://ghcr.io/v2/<owner>/<image>/manifests/<tag>   # 200 means it exists
+```
+
+**Most per-image unknowns are answerable before you deploy.** `docker run` gives
+you the UID (`--entrypoint sh -c id`), read-only-rootfs tolerance (`--read-only`
+with no `--tmpfs`), the real memory floor (`docker stats`), the served path (the
+startup log line), and host-allow-list behaviour (send a foreign `Host:` header).
+Point `*_URL` at a public demo instance and you can exercise the actual tools too
+— which is how `get_metric_metadata` was found to return empty. Doing this pass
+removed every post-deploy round trip `mcp-prometheus` would otherwise have
+needed.
 
 **Templates live outside `kubernetes/`.** `scripts/kubeconform.sh` runs
 `kustomize build` on every directory under `kubernetes/apps` containing a
@@ -373,4 +422,5 @@ kubectl auth can-i --list --as=system:serviceaccount:mcp:mcp-kubernetes | grep l
 | App | Archetype | Auth | Notes |
 |---|---|---|---|
 | `mcp/mcp-kubernetes` | native-http | none (phase 1) | Read-only cluster access |
+| `mcp/mcp-prometheus` | native-http | none (phase 1) | Queries **Thanos Query**, not Prometheus, so history reaches past local TSDB retention. `get_metric_metadata` returns empty even against a healthy Prometheus — 5 of its 6 tools are useful |
 | `default/obsidian` | — | none | Existing app exposing `/mcp` at `obsidian-mcp.${SECRET_DOMAIN}` |
