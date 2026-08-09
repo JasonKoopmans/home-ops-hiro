@@ -43,22 +43,62 @@ should not duplicate managed keys once migration is verified (see "Post-merge").
   `curl -s -X POST -H 'Content-Type: application/json' "https://generativelanguage.googleapis.com/v1beta/models/<id>:generateContent?key=$GOOGLE_API_KEY" -d '{"contents":[{"parts":[{"text":"hi"}]}]}'`
   — check for a `candidates` response, not just a non-404 status (a bare `-w '%{http_code}'`
   check without `-H 'Content-Type: application/json'` can itself 404 and mislead).
-- **Fallback: Claude** — resilience only; `fallback_providers` fires on Gemini
-  rate-limit/overload/connection errors, **not** on task difficulty.
+- **Fallback: Claude Haiku 4.5** — resilience only; `fallback_providers` fires on Gemini
+  rate-limit/overload/connection errors, **not** on task difficulty. Pinned to
+  `claude-haiku-4-5` (alias) rather than Sonnet — see the cap section below.
 - **Claude selectively for hard tasks** — manual `/model claude-sonnet-4-6` in Telegram,
   or per-cron `-m claude-sonnet-4-6`. Not automatic by design.
 
-### ⚠️ Claude subscription-OAuth is a LIVE POLICY RISK
+### Claude subscription-OAuth: what actually limits it
 
 Claude via `CLAUDE_CODE_OAUTH_TOKEN` routes through the Pro subscription instead of
-pay-per-token. Anthropic flipped this policy repeatedly through 2026 (banned Apr →
-reinstated May with an Agent-SDK credit → credit split paused mid-June). Treat it as
-unstable. **The dependency is isolated to one secret key.**
+pay-per-token, and **this works** — subscription OAuth is not blocked for programmatic
+use. Verified 2026-08-09 on the live token, same headers, same second:
 
-**Reversibility (one step):** if OAuth breaks, blank `CLAUDE_CODE_OAUTH_TOKEN` in the
-secret — Claude falls back to `ANTHROPIC_API_KEY` (raw pay-per-token, already stored).
-Nothing else changes. Do **not** design cron/mission-critical work around OAuth; point
-those at Gemini.
+| model | result |
+|---|---|
+| `claude-haiku-4-5` | 200 OK (plan-billed) |
+| `claude-sonnet-4-6` | 429 `rate_limit_error` |
+| `claude-opus-5` | 429 `rate_limit_error` |
+
+**What runs out is the per-model-tier weekly cap, not the plan.** Symptom when the Sonnet
+cap trips: `HTTP 400 "You're out of extra usage. Add more at claude.ai/settings/usage"`.
+That is *not* "plan quota gone" — Anthropic offers extra usage as the overflow lane once a
+tier cap is hit, and with a $0 extra-usage balance the request 400s while the plan still
+shows plenty of headroom. Don't read that 400 as a policy revocation.
+
+Corollary: pin unattended work to the cheapest adequate tier. Haiku had full headroom at
+the moment Sonnet and Opus were both capped, which is why fallback targets Haiku.
+
+### ⚠️ The credential pool rotates onto metered billing by itself
+
+Hermes does **not** treat the Anthropic credentials as "primary + manual backup". On every
+`load_pool()` it auto-seeds *every* Anthropic env var it finds into one pool
+(`agent/credential_pool.py::_seed_from_env`; priority OAuth 1, `ANTHROPIC_API_KEY` 4) and
+walks it with the `fill_first` strategy, marking a credential `exhausted` for 1h on a
+400/429. So the moment the OAuth entry is capped, the pool **silently rotates onto
+`ANTHROPIC_API_KEY`** — a separate metered Console org (verified: OAuth org `3878b11e-…`
+vs API-key org `67b048cd-…`). Nothing announces this: Hermes logs failures only, and the
+pool's own `request_count` counters stay at 0.
+
+`ANTHROPIC_API_KEY` is therefore **deliberately blank** in `secret.sops.yaml`, which makes
+the pool OAuth-only. Inspect the pool with:
+
+```sh
+kubectl -n default exec deploy/hermes-ai-agent -c app -- hermes auth list
+kubectl -n default exec deploy/hermes-ai-agent -c app -- hermes auth reset anthropic  # clear stale exhaustion flags
+```
+
+If a metered backstop is ever wanted, refill the key **knowingly** — the old value is
+recoverable from git history with `age.key`. `hermes auth remove anthropic <N>` also
+suppresses a pool entry durably, but that flag lives on the PVC, not in Git.
+
+**Token scope gotcha:** a `claude setup-token` carries `user:inference` but not
+`user:profile`, so `GET /api/oauth/usage` returns
+`403 permission_error: OAuth token does not meet scope requirement user:profile` and
+`hermes`'s own usage/billing views cannot read the plan windows. `hermes login` mints a
+full-scope refreshable token instead — worth doing if you want cap visibility from inside
+the pod rather than from claude.ai.
 
 ## Web dashboard
 
@@ -150,14 +190,26 @@ Run inside the pod (`kubectl -n default exec -it deploy/hermes-ai-agent -c app -
 ```sh
 hermes backup
 hermes config set model.provider gemini
-hermes config set model.default gemini-2.5-flash
+hermes config set model.default gemini-flash-latest   # alias, not a pin — see "Why an alias" above
 hermes config set skills.write_approval true       # skill writes need approval
 hermes config set skills.guard_agent_created true  # guard agent-created skills
 hermes curator pause
 # Fallback must be added interactively (writes full provider metadata):
-hermes fallback add        # pick: anthropic / claude-sonnet-4-6
+hermes fallback add        # pick: anthropic / claude-haiku-4-5
 hermes fallback list       # verify
 ```
+
+`hermes fallback` has **no non-interactive flags** (`add`/`remove` are pickers only), so
+retargeting an existing chain from a script means editing `/opt/data/config.yaml` directly.
+Back the file up first — the shape is minimal:
+
+```yaml
+fallback_providers:
+  - provider: anthropic
+    model: claude-haiku-4-5
+```
+
+Then restart the pod to reload (see "Restart to reload config.yaml").
 
 ### Post-merge (after the Secret lands via Flux and the pod restarts)
 
@@ -165,7 +217,9 @@ Provider keys now arrive as env from the Secret. Collapse the dual source so Git
 authoritative:
 
 ```sh
-# 1. Confirm env injection worked (names only):
+# 1. Confirm env injection worked (names only).
+#    Expected: ANTHROPIC_API_KEY EMPTY (intentional — see the credential-pool section),
+#    everything else set.
 kubectl -n default exec deploy/hermes-ai-agent -c app -- sh -c \
   'for v in GOOGLE_API_KEY ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN TELEGRAM_BOT_TOKEN; do \
    eval x=\$$v; [ -n "$x" ] && echo "$v set" || echo "$v EMPTY"; done'
