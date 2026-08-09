@@ -1,0 +1,50 @@
+---
+# Seed dashboard for the Git plane. Two jobs: it documents the workflow where
+# the workflow is actually used, and it proves the ConfigMap → sidecar →
+# provisioning path works on day one, before any real dashboard depends on it.
+#
+# Copy this file's shape for real dashboards — label + folder annotation are
+# what the sidecar keys on.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-lifeos-home
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: GitOps
+data:
+  lifeos-home.json: |
+    {
+      "uid": "lifeos-home",
+      "title": "LifeOS — Start Here",
+      "tags": ["lifeos", "gitops"],
+      "editable": false,
+      "schemaVersion": 39,
+      "graphTooltip": 0,
+      "time": {"from": "now-6h", "to": "now"},
+      "annotations": {"list": []},
+      "templating": {"list": []},
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "Two planes",
+          "gridPos": {"h": 13, "w": 12, "x": 0, "y": 0},
+          "options": {
+            "mode": "markdown",
+            "content": "## Git plane (this folder)\n\nDashboards in **GitOps** come from ConfigMaps in `kubernetes/apps/lifeos/grafana/app/`. They are provisioned read-only — the Save button is disabled on purpose, so nothing here can drift from Git.\n\nTo change one, edit its ConfigMap and let Flux reconcile.\n\n## UI plane (every other folder)\n\nAnything created in the browser lives in Grafana's own database on the Longhorn volume. Draft freely: new dashboards, folders, alert rules, playlists, preferences.\n\nThe volume is on the backed-up storage class, so this plane survives a pod or node loss — but it is *not* reproducible from Git.\n\n## Promotion\n\nWhen a UI draft has earned it, move it into the Git plane:\n\n```\ntask lifeos:dashboard:export uid=<dashboard-uid>\n```\n\nThat writes the ConfigMap; commit it, let Flux apply, then delete the UI copy so there is exactly one source of truth."
+          }
+        },
+        {
+          "id": 2,
+          "type": "text",
+          "title": "Data sources",
+          "gridPos": {"h": 13, "w": 12, "x": 12, "y": 0},
+          "options": {
+            "mode": "markdown",
+            "content": "### Google Sheets — uid `googlesheets`\n\nAuthenticates as a Google Cloud **service account**, not as you. A spreadsheet is invisible to Grafana until it is shared with the service account's client email, exactly like sharing with a person.\n\nThe datasource is provisioned from Git and locked for editing; its credentials come from the SOPS secret in the app directory.\n\nPanel refresh is floored at **1m** — Sheets reads hit the Google API on every refresh and the data changes only when a human edits the sheet.\n\n### Adding another source\n\nSomething with credentials that belong in Git → add it to `datasources:` in the HelmRelease with an explicit `uid`.\n\nTrialling something → install it from **Administration → Plugins** and configure it in the UI. If it sticks, move the plugin into the `plugins:` list in Git so a rebuild reproduces it.\n\nFull write-up: `docs/lifeos-grafana.md`."
+          }
+        }
+      ]
+    }

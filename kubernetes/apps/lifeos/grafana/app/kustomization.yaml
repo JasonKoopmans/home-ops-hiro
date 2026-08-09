@@ -1,0 +1,11 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./ocirepository.yaml
+  - ./helmrelease.yaml
+  - ./httproute.yaml
+  - ./secret.sops.yaml
+  # Git-plane dashboards. One ConfigMap per dashboard; add new ones here.
+  - ./dashboard-lifeos-home.yaml

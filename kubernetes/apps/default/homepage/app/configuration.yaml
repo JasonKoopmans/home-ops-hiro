@@ -57,6 +57,9 @@ data:
       Downloads:
         style: column
         icon: sonarr
+      LifeOS:
+        style: column
+        icon: grafana
       Monitoring:
         style: column
         icon: grafana

@@ -1,0 +1,233 @@
+---
+# yaml-language-server: $schema=https://lds-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: grafana
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: grafana
+  values:
+    # ------------------------------------------------------------------------
+    # Two planes of configuration, on purpose.
+    #
+    # This instance is deliberately NOT a clone of monitoring/grafana. That one
+    # is 100% declarative and disposable — wipe the PVC and Flux rebuilds it.
+    # This one is a personal workspace where dashboards get *drafted* in the UI,
+    # so its database holds state that exists nowhere else. The split:
+    #
+    #   Git plane  — everything below, plus dashboard ConfigMaps in this
+    #                directory. Provisioned read-only (allowUiUpdates: false),
+    #                so the UI physically cannot drift from Git.
+    #   UI plane   — dashboards, folders, playlists, alert rules, preferences
+    #                and API tokens created in the browser. Lives in the SQLite
+    #                DB on the PVC below.
+    #
+    # The PVC is therefore load-bearing, not a cache: it uses the backed-up
+    # `longhorn` class, unlike the monitoring instance. Draft in the UI, then
+    # promote what proves useful into Git (`task lifeos:dashboard:export`).
+    # See docs/lifeos-grafana.md.
+    # ------------------------------------------------------------------------
+
+    # RWO volume — a rolling update would deadlock on the old pod holding it.
+    deploymentStrategy:
+      type: Recreate
+
+    replicas: 1
+
+    # Deployment-level, which is where Reloader looks. The chart already
+    # checksums its own ConfigMaps into the pod template; this covers the
+    # Secret, so admin credentials and the Google key roll the pod on change.
+    annotations:
+      secret.reloader.stakater.com/reload: grafana-secret
+
+    persistence:
+      enabled: true
+      type: pvc
+      accessModes: ["ReadWriteOnce"]
+      # 3 replicas + recurring backups to S3. The UI plane is not reproducible
+      # from Git, so this is the only copy of it — do not downgrade to a
+      # -no-backup class.
+      storageClassName: longhorn
+      # SQLite DB, the plugin tree under /var/lib/grafana/plugins and the bleve
+      # search index. Single-user scale; 5Gi is headroom, not a projection.
+      size: 5Gi
+
+    admin:
+      existingSecret: grafana-secret
+      userKey: admin-user
+      passwordKey: admin-password
+
+    envValueFrom:
+      # Encrypts secureJsonData rows in the Grafana DB — datasource credentials
+      # entered through the UI, among others. Grafana falls back to a published
+      # default when unset. It must never change once set: rotating it makes
+      # every already-encrypted row undecryptable.
+      GF_SECURITY_SECRET_KEY:
+        secretKeyRef:
+          name: grafana-secret
+          key: secret-key
+      # Interpolated into the Google Sheets datasource below. These are
+      # identifiers rather than credentials, but they name a private GCP
+      # project, so they stay out of the manifests.
+      GF_GOOGLE_SA_CLIENT_EMAIL:
+        secretKeyRef:
+          name: grafana-secret
+          key: googlesheets-client-email
+      GF_GOOGLE_SA_PROJECT:
+        secretKeyRef:
+          name: grafana-secret
+          key: googlesheets-project-id
+
+    # The service-account private key is a multi-line PEM. Mounted as a file and
+    # referenced by path rather than pushed through env interpolation, which is
+    # where PEM newlines usually get mangled.
+    extraSecretMounts:
+      - name: googlesheets-sa
+        secretName: grafana-secret
+        mountPath: /etc/secrets/googlesheets
+        readOnly: true
+        # 0440 in decimal, spelled out because YAML octal parsing differs
+        # between the tools this file passes through. Group-readable, not
+        # owner-only: secret volumes are owned by root with the group set to
+        # fsGroup (472), and Grafana runs as 472 — 0400 would lock it out.
+        defaultMode: 288
+        items:
+          - key: googlesheets-private-key
+            path: privateKey
+
+    # Declared here so the plugin set is reproducible from Git. Plugin admin is
+    # left enabled in grafana.ini so plugins can be trialled from the UI — but
+    # anything that earns a permanent place belongs in this list, otherwise it
+    # only exists on the PVC.
+    plugins:
+      - grafana-googlesheets-datasource
+
+    # ---- Git plane: datasources -------------------------------------------
+    # Rendered into a ConfigMap and mounted at
+    # /etc/grafana/provisioning/datasources. editable: false keeps the UI from
+    # offering edits that the next reconcile would silently revert.
+    #
+    # Every datasource carries an explicit uid: dashboard JSON references
+    # datasources by uid, so a stable one is what makes an exported dashboard
+    # portable back into Git. Without it Grafana mints a random uid per
+    # provisioning run and dashboards break on reprovision.
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Google Sheets
+            uid: googlesheets
+            type: grafana-googlesheets-datasource
+            access: proxy
+            isDefault: true
+            editable: false
+            jsonData:
+              # jwt = service account. The alternative, `key` (an API key), only
+              # reads sheets published to "anyone with the link" — no good for
+              # personal data. Each sheet must be shared with the client email
+              # below, exactly as if it were a person.
+              authenticationType: jwt
+              # $VAR is Grafana's provisioning interpolation; $$ is the escape
+              # that stops Flux's postBuild substitution from eating it first.
+              # If a value ever arrives at Grafana un-interpolated, the fallback
+              # is to inline it here — neither field is a secret.
+              clientEmail: $$GF_GOOGLE_SA_CLIENT_EMAIL
+              defaultProject: $$GF_GOOGLE_SA_PROJECT
+              tokenUri: https://oauth2.googleapis.com/token
+              privateKeyPath: /etc/secrets/googlesheets/privateKey
+
+    # ---- Git plane: dashboards --------------------------------------------
+    # The sidecar watches ConfigMaps in this namespace labelled
+    # grafana_dashboard: "1" and drops them into the provisioning tree.
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        # Unset = this namespace only. Left alone deliberately: the monitoring
+        # instance's dashboards should not leak into the personal one.
+        searchNamespace: null
+        folder: /tmp/dashboards
+        # Each dashboard ConfigMap picks its Grafana folder with a
+        # `grafana_folder` annotation; unannotated ones land in "GitOps".
+        folderAnnotation: grafana_folder
+        defaultFolderName: GitOps
+        provider:
+          name: gitops
+          foldersFromFilesStructure: true
+          # The load-bearing half of the two-plane split: dashboards that came
+          # from Git are read-only in the browser, so there is no way to make a
+          # UI edit that a reconcile would throw away. Draft in the UI plane
+          # instead, then promote.
+          allowUiUpdates: false
+          # Removing the ConfigMap removes the dashboard — Git stays the truth
+          # for this folder.
+          disableDelete: false
+      datasources:
+        # Datasources come from the chart's own values above, not from labelled
+        # ConfigMaps. Nothing to watch.
+        enabled: false
+
+    # Sidecar only needs to read ConfigMaps in its own namespace; no reason for
+    # a cluster-scoped role.
+    rbac:
+      create: true
+      namespaced: true
+
+    "grafana.ini":
+      server:
+        root_url: https://lifeos.${SECRET_DOMAIN}
+      analytics:
+        check_for_updates: false
+        reporting_enabled: false
+        feedback_links_enabled: false
+      users:
+        allow_sign_up: false
+        allow_org_create: false
+        default_theme: dark
+      auth.anonymous:
+        enabled: false
+      security:
+        cookie_secure: true
+        disable_gravatar: true
+      plugins:
+        # Deliberately on: trialling a datasource plugin from the UI is part of
+        # how this instance is meant to be used. Promote keepers to `plugins:`.
+        plugin_admin_enabled: true
+      dashboards:
+        # Sheets reads go through the Google API on every refresh; a 5s panel
+        # interval would burn the per-minute quota for no benefit on data that
+        # changes when a human edits a spreadsheet.
+        min_refresh_interval: 1m
+      dataproxy:
+        # Sheets responses are slower than a Prometheus query. The 30s default
+        # times out on wide ranges.
+        timeout: 60
+      date_formats:
+        default_timezone: ${TIMEZONE}
+      log:
+        mode: console
+
+    # Ingress is Gateway API here — see httproute.yaml.
+    ingress:
+      enabled: false
+
+    # Prometheus discovers ServiceMonitors cluster-wide
+    # (serviceMonitorSelectorNilUsesHelmValues: false), so this instance shows
+    # up in the monitoring stack without any change over there.
+    serviceMonitor:
+      enabled: true
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        # No CPU limit — Grafana is bursty on dashboard load and throttling
+        # shows up as UI lag. Memory is the resource worth bounding.
+        memory: 512Mi
+
+    testFramework:
+      enabled: false
