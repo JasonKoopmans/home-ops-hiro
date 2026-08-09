@@ -360,7 +360,30 @@ a discovery cache under `$HOME/.kube`; `persistence.tmp: {type: emptyDir}` plus
 leaves `sessionIdGenerator` undefined, so it is stateless and would scale
 horizontally; `replicas: 1` there is a load decision. supergateway with
 `--stateful` is the opposite — one replica is a real constraint. Verify per image
-rather than copying either comment.
+rather than copying either comment, **and re-verify after a version bump**:
+`prometheus-mcp-server` rejected a session-less request on 1.4.2 with
+`PROMETHEUS_MCP_STATELESS_HTTP=true` set, and honours the same flag on 1.6.2. The
+one-line test is `tools/list` with no `mcp-session-id` header.
+
+**`/v2/<image>/tags/list` is paginated, and the truncation is silent.** GHCR
+returns 100 tags by default with no marker in the body that more exist — reading
+the tail of that page as "the newest tag" produced a confident, wrong conclusion
+that this project had stopped publishing semver images. Pass `?n=1000`, or just
+ask for the tag you want directly:
+
+```sh
+curl -sI -H "Authorization: Bearer $TOKEN" \
+  https://ghcr.io/v2/<owner>/<image>/manifests/<tag>   # 200 means it exists
+```
+
+**Most per-image unknowns are answerable before you deploy.** `docker run` gives
+you the UID (`--entrypoint sh -c id`), read-only-rootfs tolerance (`--read-only`
+with no `--tmpfs`), the real memory floor (`docker stats`), the served path (the
+startup log line), and host-allow-list behaviour (send a foreign `Host:` header).
+Point `*_URL` at a public demo instance and you can exercise the actual tools too
+— which is how `get_metric_metadata` was found to return empty. Doing this pass
+removed every post-deploy round trip `mcp-prometheus` would otherwise have
+needed.
 
 **Templates live outside `kubernetes/`.** `scripts/kubeconform.sh` runs
 `kustomize build` on every directory under `kubernetes/apps` containing a
@@ -399,5 +422,5 @@ kubectl auth can-i --list --as=system:serviceaccount:mcp:mcp-kubernetes | grep l
 | App | Archetype | Auth | Notes |
 |---|---|---|---|
 | `mcp/mcp-kubernetes` | native-http | none (phase 1) | Read-only cluster access |
-| `mcp/mcp-prometheus` | native-http | none (phase 1) | Queries **Thanos Query**, not Prometheus, so history reaches past local TSDB retention. Session-bound — `replicas: 1` is a constraint here, not a load decision |
+| `mcp/mcp-prometheus` | native-http | none (phase 1) | Queries **Thanos Query**, not Prometheus, so history reaches past local TSDB retention. `get_metric_metadata` returns empty even against a healthy Prometheus — 5 of its 6 tools are useful |
 | `default/obsidian` | — | none | Existing app exposing `/mcp` at `obsidian-mcp.${SECRET_DOMAIN}` |

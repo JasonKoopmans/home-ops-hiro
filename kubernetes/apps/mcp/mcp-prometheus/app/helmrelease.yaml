@@ -12,24 +12,20 @@ spec:
   values:
     controllers:
       main:
-        # A real constraint here, unlike mcp-kubernetes. This server issues an
-        # mcp-session-id and rejects a request that arrives without one
-        # ("Bad Request: Missing session ID"), so sessions pin to a pod and a
-        # second replica would need sticky sessions the gateway doesn't provide.
-        # PROMETHEUS_MCP_STATELESS_HTTP=true does NOT lift this — verified
-        # against 1.4.2: a session-less tools/list is still rejected with the
-        # flag on. Leave replicas at 1 until that changes upstream.
+        # A load decision, not a transport constraint — same as mcp-kubernetes.
+        # PROMETHEUS_MCP_STATELESS_HTTP below makes every request carry its own
+        # transport, so nothing pins a client to a pod. Note this is version
+        # dependent: on 1.4.2 that flag had no effect and a session-less request
+        # was rejected outright, which would have made replicas:1 mandatory.
+        # Re-test with `tools/list` and no mcp-session-id header before assuming
+        # it still holds after a bump.
         replicas: 1
         strategy: Recreate
         containers:
           app:
             image:
               repository: ghcr.io/pab1it0/prometheus-mcp-server
-              # The image trails PyPI: 1.4.2 is the newest published container
-              # tag while the Python package is already at 1.6.2. Renovate
-              # tracks this tag, so it will pick up 1.5.x/1.6.x whenever the
-              # image catches up. Do not substitute the PyPI version here.
-              tag: 1.4.2
+              tag: 1.6.2
             env:
               # Points at Thanos Query, not at Prometheus itself. Thanos serves
               # the same Prometheus HTTP API but fronts the local TSDB *and* the
@@ -49,6 +45,11 @@ spec:
               #   http://0.0.0.0:3000/mcp
               PROMETHEUS_MCP_BIND_HOST: 0.0.0.0
               PROMETHEUS_MCP_BIND_PORT: &port 3000
+              # Fresh transport per request instead of a server-held session.
+              # Keeps replicas a free choice and stops a pod restart from
+              # stranding a client mid-session. Works as of 1.6.2; it was inert
+              # on 1.4.2 — see the replicas comment above.
+              PROMETHEUS_MCP_STATELESS_HTTP: "true"
               # Strips the Prometheus UI links this server otherwise appends to
               # every response. They point at a host no client here can resolve,
               # and they cost context on every single tool result.
@@ -79,12 +80,12 @@ spec:
             resources:
               requests:
                 cpu: 10m
-                # Measured, not copied: the image idles at ~53Mi after serving
-                # requests, so the template's 64Mi default would sit at 83% of
-                # its request from the first second. The limit is deliberately
-                # loose because a wide execute_range_query against Thanos can
-                # pull a large result set into memory.
-                memory: 96Mi
+                # Measured, not copied: 1.6.2 sits at ~80Mi after serving real
+                # queries, so the template's 64Mi default would have been under
+                # steady-state usage from the first second. The limit is
+                # deliberately loose because a wide execute_range_query against
+                # Thanos can pull a large result set into memory.
+                memory: 128Mi
               limits:
                 memory: 512Mi
 
@@ -94,7 +95,7 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         # Read off the image rather than guessed, before deploying:
-        #   docker run --rm --entrypoint sh ghcr.io/pab1it0/prometheus-mcp-server:1.4.2 -c id
+        #   docker run --rm --entrypoint sh ghcr.io/pab1it0/prometheus-mcp-server:1.6.2 -c id
         #   uid=1000(app) gid=1000(app)
         # This is the image's own USER, so pinning changes nothing at runtime;
         # it stops the pod being *able* to run as root if a future tag drops it.
@@ -104,12 +105,12 @@ spec:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
 
-    persistence:
-      # Kept as insurance, not from a demonstrated need: the read-only-rootfs
-      # check that cleared this image was run with a writable /tmp, so a write
-      # there would not have shown up. Cheap enough to leave in place.
-      tmp:
-        type: emptyDir
+    # No persistence block on purpose. The scratch emptyDir most MCP apps carry
+    # is not needed here: this image serves requests with a wholly read-only
+    # filesystem and no tmpfs at all (`docker run --read-only`, no `--tmpfs`),
+    # and every tool is an outbound HTTP call that writes nothing. Add one back
+    # only if a future version actually crashes for want of a writable path —
+    # never by flipping readOnlyRootFilesystem.
 
     service:
       main:
