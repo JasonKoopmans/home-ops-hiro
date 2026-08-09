@@ -165,20 +165,37 @@ spec:
         # Series come from the bucket metrics endpoint, scraped by the probe-bucket-metrics.yaml in that app's
         # directory. Confirm the exact metric names against the first live scrape before trusting silence here —
         # Minio has renamed bucket replication series across releases.
-        - alert: RecordingAnnotatorMediaReplicationNotConfigured
-          expr: absent(minio_bucket_replication_failed_count{bucket="recordings"})
-          for: 1h
+        # These replaced a pair keyed on minio_bucket_replication_*, which could never have fired: those series
+        # only exist when Minio server-side replication is configured, and it cannot be configured against AWS S3
+        # at all. Minio validates a new remote target by probing it for /minio/health/live, a Minio-only admin
+        # endpoint, so an S3 target always fails with "Health check timed out after 3 seconds"
+        # (cmd/bucket-targets.go, still true on master as of 2026-02). `mc batch` replicate is not a way around it
+        # either — it accepts an S3 target and reports "completed" while transferring nothing, because S3 demands
+        # a checksum header on multipart parts when Object Lock is enabled and the batch handler omits it. The
+        # media is therefore mirrored by a client-side CronJob, and these alerts watch that instead.
+        #
+        # An alert keyed on absence would have been the wrong shape anyway: absent() on a metric that never
+        # exists fires forever and cannot self-clear, which is exactly the failure the comment at the top of this
+        # file describes. Both rules below key on the CronJob's own last-success time via kube-state-metrics.
+        - alert: RecordingAnnotatorMediaMirrorNotSucceeding
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="storage", cronjob="recording-annotator-media-mirror"} > 10800
+          for: 5m
           labels:
             severity: critical
           annotations:
-            summary: Minio replication to S3 is not reporting for the recordings bucket
-            description: No replication metrics for the recordings bucket. Either configure-minio-replication.sh was never run against this instance, the rule was removed, or the bucket-metrics scrape is broken. Until this is resolved the recordings have NO offsite copy — the PVC is on longhorn-2-no-backup precisely because replication was meant to cover it.
+            summary: RecordingAnnotator media mirror to S3 has no recent successful run
+            description: The recording-annotator-media-mirror CronJob has not recorded a successful run in over 3 hours against an hourly schedule. Recently uploaded recordings are not reaching the Object-Locked S3 bucket, and the source PVC is on longhorn-2-no-backup — this mirror is their only offsite copy.
 
-        - alert: RecordingAnnotatorMediaReplicationFailing
-          expr: minio_bucket_replication_failed_count{bucket="recordings"} > 0
-          for: 30m
+        # Separate rule because the one above evaluates empty, and so never fires, until the CronJob has succeeded
+        # at least once — the state a fresh deploy or a rebuilt instance starts in, and precisely when a silent
+        # failure matters most. `absent()` is safe here in a way it was not for the replication metrics: this
+        # series does appear as soon as the first run succeeds, so the alert can resolve.
+        - alert: RecordingAnnotatorMediaMirrorNeverSucceeded
+          expr: absent(kube_cronjob_status_last_successful_time{namespace="storage", cronjob="recording-annotator-media-mirror"})
+          for: 3h
           labels:
             severity: critical
           annotations:
-            summary: Minio replication to S3 is failing for the recordings bucket
-            description: "{{ $$value }} replication operation(s) have failed for 30 minutes. Newly uploaded recordings are not reaching the Object-Locked S3 bucket; check the replication target credentials and the remote bucket's object-lock configuration."
+            summary: RecordingAnnotator media mirror to S3 has never completed
+            description: No successful run of recording-annotator-media-mirror has ever been recorded, over at least 3 hours of an hourly schedule. Expected briefly after a first deploy; if it persists the recordings have NO offsite copy at all. Check the Job logs for credential or bucket errors.

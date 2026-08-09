@@ -11,4 +11,4 @@ resources:
   - ./recording-annotator-minio-user-credentials.sops.yaml
   - ./recording-annotator-user-bootstrap-job.yaml
   - ./recording-annotator-s3-replication-credentials.sops.yaml
-  - ./recording-annotator-replication-bootstrap-job.yaml
+  - ./recording-annotator-mirror-cronjob.yaml

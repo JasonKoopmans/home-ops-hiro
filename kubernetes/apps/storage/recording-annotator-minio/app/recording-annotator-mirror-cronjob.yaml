@@ -1,0 +1,135 @@
+---
+# Hourly one-way mirror of the recordings bucket to the Object-Locked AWS S3 bucket. This is the ONLY offsite
+# protection for the media: the PVC is deliberately longhorn-2-no-backup because the offsite copy is the backup.
+#
+# WHY A CLIENT-SIDE MIRROR AND NOT SERVER-SIDE REPLICATION
+# Both Minio-native paths were tried against this exact client and server (mc RELEASE.2025-08-13,
+# Minio RELEASE.2024-12-18) and this bucket, and neither can work:
+#
+#   `mc replicate add` (server-side replication) — Minio validates every new remote target by probing it with
+#   madmin AliveOpts, i.e. /minio/health/live, an endpoint only a Minio server has (cmd/bucket-targets.go, "Check
+#   if target is a MinIO server and alive"). AWS S3 has no such endpoint, so the check always fails with
+#   "Health check timed out after 3 seconds". Still true on Minio master as of 2026-02. Note the error text
+#   renders an empty endpoint because that failure path leaves the Endpoint field unset — it looks like a URL
+#   parse failure and is not one. Server-side replication is Minio-to-Minio only, full stop.
+#
+#   `mc batch` replicate — accepts an S3 target and the job runs to "completed", but silently transfers nothing.
+#   The server log shows "Content-MD5 OR x-amz-checksum- HTTP header is required for Put Part requests with
+#   Object Lock parameters": S3 requires a checksum on multipart parts when the bucket has Object Lock, and the
+#   batch handler does not send one. Object Lock is the entire point of this bucket, so batch is unusable here.
+#
+# `mc mirror` works, including multipart uploads, because the client sends the checksum the batch handler omits.
+# Verified end to end: a 26MiB object landed with X-Amz-Object-Lock-Mode COMPLIANCE and a retain-until date.
+#
+# The trade-off versus server-side replication is RPO: this is hourly rather than continuous.
+#
+# --remove is deliberately ABSENT and must stay absent. It would propagate source deletions to the replica,
+# which inverts the threat model (docs/backup-recovery.md §3): accidental deletion and ransomware act on the
+# primary, and the replica exists precisely so those do not reach it. Without it a deleted recording simply stays
+# in S3, and Object Lock keeps it there for the retention period regardless.
+#
+# Runs as the SCOPED minio user, never root — mirroring only reads the source, and recording-annotator-rw already
+# holds s3:ListBucket and s3:GetObject. Root credentials stay confined to the bootstrap Job.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: recording-annotator-media-mirror
+  namespace: storage
+spec:
+  # Offset from the top of the hour so this does not contend with the app's own index-backup run.
+  schedule: "23 * * * *"
+  timeZone: ${TIMEZONE}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistory: 3
+  failedJobsHistory: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3000
+      # Bounded history so a failed run cannot latch an alert on forever — the failure mode that kept a critical
+      # firing for a week in August 2026 (see prometheusrule-recording-annotator.yaml).
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          containers:
+            - name: mc
+              image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  # mc writes its config under $HOME; the image's default is /root, which is not writable as a
+                  # non-root user and not present with a read-only root filesystem.
+                  export MC_CONFIG_DIR=/tmp/mc
+
+                  RETRIES=0; MAX_RETRIES=60
+                  until mc alias set src "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"; do
+                    RETRIES=$((RETRIES + 1))
+                    if [ "$RETRIES" -ge "$MAX_RETRIES" ]; then
+                      echo "ERROR: minio did not become ready after $((MAX_RETRIES * 5))s, giving up"
+                      exit 1
+                    fi
+                    echo "waiting for minio... (attempt $RETRIES/$MAX_RETRIES)"; sleep 5
+                  done
+
+                  # Credentials go in argv here, so none of the URL-encoding problems that sank the
+                  # `mc replicate add` approach apply — there is no credential URL to parse.
+                  mc alias set dst "$AWS_S3_ENDPOINT" "$BACKUP_ACCESS_KEY" "$BACKUP_SECRET_KEY" --api S3v4
+
+                  echo "mirroring $SOURCE_BUCKET -> $BACKUP_BUCKET"
+                  mc mirror --quiet src/"$SOURCE_BUCKET" dst/"$BACKUP_BUCKET"
+                  echo "mirror complete"
+              env:
+                - name: MINIO_ENDPOINT
+                  value: http://recording-annotator-minio.storage.svc.cluster.local:9000
+                - name: SOURCE_BUCKET
+                  value: recordings
+                - name: BACKUP_BUCKET
+                  value: hiro-recording-annotator-media-backup
+                - name: AWS_S3_ENDPOINT
+                  value: https://s3.us-east-1.amazonaws.com
+                - name: MINIO_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: recording-annotator-minio-user-credentials
+                      key: accessKey
+                - name: MINIO_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: recording-annotator-minio-user-credentials
+                      key: secretKey
+                - name: BACKUP_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: recording-annotator-s3-replication-credentials
+                      key: accessKey
+                - name: BACKUP_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: recording-annotator-s3-replication-credentials
+                      key: secretKey
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  memory: 512Mi
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi
