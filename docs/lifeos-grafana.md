@@ -95,17 +95,16 @@ address*, exactly as if it were a colleague.
 
 ### One-time setup
 
-1. In a Google Cloud project, enable the **Google Sheets API** and the **Google
-   Drive API**.
-2. Create a service account, then create a JSON key for it and download it.
-3. Fill in `kubernetes/apps/lifeos/grafana/app/secret.sops.yaml` — the header
-   comment in that file has the exact commands. From the JSON key you need:
-   - `client_email` → `googlesheets-client-email`
-   - `project_id` → `googlesheets-project-id`
-   - `private_key` → `googlesheets-private-key`, as a real multi-line PEM with
-     the `\n` escapes expanded
-4. `sops --encrypt --in-place` the file, commit, push.
-5. Share each spreadsheet with the `client_email` address, Viewer is enough.
+Full walkthrough — project, service account, folder sharing, key rotation, and
+why this gets its own identity rather than n8n's — is in
+**`docs/lifeos-google-credentials.md`**. In outline:
+
+1. Enable the Sheets API and Drive API in a GCP project.
+2. Create a `grafana-lifeos` service account and a JSON key. No IAM roles.
+3. Put the reportable sheets in a **LifeOS** Drive folder, shared once with the
+   service account as Viewer.
+4. Extract `client_email` / `project_id` / `private_key` into
+   `kubernetes/apps/lifeos/grafana/app/secret.sops.yaml`, encrypt, push.
 
 The private key is mounted as a file (`privateKeyPath`) rather than passed
 through an environment variable, because PEM newlines survive a file mount and
