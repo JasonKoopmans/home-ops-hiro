@@ -29,3 +29,4 @@ resources:
   - ./freecad/ks.yaml
   - ./audacity/ks.yaml
   - ./recording-annotator/ks.yaml
+  - ./freshrss/ks.yaml

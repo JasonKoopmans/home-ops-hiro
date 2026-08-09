@@ -1,0 +1,98 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app freshrss
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: freshrss
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      main:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        # Official image's entrypoint (Apache + cron) runs as root and writes
+        # into /var/www/FreshRSS/data at start — no PUID/PGID support like
+        # linuxserver images. Default (root) pod security context is
+        # intentional, not an oversight.
+        containers:
+          app:
+            image:
+              repository: docker.io/freshrss/freshrss
+              tag: "1.29.1"
+            envFrom:
+              - secretRef:
+                  name: freshrss-secret
+            env:
+              TZ: ${TIMEZONE}
+              BASE_URL: https://freshrss.${SECRET_DOMAIN}
+              # sqlite is the default when DB_HOST is unset; pinned explicitly
+              # so the unattended installer's DB choice doesn't rely on that
+              # implicit default.
+              DB_TYPE: sqlite
+              ADMIN_EMAIL: admin@${SECRET_DOMAIN}
+              DEFAULT_USER: admin
+              # Twice-hourly feed refresh cron, run by the container's own cron.
+              CRON_MIN: "1,31"
+              LANGUAGE: en
+            probes:
+              liveness: &probe
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: &port 80
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              readiness: *probe
+            resources:
+              requests:
+                cpu: 25m
+                memory: 256Mi
+              limits:
+                memory: 512Mi
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: freshrss
+          gethomepage.dev/title: FreshRSS
+          gethomepage.dev/description: "RSS feed aggregator"
+          gethomepage.dev/group: "Reading"
+        hostnames:
+          - freshrss.${SECRET_DOMAIN}
+        parentRefs:
+          - name: envoy-external
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: main
+                port: *port
+
+    persistence:
+      data:
+        existingClaim: freshrss-data
+        globalMounts:
+          - path: /var/www/FreshRSS/data
