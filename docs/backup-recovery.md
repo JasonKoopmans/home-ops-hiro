@@ -196,10 +196,11 @@ the app opens (`LiteDb__DataDirectory` is set to `/data`; the app's default file
 was run live during the 2026-08-13 incident that fixed the CronJob triggers (PR #439)
 and is confirmed to work end to end.
 
-1. Scale the app to 0 replicas. The PVC is RWO, so the recovery pod in step 3 can't
+1. Scale the app to 0 replicas and wait for the pod to terminate. The PVC is RWO, so the recovery pod in step 3 can't
    mount it while the app pod still holds it:
    ```sh
    kubectl scale deployment/recording-annotator -n default --replicas=0
+   kubectl rollout status deployment/recording-annotator -n default --timeout=5m
    ```
 2. Find and download the latest index snapshot from S3, using the **read-only**
    credentials in `recording-annotator-restore-secret` — the same principal the
