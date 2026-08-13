@@ -157,7 +157,7 @@ spec:
               - --max-time
               - "240"
               - -X
-              - GET
+              - POST
               - http://recording-annotator:8080/internal/backup/index
             securityContext:
               allowPrivilegeEscalation: false
@@ -199,7 +199,7 @@ spec:
               - --max-time
               - "540"
               - -X
-              - GET
+              - POST
               - http://recording-annotator:8080/internal/reconcile
             securityContext:
               allowPrivilegeEscalation: false
