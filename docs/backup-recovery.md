@@ -269,19 +269,41 @@ any other object) or re-index by hand.
 
 ## §9 Monthly restore drill
 
-A CronJob (`recording-annotator-restore-drill`) runs monthly and performs an
-end-to-end proof that the offsite index backup is actually restorable. The drill
-consists of four phases:
+A CronJob (`recording-annotator-restore-drill`) runs monthly and proves the offsite
+**index** backup is actually restorable — "an untested backup is not a backup." The
+drill (`RestoreDrillService` in the app, entrypoint `restore-verify`) runs four phases:
 
 | Phase | Action |
 |---|---|
-| 1 | Download the most recent index snapshot from S3 |
-| 2 | Load the snapshot into a temporary ephemeral volume |
-| 3 | Run a read-only consistency check against the live blob store |
-| 4 | Verify that a sample of index entries can be resolved to real, accessible blobs in MinIO |
+| 1 | List objects under the `index/` prefix in the backup bucket and pick the lexically-latest `.db` key (snapshot keys are timestamped, so lexical order is time order — §5) |
+| 2 | Download that object to the pod's own `/tmp` and open it as LiteDB, calling `Rebuild()` — throws, failing the Job, if the file is structurally corrupt |
+| 3 | Count rows in the `artifacts`/`comments` collections |
+| 4 | Fail the drill if `artifacts` is below `Backup__MinArtifacts` |
 
-**Phase 4** is the critical verification step — it proves the snapshot is not just
-syntactically valid but that the blobs it references are actually present and readable.
+**Phase 4** is what actually proves the backup is *restorable*, not merely present:
+`Rebuild()` succeeding only shows the file isn't corrupt; phase 4 is what catches an
+export pipeline that has quietly started shipping structurally-valid but empty (or
+truncated) snapshots.
+
+**This never touches MinIO or the `recordings` bucket, at any phase.** The
+restore-drill container has no `Storage__*` credentials configured at all (only
+`Backup__*`, pointed at the S3 index bucket) — it has no way to reach the live blob
+store even if it wanted to. It proves the index snapshot is structurally intact and
+non-trivially non-empty, nothing about whether the blobs its entries reference still
+exist in MinIO. That cross-check (dangling references, orphan objects) is what the
+**daily reconciliation** job does instead, against the live store (§7) — a separate
+job, separate schedule, separate credentials, not a phase of this drill.
+
+`Backup__MinArtifacts` is currently `0` (pre-launch — see the `helmrelease.yaml`
+comment for when to raise it), so phase 4 is presently a no-op: a snapshot that
+rebuilds cleanly always passes regardless of content until that floor is raised.
+
+A passing run logs exactly:
+```
+Restore drill: restoring snapshot <key> from bucket hiro-recording-annotator-index-backup.
+Restore drill PASSED: <key> (<bytes> bytes) opened and rebuilt; <N> artifacts, <M> comments.
+```
+
 If the `RecordingAnnotatorRestoreDrillJobFailed` alert fires, the index backup must be
 treated as **unverified** until the drill is re-run successfully and passes all four
 phases.
