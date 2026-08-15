@@ -95,6 +95,7 @@ spec:
           gethomepage.dev/title: Obsidian
           gethomepage.dev/description: "Obsidian Vault UI"
           gethomepage.dev/group: "Automation"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=obsidian"
         hostnames:
           - obsidian.${SECRET_DOMAIN}
         parentRefs:

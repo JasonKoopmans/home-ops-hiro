@@ -104,6 +104,7 @@ spec:
           gethomepage.dev/title: Scanner Files
           gethomepage.dev/description: "File Scanning and Sharing Platform"
           gethomepage.dev/group: "Home"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=scanner-files"
         hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}", "scans.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
