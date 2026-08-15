@@ -14,7 +14,7 @@
         <outline type="rss" text="Cloudflare changelog" title="Cloudflare changelog" xmlUrl="https://developers.cloudflare.com/changelog/rss.xml" htmlUrl="https://developers.cloudflare.com/changelog/"/>
       </outline>
       <outline text="OPNsense" title="OPNsense">
-        <outline type="rss" text="OPNsense blog" title="OPNsense blog" xmlUrl="https://opnsense.org/blog/feed/" htmlUrl="https://opnsense.org/blog/"/>
+        <outline type="rss" text="OPNsense announcements" title="OPNsense announcements" xmlUrl="https://forum.opnsense.org/index.php?action=.xml;type=rss2;board=11" htmlUrl="https://opnsense.org/blog/"/>
         <outline type="rss" text="OPNsense releases" title="OPNsense releases" xmlUrl="https://github.com/opnsense/core/releases.atom" htmlUrl="https://github.com/opnsense/core/releases"/>
       </outline>
       <outline text="Omada (TP-Link)" title="Omada (TP-Link)">
