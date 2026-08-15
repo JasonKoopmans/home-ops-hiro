@@ -56,7 +56,7 @@ jobs:
       - name: Install Kubescape (CI-only)
         run: |
           # renovate: datasource=github-releases depName=kubescape/kubescape
-          KUBESCAPE_VERSION=4.0.11
+          KUBESCAPE_VERSION=4.0.12
           mise use --global "aqua:kubescape/kubescape@${KUBESCAPE_VERSION}"
 
       # Runs before rendering so it only ever sees committed repo content —
