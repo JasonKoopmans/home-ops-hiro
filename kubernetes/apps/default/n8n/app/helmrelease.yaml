@@ -97,6 +97,7 @@ spec:
           gethomepage.dev/title: n8n
           gethomepage.dev/description: "N8N Automation Platform"
           gethomepage.dev/group: "Automation"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=n8n"
         hostnames:
           - *hostName
         parentRefs:
