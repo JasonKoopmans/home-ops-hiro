@@ -52,7 +52,7 @@ Managed outside this repo but of keen interest. Blog feeds are the primary signa
 | Home Assistant | Home automation hub | `www.home-assistant.io/atom.xml` ✓ | `github.com/home-assistant/core/releases.atom` ✓ |
 | Tailscale | Mesh VPN / access | `tailscale.com/blog/index.xml` ✓ | `github.com/tailscale/tailscale/releases.atom` ✓ |
 | Cloudflare (platform) | Tunnel, Access, DNS, edge | `blog.cloudflare.com/rss/` ✓ + `developers.cloudflare.com/changelog/rss.xml` ✓ | — (cloudflared version tracked in `homelab-feeds.opml`) |
-| OPNsense | Firewall / router | `opnsense.org/blog/feed/` ✓ | `github.com/opnsense/core/releases.atom` ✓ |
+| OPNsense | Firewall / router | `forum.opnsense.org/index.php?action=.xml;type=rss2;board=11` (Announcements board — mirrors opnsense.org/blog; `opnsense.org/blog/feed/` itself is broken, returns an empty WP comments feed) ✓ | `github.com/opnsense/core/releases.atom` ✓ |
 | netboot.xyz | Network boot / provisioning | — | `github.com/netbootxyz/netboot.xyz/releases.atom` ✓ |
 | Plex | Media server | `www.plex.tv/blog/feed/` ✓ | no official RSS (blog covers "New on Plex" monthly) |
 | Omada (TP-Link) | Network controller / APs | no RSS (TP-Link notes page, manual) | `github.com/mbentley/docker-omada-controller/tags.atom` ✓ (community image proxy for controller version) |
