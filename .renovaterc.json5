@@ -86,6 +86,16 @@
       automergeType: "branch",
     },
     {
+      // Longhorn upgrades are one-way: the manager records `current-longhorn-version`
+      // in a Setting CR and refuses to start on an older binary, so a failed upgrade
+      // cannot be rolled back (see kubernetes/apps/storage/longhorn-system).
+      // Merge these by hand, while someone is watching the cluster.
+      description: "Never auto-merge Longhorn — storage upgrades are not reversible",
+      matchDatasources: ["helm"],
+      matchPackageNames: ["longhorn"],
+      automerge: false,
+    },
+    {
       matchUpdateTypes: ["digest"],
       semanticCommitType: "chore",
       commitMessageExtra: "( {{currentDigestShort}} ➔ {{newDigestShort}} )",

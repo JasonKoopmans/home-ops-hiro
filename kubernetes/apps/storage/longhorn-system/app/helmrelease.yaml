@@ -6,6 +6,14 @@ metadata:
   name: longhorn
 spec:
   interval: 1h
+  # The default 5m is far too short for this chart: longhorn-manager rolls out with
+  # `maxUnavailable: 100%`, so every node restarts its manager and pulls the new
+  # manager + share-manager images at once. On 2026-08-16 the 1.12.0 ➔ 1.12.1 upgrade
+  # tripped that 5m deadline, Flux remediated with a rollback to 1.12.0, and every
+  # manager then fatal-exited ("downgrading from v1.12.1 to v1.12.0 is not supported")
+  # because the running version is already persisted in the current-longhorn-version
+  # Setting. Rollback is disabled for this release in kubernetes/flux/cluster/ks.yaml.
+  timeout: 30m
   chart:
     spec:
       chart: longhorn
