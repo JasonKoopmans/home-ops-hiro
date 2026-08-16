@@ -27,6 +27,48 @@ spec:
       - name: alertname
         value: Watchdog
         matchType: "!="
+    # Severity split. On 2026-08-16 a Longhorn outage produced 23 distinct alertnames
+    # and ~200 Telegram messages in 8h — roughly one every 2.4 minutes. Detection was
+    # never the problem (LonghornManagerDown fired critical at 05:45, as designed);
+    # the two messages that mattered were buried in warning churn, because grouping
+    # by alertname alone gives every alertname its own message and CrashLoopBackOff
+    # pod churn keeps changing group membership, re-triggering each groupInterval.
+    routes:
+      # Criticals keep per-alertname granularity and nag more often than the 4h default.
+      - receiver: telegram
+        matchers:
+          - name: severity
+            value: critical
+        groupBy: ["alertname"]
+        groupWait: 30s
+        groupInterval: 5m
+        repeatInterval: 1h
+      # Warnings collapse into one digest per namespace, at a much slower cadence.
+      - receiver: telegram-warnings
+        matchers:
+          - name: severity
+            value: warning
+        groupBy: ["namespace", "severity"]
+        groupWait: 5m
+        groupInterval: 30m
+        repeatInterval: 12h
+  # The chart ships inhibit rules keyed on `equal: [namespace, alertname]`, so a
+  # critical only ever silences the *same* alertname. That never suppresses a
+  # cascade. When Longhorn's control plane is down, every pod-health alert in the
+  # cluster is a symptom of it — both admission webhooks are failurePolicy: Fail,
+  # so unrelated namespaces start failing admission too. Mute the symptoms while
+  # the root cause is firing; they return the moment it resolves.
+  inhibitRules:
+    - sourceMatch:
+        - name: alertname
+          value: LonghornManagerDown|LonghornNodeNotReady
+          matchType: "=~"
+      targetMatch:
+        - name: alertname
+          value: KubePodCrashLooping|KubePodNotReady|KubeContainerWaiting|KubeDeploymentReplicasMismatch|KubeStatefulSetReplicasMismatch|KubeDaemonSetRolloutStuck|KubeJobFailed|TargetDown|LonghornVolumeUnhealthy
+          matchType: "=~"
+      # No `equal:` on purpose — the blast radius of a Longhorn outage is
+      # cluster-wide, not confined to the storage namespace.
   receivers:
     - name: telegram
       telegramConfigs:
@@ -46,3 +88,19 @@ spec:
             {{ end }}{{ range .Alerts.Resolved }}
             ✅ <b>{{ .Labels.alertname }}</b> resolved{{ if .Labels.node }} — <code>{{ .Labels.node }}</code>{{ end }}{{ if .Labels.pod }} — <code>{{ .Labels.pod }}</code>{{ end }}{{ if .Labels.instance }} — <code>{{ .Labels.instance }}</code>{{ end }} (was {{ .Labels.severity }}, {{ .StartsAt.Format "15:04" }}–{{ .EndsAt.Format "15:04 MST" }})
             {{ end }}
+    # Separate receiver purely for the template: a namespace digest can carry 20+
+    # alerts, and the verbose per-alert format above would blow past Telegram's
+    # 4096-character message limit and fail the notification. One line each.
+    - name: telegram-warnings
+      telegramConfigs:
+        - botToken:
+            name: alertmanager-telegram-secret
+            key: bot-token
+          chatID: 8854064758
+          sendResolved: true
+          parseMode: HTML
+          message: |-
+            🟠 <b>{{ .Alerts.Firing | len }} warning(s)</b>{{ if .GroupLabels.namespace }} in <code>{{ .GroupLabels.namespace }}</code>{{ end }}
+            {{ range .Alerts.Firing }}• <b>{{ .Labels.alertname }}</b>{{ if .Labels.pod }} <code>{{ .Labels.pod }}</code>{{ else if .Labels.node }} <code>{{ .Labels.node }}</code>{{ else if .Labels.instance }} <code>{{ .Labels.instance }}</code>{{ end }} — since {{ .StartsAt.Format "15:04" }}
+            {{ end }}{{ if gt (len .Alerts.Resolved) 0 }}
+            ✅ <b>{{ .Alerts.Resolved | len }} resolved</b>: {{ range .Alerts.Resolved }}{{ .Labels.alertname }} {{ end }}{{ end }}
