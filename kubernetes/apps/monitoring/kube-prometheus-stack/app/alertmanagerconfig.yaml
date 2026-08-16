@@ -43,7 +43,23 @@ spec:
         groupWait: 30s
         groupInterval: 5m
         repeatInterval: 1h
-      # Warnings collapse into one digest per namespace, at a much slower cadence.
+      # Node and kubelet health keeps the old fast cadence — a node degrading is
+      # worth knowing about now, not in the next digest. Matched by alertname, not
+      # by an absent namespace label: kube-prometheus-stack labels these with the
+      # *rule's* namespace, so KubeNodeUnreachable and NodeDiskIOSaturation both
+      # arrive as namespace="monitoring" and would otherwise land in that digest.
+      - receiver: telegram
+        matchers:
+          - name: severity
+            value: warning
+          - name: alertname
+            value: (Node|KubeNode|Host|Kubelet).*
+            matchType: "=~"
+        groupBy: ["alertname"]
+        groupWait: 30s
+        groupInterval: 5m
+        repeatInterval: 4h
+      # Everything else collapses into one digest per namespace, much more slowly.
       - receiver: telegram-warnings
         matchers:
           - name: severity
@@ -58,6 +74,12 @@ spec:
   # cluster is a symptom of it — both admission webhooks are failurePolicy: Fail,
   # so unrelated namespaces start failing admission too. Mute the symptoms while
   # the root cause is firing; they return the moment it resolves.
+  #
+  # Like the route above, this depends on alertmanagerConfigMatcherStrategy.type:
+  # None. Under the default strategy the operator's namespaceEnforcer appends a
+  # namespace="monitoring" matcher to both sides (see processInhibitRule), which
+  # would silently reduce this rule to a no-op — every alert here carries a
+  # different namespace.
   inhibitRules:
     - sourceMatch:
         - name: alertname
@@ -65,8 +87,16 @@ spec:
           matchType: "=~"
       targetMatch:
         - name: alertname
-          value: KubePodCrashLooping|KubePodNotReady|KubeContainerWaiting|KubeDeploymentReplicasMismatch|KubeStatefulSetReplicasMismatch|KubeDaemonSetRolloutStuck|KubeJobFailed|TargetDown|LonghornVolumeUnhealthy
+          value: KubePodCrashLooping|KubePodNotReady|KubeContainerWaiting|KubeDeploymentReplicasMismatch|KubeStatefulSetReplicasMismatch|KubeDaemonSetRolloutStuck|KubeJobFailed|TargetDown
           matchType: "=~"
+        # Symptoms only. Matching on alertname alone would also mute critical
+        # instances of these alerts — LonghornVolumeUnhealthy is critical, and it
+        # is the one alert that reports actual data risk during a Longhorn outage,
+        # so it must never be inhibited. This guard also protects any target above
+        # that a future chart version promotes to critical.
+        - name: severity
+          value: critical
+          matchType: "!="
       # No `equal:` on purpose — the blast radius of a Longhorn outage is
       # cluster-wide, not confined to the storage namespace.
   receivers:
