@@ -87,11 +87,11 @@ data:
     - Home:
         - Home Assistant:
             icon: home-assistant
-            href: https://ha.koopmans.co
+            href: https://ha.${SECRET_DOMAIN}
             description: Smart Home Hub
         - Printer:
             icon: hp
-            href: https://hp476.koopmans.co
+            href: https://hp476.${SECRET_DOMAIN}
             description: HP Printer Configuration
     - Networking:
         - OPNsense:
@@ -100,7 +100,7 @@ data:
             description: Router & Firewall
         - Proxmox:
             icon: proxmox
-            href: https://vm01.koopmans.co:8006
+            href: https://vm01.${SECRET_DOMAIN}:8006
             description: Virtualization Management
         - Omada:
             icon: tp-link
