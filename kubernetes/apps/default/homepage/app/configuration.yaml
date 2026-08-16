@@ -118,5 +118,5 @@ data:
     - Storage:
         - Longhorn:
             icon: longhorn
-            href: https://longhorn.koopmans.co
+            href: https://longhorn.${SECRET_DOMAIN}
             description: Distributed Block Storage

@@ -20,7 +20,7 @@ spec:
               repository: ghcr.io/gethomepage/homepage
               tag: v2.0.0
             env:
-              HOMEPAGE_ALLOWED_HOSTS: "home.${SECRET_DOMAIN},grafana.koopmans.co,longhorn.koopmans.co"
+              HOMEPAGE_ALLOWED_HOSTS: "home.${SECRET_DOMAIN},grafana.${SECRET_DOMAIN},longhorn.${SECRET_DOMAIN}"
             # envFrom:
             #   - secretRef:
             #       name: homepage-secret

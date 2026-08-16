@@ -1,5 +1,5 @@
 ---
-# Route external traffic for knative-smoke.koopmans.co through the internal Envoy Gateway.
+# Route external traffic for knative-smoke.${SECRET_DOMAIN} through the internal Envoy Gateway.
 # We route directly to the revision service (knative-smoke-00001) rather than the
 # knative-smoke ExternalName Service, because Envoy Gateway cannot resolve ExternalName
 # backends. Knative automatically swaps revision service endpoints between the

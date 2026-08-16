@@ -56,9 +56,9 @@ spec:
     - URL: https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v1.21.0/release.yaml
   config:
     domain:
-      # Register koopmans.co as the default domain for Knative Services.
-      # KServices will get URLs like <name>.<namespace>.koopmans.co via the external gateway.
-      koopmans.co: ""
+      # Register ${SECRET_DOMAIN} as the default domain for Knative Services.
+      # KServices will get URLs like <name>.<namespace>.${SECRET_DOMAIN} via the external gateway.
+      ${SECRET_DOMAIN}: ""
     network:
       ingress-class: gateway-api.ingress.networking.knative.dev
     gateway:
