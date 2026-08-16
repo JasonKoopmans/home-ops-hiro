@@ -30,6 +30,20 @@ spec:
     remediation:
       retries: 3
   values:
+    longhornManager:
+      # Deliberate deviation from the chart default of "100%". Upstream removes every
+      # old manager before starting the new ones, so a manager image that cannot start
+      # takes down the whole Longhorn control plane at once — and because both admission
+      # webhooks are failurePolicy: Fail, that also fails every PVC/RecurringJob dry-run
+      # cluster-wide, which on 2026-08-16 deadlocked recovery (Flux could not apply the
+      # fixed HelmRelease because the webhook it needed was served by the down managers).
+      # Rolling one node at a time makes the DaemonSet stall on the first unready pod
+      # instead, keeping the remaining managers — and the webhook — serving.
+      # Trade-off accepted: manager versions are briefly mixed during a rollout, and the
+      # rollout is slower because image pulls serialize (covered by spec.timeout above).
+      updateStrategy:
+        rollingUpdate:
+          maxUnavailable: 1
     persistence:
       defaultDataLocality: best-effort
     defaultSettings:
