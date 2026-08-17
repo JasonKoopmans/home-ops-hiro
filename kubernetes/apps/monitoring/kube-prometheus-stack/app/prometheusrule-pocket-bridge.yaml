@@ -1,0 +1,61 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pocket-bridge-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: pocket-bridge.rules
+      rules:
+        # Both rules key on the CronJob's own last-success timestamp, NOT on kube_job_failed. A failed Job
+        # object latches: `kube_job_failed > 0` keys on the *existence* of a failed Job rather than on any
+        # recent event, so it cannot self-clear and has to be cleared by deleting Job objects by hand. This
+        # repo has already lived through that (see prometheusrule-recording-annotator.yaml).
+        #
+        # kube_cronjob_status_last_successful_time is used in preference to
+        # `max(kube_job_status_completion_time{job_name=~"pocket-bridge-sync-.*"})` because the Job-level
+        # series only exists while the Job objects do. With ttlSecondsAfterFinished: 48h on the CronJob, every
+        # successful Job is garbage-collected 48h after it finishes — so under a sustained outage the last
+        # successful Job disappears, `max()` over an empty set returns no samples, and a rule built on it stops
+        # firing exactly when the outage has gone on longest. The CronJob status field survives Job GC.
+        #
+        # 36h against a 12h schedule allows two consecutive missed runs before alerting.
+        #
+        # NAME TRAP — the CronJob is `pocket-bridge`, NOT `pocket-bridge-sync`. bjw-s app-template only
+        # appends the controller identifier to the resource name when the release has more than one
+        # controller (lib/common/_determineResourceNameFromValues.tpl: the suffix is applied under
+        # `if or (gt $itemCount 1) .Values.global.alwaysAppendIdentifierToResourceName`). pocket-bridge has a
+        # single controller, so the `sync` identifier is dropped and the bare fullname is used — unlike
+        # recording-annotator, whose four controllers all do get suffixes. Verified by rendering the chart.
+        # If a second controller is ever added to this HelmRelease the CronJob silently RENAMES to
+        # `pocket-bridge-sync` and both rules below go stale — the first stops firing, and the absent() one
+        # below starts firing forever. Update these selectors in the same commit if that happens.
+        - alert: PocketBridgeSyncNotSucceeding
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="default", cronjob="pocket-bridge"} > 129600
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: pocket-bridge sync CronJob has no recent successful run
+            description: The pocket-bridge-sync CronJob has not recorded a successful Job in over 36 hours against a 12-hourly schedule. Tagged Hey Pocket recordings are not being uploaded to RecordingAnnotator or written into Obsidian, and they stay tagged, so nothing is lost — but the backlog grows until this is fixed.
+
+        # Separate rule because the one above evaluates empty, and so never fires, until the CronJob has
+        # succeeded at least once — which is the state a fresh deploy starts in, and precisely when a silent
+        # failure matters most. absent() is safe here in a way it would not be for a metric that never appears:
+        # this series shows up as soon as the first run succeeds, so the alert can resolve on its own.
+        #
+        # EXPECTED TO FIRE ON FIRST DEPLOY and to keep firing until the first successful sync. Until the
+        # pocket-bridge image is published this CronJob will ImagePullBackOff, so treat this as pending setup
+        # rather than a regression; it clears itself once a run completes.
+        - alert: PocketBridgeSyncNeverSucceeded
+          expr: absent(kube_cronjob_status_last_successful_time{namespace="default", cronjob="pocket-bridge"})
+          for: 3h
+          labels:
+            severity: warning
+          annotations:
+            summary: pocket-bridge sync CronJob has never completed successfully
+            description: No successful run of pocket-bridge-sync has ever been recorded, over at least 3 hours of a 12-hourly schedule. Expected right after the first deploy and until ghcr.io/jasonkoopmans/pocket-bridge publishes its first image tag. If it persists beyond that, check the Job logs for Hey Pocket / Obsidian credential errors.
