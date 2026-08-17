@@ -30,6 +30,15 @@ spec:
     remediation:
       retries: 3
   values:
+    networkPolicies:
+      # Chart 1.12.1 introduced this key defaulting to TRUE, and five policy
+      # templates render on it alone — independent of `networkPolicies.enabled`,
+      # which is still false. So a patch bump switched NetworkPolicies on for
+      # Longhorn's internal components without any change on our side, and the
+      # manager policy has no allowance for metrics scraping (see
+      # ./networkpolicy.yaml). Pinned explicitly so the value is a decision
+      # rather than an inherited default that can flip again.
+      restrictInternalTraffic: true
     longhornManager:
       # Deliberate deviation from the chart default of "100%". Upstream removes every
       # old manager before starting the new ones, so a manager image that cannot start
