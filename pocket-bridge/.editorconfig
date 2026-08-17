@@ -1,0 +1,24 @@
+# pocket-bridge overrides.
+#
+# The home-ops-hiro repo root .editorconfig declares `root = true` with a global
+# `indent_size = 2`, which is right for YAML manifests but wrong for C#. Without
+# this file `dotnet format --verify-no-changes` would demand 2-space indentation
+# in every .cs file. Scoped overrides live here so the repo-root config keeps
+# governing the manifests and this directory stays liftable into its own repo.
+
+[*.cs]
+indent_size = 4
+indent_style = space
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# File-scoped namespaces are used throughout; keep the analyzer aligned.
+csharp_style_namespace_declarations = file_scoped:suggestion
+
+[*.{csproj,props,targets}]
+indent_size = 2
+
+[*.json]
+indent_size = 2
