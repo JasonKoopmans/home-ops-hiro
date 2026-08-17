@@ -2,6 +2,11 @@
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!--
+      Test naming is intentionally descriptive rather than API-shaped, and tests do not
+      need ConfigureAwait or sealed-type micro-optimisation.
+    -->
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1861;CA1515;CA1852</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
