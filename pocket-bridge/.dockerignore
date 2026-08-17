@@ -1,0 +1,18 @@
+# Keep the build context small and avoid poisoning the image layer cache with
+# host build output that the SDK stage would otherwise overwrite anyway.
+**/bin/
+**/obj/
+**/TestResults/
+**/.vs/
+**/.idea/
+
+.git/
+.github/
+.gitignore
+.dockerignore
+README.md
+
+# Never let a local secrets file reach the build context.
+**/appsettings.Local.json
+**/appsettings.Development.json
+**/*.env

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    No PackageReference entries: the ASP.NET Core shared framework already
+    supplies Configuration, Options and Hosting. Adding them explicitly trips
+    NU1510 (unprunable reference), which TreatWarningsAsErrors turns into a
+    build failure.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\PocketBridge.Core\PocketBridge.Core.csproj" />
+    <ProjectReference Include="..\PocketBridge.Infrastructure\PocketBridge.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

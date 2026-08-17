@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+
+# Test output
+TestResults/
+*.trx
+coverage.*.json
+*.opencover.xml
+
+# Local secrets — never commit a real Pocket or Obsidian token.
+# Use `dotnet user-secrets` locally and Kubernetes Secrets in the cluster.
+appsettings.Local.json
+appsettings.Development.json
+*.env
+.env
+
+# Editor / OS
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
