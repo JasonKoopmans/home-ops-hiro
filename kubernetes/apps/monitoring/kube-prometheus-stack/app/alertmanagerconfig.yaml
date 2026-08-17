@@ -82,9 +82,17 @@ spec:
   # different namespace.
   inhibitRules:
     - sourceMatch:
+        # LonghornNodeNotReady only. LonghornManagerDown is `up{job=...} == 0`,
+        # which cannot tell "manager is down" from "Prometheus cannot reach the
+        # manager" — on 2026-08-16 a NetworkPolicy blocking the scrape path had
+        # it firing critical for hours while Longhorn was entirely healthy. As an
+        # inhibit source that would have muted pod-health warnings cluster-wide
+        # over a monitoring-path problem. LonghornNodeNotReady reads
+        # longhorn_node_status, so the same scrape failure makes its data absent
+        # and it simply stops evaluating — it fails safe, which is what an
+        # inhibit source has to do.
         - name: alertname
-          value: LonghornManagerDown|LonghornNodeNotReady
-          matchType: "=~"
+          value: LonghornNodeNotReady
       targetMatch:
         - name: alertname
           value: KubePodCrashLooping|KubePodNotReady|KubeContainerWaiting|KubeDeploymentReplicasMismatch|KubeStatefulSetReplicasMismatch|KubeDaemonSetRolloutStuck|KubeJobFailed|TargetDown
