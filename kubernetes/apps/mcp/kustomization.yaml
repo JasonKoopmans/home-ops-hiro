@@ -10,3 +10,4 @@ resources:
   - ./namespace.yaml
   - ./mcp-kubernetes/ks.yaml
   - ./mcp-prometheus/ks.yaml
+  - ./mcp-proxmox/ks.yaml

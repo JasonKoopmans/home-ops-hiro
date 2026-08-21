@@ -1,0 +1,25 @@
+---
+# PLACEHOLDER — replace the block below with the real certificate before this
+# app can start. Not a secret: this is the public half of Proxmox's cluster CA,
+# which is why it lives in a ConfigMap rather than the SOPS Secret.
+#
+# The image refuses to run with TLS verification disabled, and Proxmox presents
+# a certificate signed by its own "PVE Cluster Manager CA" rather than a public
+# authority, so the CA has to be supplied for verification to succeed. Fetch it
+# from the Proxmox host:
+#
+#   ssh root@vm01 cat /etc/pve/pve-root-ca.pem
+#
+# and paste it below, indented under the `|` block. The current leaf certificate
+# carries 192.168.1.11 in its SAN list and expires 2027-10-16; the CA itself is
+# longer-lived, but a `pvecm updatecerts`-style regeneration on the Proxmox side
+# means this file has to be refreshed too.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-proxmox-ca
+data:
+  pve-root-ca.pem: |
+    -----BEGIN CERTIFICATE-----
+    PLACEHOLDER — paste /etc/pve/pve-root-ca.pem from the Proxmox host here.
+    -----END CERTIFICATE-----
