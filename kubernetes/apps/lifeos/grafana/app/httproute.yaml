@@ -1,0 +1,28 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/gateway.networking.k8s.io/httproute_v1.json
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/icon: grafana
+    gethomepage.dev/title: LifeOS
+    gethomepage.dev/description: "Personal reporting & aggregation"
+    gethomepage.dev/group: "LifeOS"
+spec:
+  # Single-label hostname: the wildcard cert covers ${SECRET_DOMAIN} and
+  # *.${SECRET_DOMAIN} only, so a second label would fail TLS. `lifeos` rather
+  # than `grafana-lifeos` because this is the front door of the personal stack —
+  # future LifeOS apps get their own names alongside it.
+  hostnames: ["lifeos.${SECRET_DOMAIN}"]
+  parentRefs:
+    # Internal only, and not negotiable: this instance aggregates personal data
+    # and authenticates with a single local admin account.
+    - name: envoy-internal
+      namespace: network
+      sectionName: https
+  rules:
+    - backendRefs:
+        - name: grafana
+          port: 80

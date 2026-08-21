@@ -1,0 +1,66 @@
+---
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+vars:
+  # Quoted at every use site — a checkout path containing a space would
+  # otherwise split into two arguments.
+  DASHBOARD_EXPORT_SCRIPT: "{{.ROOT_DIR}}/scripts/lifeos-dashboard-export.sh"
+  LIFEOS_APP_DIR: "{{.ROOT_DIR}}/kubernetes/apps/lifeos/grafana/app"
+
+tasks:
+
+  dashboard:list:
+    desc: List dashboards in the LifeOS Grafana, with their uid and folder
+    summary: |
+      Shows both planes at once, so it doubles as the drift check: anything in
+      the GitOps folder came from a ConfigMap in this repo, everything else
+      lives only in Grafana's database and is a promotion candidate.
+    cmd: |
+      user="$(kubectl -n lifeos get secret grafana-secret -o jsonpath='{.data.admin-user}' | base64 -d)"
+      password="$(kubectl -n lifeos get secret grafana-secret -o jsonpath='{.data.admin-password}' | base64 -d)"
+
+      pf_log="$(mktemp)"
+      kubectl -n lifeos port-forward svc/grafana :80 >"$pf_log" 2>&1 &
+      pf_pid=$!
+      trap 'kill $pf_pid 2>/dev/null || true; rm -f "$pf_log"' EXIT
+
+      port=""
+      for _ in $(seq 1 50); do
+        port="$(sed -n 's/^Forwarding from 127\.0\.0\.1:\([0-9]*\).*/\1/p' "$pf_log" | head -1)"
+        [ -n "$port" ] && break
+        sleep 0.2
+      done
+      [ -n "$port" ] || { echo "port-forward never came up" >&2; cat "$pf_log" >&2; exit 1; }
+
+      curl -sS --fail --max-time 30 -u "$user:$password" \
+        "http://127.0.0.1:$port/api/search?type=dash-db" \
+        | jq -r '["UID","FOLDER","TITLE"], (.[] | [.uid, (.folderTitle // "General"), .title]) | @tsv' \
+        | column -t -s "$(printf '\t')"
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: 'test -f "{{.KUBECONFIG}}"' }
+
+  dashboard:export:
+    desc: Promote a UI-authored dashboard into Git as a ConfigMap
+    summary: |
+      Args:
+        uid:    dashboard uid (required) — see `task lifeos:dashboard:list`
+        folder: Grafana folder for the provisioned copy (default: GitOps)
+
+      Fetches the dashboard over Grafana's API, strips the database-local id and
+      version fields, writes kubernetes/apps/lifeos/grafana/app/dashboard-<slug>.yaml
+      and registers it in that directory's kustomization.yaml.
+
+      The result is provisioned read-only, so delete the UI copy once Flux has
+      reconciled it — otherwise the same dashboard exists twice and only one of
+      them is under version control.
+
+      Example:
+        task lifeos:dashboard:export uid=lifeos-spend folder=Finance
+    requires:
+      vars: [uid]
+    cmd: bash "{{.DASHBOARD_EXPORT_SCRIPT}}" "{{.uid}}" "{{.folder | default `GitOps`}}" "{{.ROOT_DIR}}"
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: 'test -f "{{.KUBECONFIG}}"' }
+      - { msg: "Missing export script", sh: 'test -f "{{.DASHBOARD_EXPORT_SCRIPT}}"' }
+      - { msg: "Missing lifeos grafana app directory", sh: 'test -d "{{.LIFEOS_APP_DIR}}"' }

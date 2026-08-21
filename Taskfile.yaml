@@ -22,6 +22,7 @@ env:
 includes:
   bootstrap: .taskfiles/bootstrap
   crd: .taskfiles/crd
+  lifeos: .taskfiles/lifeos
   mcp: .taskfiles/mcp
   talos: .taskfiles/talos
   template: .taskfiles/template
