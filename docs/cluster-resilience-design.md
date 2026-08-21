@@ -38,7 +38,7 @@ tier assumes the tiers below it are already healthy:
 | **3 — Data services** | Longhorn volume backups, MinIO buckets, mariadb-operator/databases, Prometheus/Loki/Thanos TSDB | Tier 2 healthy |
 | **4 — Leaf applications** | The stateless majority (recovered automatically by Flux) + the dozen apps with PVCs (recovered via Tier 3 mechanisms) | Tiers 1–3 healthy |
 
-**Status: Tiers 1–3 audited below (2026-08-21). Tier 4 not yet started.**
+**Status: Tiers 1–4 audited below (2026-08-21). First full pass complete.**
 
 ---
 
@@ -268,4 +268,88 @@ day comes.
 
 ## Tier 4 — Leaf applications
 
-Not yet audited. See `PLAN-9`.
+**Status: audited 2026-08-21.** Scope: the stateless majority (confirmed,
+not just assumed) plus every app holding real state — PVC-backed or
+otherwise.
+
+### Stateless majority: confirmed, not assumed
+
+Rather than trust the Tier 1 PVC glob alone, this audit grepped every
+`helmrelease.yaml` under `kubernetes/apps` for a `persistence:` block —
+app-template's full vocabulary for declaring state (`type:
+persistentVolumeClaim`/`existingClaim`, `configMap`, `secret`,
+`emptyDir`). Apps with no `persistence:` block and no standalone PVC file
+are genuinely stateless by declaration, not just by assumption. A few
+apps that looked like they might hold state turned out not to:
+`guacamole` (only mounts a SOPS secret), `homepage` (only a ConfigMap —
+its whole dashboard config is git-defined YAML), `openreel` (`emptyDir`
+only), `tika-ner` (`emptyDir`/ConfigMap only), `mcp-kubernetes`
+(`emptyDir` scratch cache only). All fully reproducible from Git with no
+gap.
+
+### PVC-backed apps: coverage confirmed
+
+| App | Storage class | Backed up? |
+|---|---|---|
+| `audacity`, `bookshelf`, `changedetection`, `freecad`, `freshrss`, `hermes-ai-agent`, `minecraft`, `obsidian`, `prowlarr`, `qbittorrent`, `recording-annotator` | `longhorn` | ✅ Daily S3 backup (Tier 3 `default` group) |
+| `thanos` (`thanos-compactor-data`) | `longhorn-scratch` | Intentionally not — see Tier 3 |
+
+Every one of these already lands on the fully-backed-up class. No app
+holding real, irreplaceable state (`minecraft`'s world, `obsidian`'s
+vault, `audacity`/`freecad`'s project files) is sitting on a
+`*-no-backup` class by mistake. This is the reassuring result the sweep
+was designed to either confirm or refute — confirmed.
+
+### The actual finding: two PVCs that don't exist in Git at all
+
+`n8n` and `scanner-files` both mount storage via app-template's
+`existingClaim:` (`n8n`, `scanner-files` respectively) — but **no
+`PersistentVolumeClaim` manifest for either name exists anywhere in this
+repository.** Confirmed by grepping every `kind: PersistentVolumeClaim`
+manifest in the tree and every reference to those two names.
+
+This is a different, more serious category of gap than anything else
+found in Tiers 1–4: it's not "backed up vs. not," it's "provisioned by
+Git at all vs. not." Two explanations are both consistent with what's
+visible from this audit, and telling them apart needs live cluster
+access this session doesn't have:
+
+1. **The PVC was created out-of-band** (`kubectl apply`, `task apply`,
+   or similar) and currently exists live, invisible to Flux. It works
+   today but would **not** be recreated on any cluster rebuild — Tier 1
+   or otherwise — because nothing in Git declares it. This is the same
+   failure mode the two-phase decommission Watchouts in
+   `copilot-instructions.md` already warn about for *removal*
+   (untracked resources survive Flux prune), just in the *creation*
+   direction instead.
+2. **No PVC exists at all**, and both pods are currently stuck unable to
+   schedule (`Pending`, unbound `PersistentVolumeClaim`) — i.e. the apps
+   are simply not running.
+
+`n8n` is the more concerning of the two if scenario 1 is what's
+happening: it has its own Grafana dashboard and Prometheus alert rules
+(`kubernetes/apps/monitoring/kube-prometheus-stack/app/grafana-dashboard-n8n.yaml`,
+`prometheusrule-n8n.yaml`), suggesting active, monitored use — and n8n
+stores actual user-created workflow definitions in that volume by
+default, not reproducible data.
+
+**Recommendation, not yet actioned:** check
+`kubectl get pvc -n default n8n scanner-files` against the live cluster
+to determine which scenario applies, then either commit a `pvc.yaml`
+matching the existing live PVC's characteristics (scenario 1) or decide
+on size/class for a fresh one (scenario 2). Deliberately not
+guess-writing either manifest in this session — a mismatched
+`storageClassName`/size against an already-bound live PVC would fail to
+apply (those fields are immutable), and this session has no cluster
+access to check first (the `kubernetes` MCP connector isn't authorized
+in this session). Tracked as `PLAN-15`.
+
+### Minor nit
+
+`kubernetes/apps/default/test/app/volume.yaml` defines a PVC under a
+non-canonical filename (`copilot-instructions.md` specifies `pvc.yaml`)
+— which is why this audit's original Tier 1 glob (`**/app/pvc.yaml`)
+missed it. Low priority: `test` is already documented as a scratch app
+not meant to be extended or used as a pattern reference, so this isn't
+worth its own plan item — just a note for anyone grepping for PVCs the
+same way this audit initially did.

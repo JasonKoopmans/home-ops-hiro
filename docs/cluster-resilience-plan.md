@@ -94,13 +94,27 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
 
 ## Tier 4 — Leaf applications
 
-- 🔴 **PLAN-9:** Once Tier 3 lands, sweep the apps with PVCs individually
-  for anything that doesn't fit the Tier 3 default: `audacity`,
-  `bookshelf`, `changedetection`, `freecad`, `freshrss`,
-  `hermes-ai-agent`, `minecraft`, `obsidian`, `prowlarr`, `qbittorrent`,
-  `recording-annotator`, `thanos`. `recording-annotator` already has its
-  own complete, drilled backup design — see `docs/backup-recovery.md` —
-  so it's effectively done; the rest have not been looked at.
+- 🟢 **PLAN-9:** Sweep the apps with PVCs individually for anything that
+  doesn't fit the Tier 3 default, and confirm the "stateless majority"
+  premise the whole tiered approach rests on. Done — see design doc. All
+  eleven PVC-backed apps land on the fully-backed-up `longhorn` class;
+  every app checked for hidden state (`persistence:` blocks of any kind)
+  that turned out stateless is confirmed, not assumed. One real finding
+  came out of it — `PLAN-15`.
+
+- 🔴 **PLAN-15 (High):** `n8n` and `scanner-files` mount PVCs
+  (`existingClaim: n8n` / `existingClaim: scanner-files`) that don't
+  exist anywhere in this Git repo — no `pvc.yaml`, no equivalent, nothing.
+  Either they're running today on a PVC created out-of-band (invisible to
+  Flux, would **not** survive any cluster rebuild), or both pods are
+  currently stuck `Pending`. Needs `kubectl get pvc -n default n8n
+  scanner-files` against the live cluster to tell which — not something
+  this session could check (no cluster access). `n8n` is the more urgent
+  of the two: it has its own Grafana dashboard and Prometheus alerting,
+  suggesting real active use, and stores actual workflow data by default.
+  Once confirmed, the fix itself is mechanical (commit a matching or new
+  `pvc.yaml`) — this item is blocked on live-cluster verification, not on
+  a design decision.
 
 ---
 

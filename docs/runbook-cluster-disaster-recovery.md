@@ -174,6 +174,21 @@ Order of operations:
 
 ## Tier 4: leaf applications
 
-Not written yet — see `PLAN-9`. The recording-annotator app already has
-a complete, drilled recovery procedure independent of this runbook — see
-`docs/backup-recovery.md`.
+Once Tiers 1–3 are healthy, this tier is mostly self-recovering: Flux
+reconciles every app in `kubernetes/apps/`, and the stateless majority
+just comes up with no further action. The PVC-backed apps
+(`audacity`, `bookshelf`, `changedetection`, `freecad`, `freshrss`,
+`hermes-ai-agent`, `minecraft`, `obsidian`, `prowlarr`, `qbittorrent`,
+`recording-annotator`) all use the `default` Longhorn group — follow the
+same Tier 3 restore-from-backup procedure for each.
+
+`recording-annotator` has its own complete, drilled recovery procedure
+independent of this runbook — see `docs/backup-recovery.md`.
+
+**Known issue to check first, before assuming this tier "just works":**
+`n8n` and `scanner-files` mount PVCs (`existingClaim: n8n` /
+`existingClaim: scanner-files`) that don't exist anywhere in Git — see
+`PLAN-15`. If that's still unresolved when this runbook is actually
+used, expect both pods stuck `Pending` after a rebuild regardless of
+what Tiers 1–3 did correctly — they need a `pvc.yaml` (or equivalent)
+that currently doesn't exist in the repo at all.
