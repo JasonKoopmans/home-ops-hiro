@@ -172,8 +172,34 @@ and settles on its own.
 | cloudflared (`cloudflare-tunnel`) | ✅ Fully Git | Runs off `TUNNEL_TOKEN` (committed, SOPS-encrypted) — see the Tier 1 correction above. |
 | external-dns (`cloudflare-dns`) | ✅ Fully Git | API token committed, SOPS-encrypted. |
 | k8s_gateway | ✅ Fully Git | No external state. |
-| Longhorn (engine) | ✅ Fully Git — **contradicts a stale README note** | `defaultSettings.createDefaultDiskLabeledNodes: true` (HelmRelease) plus the `node.longhorn.io/create-default-disk` label and `default-disks-config` annotation (Talos, per node in `talconfig.yaml`) fully declare node/disk setup. `README.md`'s "Configure Defaults for Nodes and Disks... 😭 I ended up configuring in the UI" note looks like it predates this and is stale — but that's inferred from Git, **not independently verified against the live cluster** (no cluster access from this session). Worth one live check that no manual UI drift exists beyond what Git declares — `PLAN-12`. |
+| Longhorn (engine) | ⚠️ Declared in Git, but **not fully applied live** — see correction below | `defaultSettings.createDefaultDiskLabeledNodes: true` (HelmRelease) plus the `node.longhorn.io/create-default-disk` label and `default-disks-config` annotation (Talos, per node in `talconfig.yaml`) declare node/disk setup for all five nodes. Verified live (`PLAN-12`) that this is only actually *applied* to one of them. |
 | Multus | ⚠️ Fully Git, one fragile assumption | Two `NetworkAttachmentDefinition`s (`macvlan-conf`, `macvlan-conf-lan`) hardcode NIC names `ens19`/`ens20` as the macvlan master interface. Nothing asserts these names survive a node rebuild — Proxmox/Talos NIC enumeration could reorder them, silently breaking macvlan-attached pods (anything wanting a real LAN IP) with no error pointing at the actual cause. Tracked as `PLAN-11`. |
+
+### Correction from live verification (`PLAN-12`, resolved 2026-08-21)
+
+This audit's original Longhorn row above guessed from Git alone that the
+README's manual-UI-config note was stale. A follow-up session with real
+cluster access checked `kubectl get nodes.longhorn.io -n storage -o
+yaml` and found the opposite: only `hiro-cmp-05` (the newest node, added
+after the Talos annotation approach was adopted) actually carries the
+`node.longhorn.io/create-default-disk` label and
+`default-disks-config` annotation live. `hiro-cmp-01`..`04`'s *applied*
+Talos machine config was never updated after the Longhorn patch was
+added to `talconfig.yaml` — their live disk config is a static leftover
+from the original manual UI setup the README describes, not something
+Git is currently reconciling. All five nodes' Longhorn `Node` CRs happen
+to still be correctly configured today, so there's no *current*
+functional problem — but four of five nodes would not reproduce their
+disk config from Git alone outside of a full rebuild (which applies
+`talconfig.yaml` fresh to every node regardless — see the runbook's
+Tier 2 section, this drift doesn't survive a real DR event).
+
+Applying the missing machine-config patch to `hiro-cmp-01`..`04` live is
+`PLAN-16`, deliberately left undone by the verifying session — it
+touches live Talos config on control-plane nodes, which needs the
+owner's explicit go-ahead per this repo's own guardrail (`Talos Linux`
+section, `.github/copilot-instructions.md`) rather than being done
+opportunistically while resolving a different item.
 
 ### Recovery order
 

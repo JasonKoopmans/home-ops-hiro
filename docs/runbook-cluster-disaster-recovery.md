@@ -124,7 +124,14 @@ flagged as not fully self-verifying:
    ```sh
    kubectl get gateway -n network
    ```
-2. **Multus macvlan interfaces resolved**, if any macvlan-attached pods
+2. **Not a concern for this runbook, but worth knowing:** the live
+   cluster currently has a Talos config drift on `hiro-cmp-01`..`04`
+   (Longhorn's node/disk patch was never re-applied after being added to
+   `talconfig.yaml` — see `PLAN-16`). A real Tier 1 rebuild applies
+   `talconfig.yaml` fresh to every node regardless, so this specific
+   drift doesn't survive a genuine DR event — it's a today-only
+   inconsistency, not something this runbook needs to work around.
+3. **Multus macvlan interfaces resolved**, if any macvlan-attached pods
    exist. `kubernetes/apps/network/multus/app/NetworkAttachmentDefinition.yaml`
    hardcodes NIC names `ens19`/`ens20` as macvlan masters — a rebuilt
    node whose NIC enumeration doesn't match will fail silently rather
