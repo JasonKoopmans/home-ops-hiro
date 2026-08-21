@@ -38,7 +38,7 @@ tier assumes the tiers below it are already healthy:
 | **3 — Data services** | Longhorn volume backups, MinIO buckets, mariadb-operator/databases, Prometheus/Loki/Thanos TSDB | Tier 2 healthy |
 | **4 — Leaf applications** | The stateless majority (recovered automatically by Flux) + the dozen apps with PVCs (recovered via Tier 3 mechanisms) | Tiers 1–3 healthy |
 
-**Status: Tiers 1–2 audited below (2026-08-21). Tiers 3–4 not yet started.**
+**Status: Tiers 1–3 audited below (2026-08-21). Tier 4 not yet started.**
 
 ---
 
@@ -193,11 +193,78 @@ and settles on its own.
 
 ## Tier 3 — Data services
 
-Not yet audited. Longhorn's S3 backup target
-(`kubernetes/apps/storage/longhorn-system/app/default-backup-target.yaml`)
-and the recording-annotator app's own backup design
-(`docs/backup-recovery.md`) are the two known pieces of prior art to
-build on rather than duplicate. See `PLAN-6`, `PLAN-7`, `PLAN-8`.
+**Status: audited 2026-08-21.** Scope: Longhorn's S3 backup-target
+coverage, MinIO (the `storage/minio` instance backing Thanos/Loki —
+`recording-annotator-minio` is a separate instance already fully covered
+by `docs/backup-recovery.md`), and mariadb-operator/databases.
+
+### Longhorn recurring-job coverage (`PLAN-6`)
+
+Tier 2 already found the RecurringJob *policy* fully declarative
+(`default-jobs.yaml`); this tier checked what it actually covers.
+`storageclasses.yaml`'s `recurringJobSelector` wiring maps cleanly:
+
+| Group (StorageClass) | Snapshot | S3 backup | What lands here |
+|---|---|---|---|
+| `default` (`longhorn`, 3 replicas) | 6-hourly | **daily** | The ~12 apps with real PVCs (see Tier 4), Grafana's 1Gi PVC |
+| `snapshot-only` (`*-no-backup` classes) | daily | none | MinIO instances (`storage/minio`, `recording-annotator-minio`) |
+| `tsdb` (`longhorn-tsdb`) | daily | none | Prometheus, Loki — durable copy assumed to be MinIO |
+| `scratch` (`longhorn-scratch`) | none | none | `thanos-compactor-data` — genuinely disposable |
+
+Coverage itself is coherent and well-reasoned (the `storageclasses.yaml`
+comments already explain each trade-off in detail). What's missing:
+**nothing proves the daily S3 backup for the `default` group actually
+restores.** Unlike recording-annotator's monthly restore drill
+(`docs/backup-recovery.md` §9 — "an untested backup is not a backup"),
+there's no equivalent check for Longhorn's own backup target. This
+covers real application data for a dozen stateful apps, so it's a more
+consequential gap than it might first look — tracked as `PLAN-13`.
+
+**Operationally important, worth stating plainly for the runbook:**
+recreating a PVC through GitOps (Flux reapplying the manifest after a
+rebuild) provisions a **new, empty** Longhorn volume — it does not
+automatically attach existing S3 backup data. Restoring actual content
+requires a separate, explicit Longhorn restore action per volume. This
+session couldn't verify the exact current procedure against Longhorn's
+own docs (outbound access to longhorn.io is blocked in this
+environment) — `PLAN-13` should nail down and document the real steps by
+actually running a drill, rather than this doc guessing at commands.
+
+### MinIO durability gap (`PLAN-7`)
+
+The `storage/minio` instance (buckets: `observability-thanos`,
+`observability-loki`) is exactly the "durable copy" that justifies
+skipping Longhorn backup for Prometheus's and Loki's own local volumes
+(see the `tsdb` row above, and `storageclasses.yaml`'s own comment: "no
+Longhorn backup because the real copy is already in MinIO"). But MinIO's
+own PVC uses `longhorn-2-no-backup` — **2-replica in-cluster redundancy
+only, no S3 backup, no offsite copy of any kind.** The reasoning that
+justified skipping backup for Prometheus/Loki's local volumes doesn't
+actually hold at the MinIO layer itself: a whole-cluster loss event (not
+just a single node/disk) takes the entire metrics/logs history with it,
+with no recovery path.
+
+This is a real, previously-undocumented gap — not a false alarm — but
+worth sizing correctly: the data at risk is observability history
+(dashboards, log search), not primary application data. Losing it after
+a full rebuild is annoying, not catastrophic.
+`recording-annotator-minio` already solves the identical problem for its
+own instance with an hourly `mc mirror` to a dedicated, Object-Locked S3
+bucket (`docs/backup-recovery.md` §2) — the same technique is the
+obvious template here if the history is judged worth protecting. Tracked
+as `PLAN-14`, owner decision on priority.
+
+### mariadb-operator (`PLAN-8`)
+
+Audited, nothing to find yet: the operator (and its CRDs, via
+`helmrelease-crds.yaml`) is installed, but **no application currently
+provisions a `MariaDB` CR** — confirmed by grepping every manifest under
+`kubernetes/apps` for `kind: MariaDB`/`Backup`/`PhysicalBackup`/
+`SqlDump`. Nothing is at risk because nothing exists yet. The
+resilience-posture guardrail added to `.github/copilot-instructions.md`
+during the Tier 1 work should catch this the first time an app actually
+uses mariadb-operator — worth double-checking that it does, when that
+day comes.
 
 ## Tier 4 — Leaf applications
 

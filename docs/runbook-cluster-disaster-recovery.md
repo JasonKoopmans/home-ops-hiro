@@ -136,7 +136,41 @@ flagged as not fully self-verifying:
 
 ## Tier 3: data services
 
-Not written yet — see `PLAN-6`, `PLAN-7`, `PLAN-8`.
+Longhorn's engine is already up from Tier 2. This section is about
+getting actual *data* back, not just the storage system.
+
+**The one thing to get right first:** letting Flux reconcile
+`kubernetes/apps/` recreates every PVC — but a freshly provisioned
+Longhorn volume is **empty**, even though the S3 backup target
+(`s3://hiro-longhorn-backups@us-east-1/`) still holds the real data.
+Restoring content into a volume is a separate, explicit action per
+volume, not something that happens automatically because the PVC
+manifest reapplied successfully. Do not declare an app "recovered" just
+because its pod is Running — check that its data actually came back.
+
+The exact current restore procedure needs to be confirmed against
+Longhorn's own documentation at recovery time — this runbook
+deliberately doesn't hardcode steps that could drift across Longhorn
+versions (see `PLAN-13`, which exists specifically to nail this down
+ahead of an actual emergency rather than during one). Longhorn's own UI
+is generally the most reliable place to find the current restore flow
+for a given backup.
+
+Order of operations:
+
+1. Let Flux reconcile all of `kubernetes/apps/` and confirm pods come up
+   (most will — see Tier 4, mostly stateless).
+2. For each app whose data actually matters (the `default`-group apps —
+   see the design doc's Tier 3 table), restore its volume from the
+   Longhorn S3 backup target **before** trusting the app's state.
+3. `snapshot-only`/`tsdb`-group volumes (MinIO, Prometheus, Loki) have
+   no S3 backup to restore from — they come back empty by design. If
+   `PLAN-14` is ever implemented, MinIO's buckets would be restored from
+   its own offsite mirror instead, the same way
+   `docs/backup-recovery.md` §10 does for `recording-annotator-minio`.
+4. `scratch`-group volumes (`thanos-compactor-data`) need no recovery
+   action — they're rebuilt from upstream state as a normal part of the
+   app running.
 
 ## Tier 4: leaf applications
 

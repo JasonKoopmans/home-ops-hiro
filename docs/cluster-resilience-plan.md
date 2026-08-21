@@ -62,13 +62,35 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
 
 ## Tier 3 — Data services
 
-- 🔴 **PLAN-6:** Audit Longhorn's S3 backup target coverage — which
-  storage classes/volumes are actually captured by recurring backup jobs
-  vs. `*-no-backup` classes, and whether a restore has ever been tested.
-- 🔴 **PLAN-7:** Audit MinIO bucket backup/recovery (Thanos, Loki object
+- 🟢 **PLAN-6:** Audit Longhorn's S3 backup target coverage. Done — see
+  design doc. Coverage/policy across the `default`/`snapshot-only`/
+  `tsdb`/`scratch` groups is coherent and well-documented; the real gap
+  is that restore has never been proven to work (`PLAN-13`).
+- 🟢 **PLAN-7:** Audit MinIO bucket backup/recovery (Thanos, Loki object
   storage) — a separate concern from the Longhorn backup target per the
-  Storage section of `.github/copilot-instructions.md`.
-- 🔴 **PLAN-8:** Audit mariadb-operator/database backup coverage.
+  Storage section of `.github/copilot-instructions.md`. Done — found a
+  real gap: the observability MinIO instance has no backup beyond
+  in-cluster replicas (`PLAN-14`).
+- 🟢 **PLAN-8:** Audit mariadb-operator/database backup coverage. Done —
+  nothing to audit yet, no app provisions a `MariaDB` CR. Covered going
+  forward by the "Adding a New Application" resilience guardrail.
+
+- 🔴 **PLAN-13 (Medium-High):** Run and document an actual Longhorn
+  restore-from-backup drill against the S3 backup target — pick any
+  `default`-group volume, confirm the real current procedure (this
+  session couldn't verify it against Longhorn's docs — outbound access
+  to longhorn.io is blocked in this environment), and write it up as
+  part of `docs/runbook-cluster-disaster-recovery.md`'s Tier 3 section.
+  Covers real application data for a dozen stateful apps, so it's more
+  consequential than PLAN-2/PLAN-11/PLAN-12.
+
+- 🔴 **PLAN-14 (Medium, owner decision):** Decide whether the
+  `storage/minio` instance's `observability-thanos`/`observability-loki`
+  buckets are worth an offsite backup, given the data at risk is
+  metrics/log history rather than primary application data. If yes,
+  `recording-annotator-minio` already has a working template to copy —
+  an hourly `mc mirror` to a dedicated Object-Locked S3 bucket
+  (`docs/backup-recovery.md` §2).
 
 ## Tier 4 — Leaf applications
 
