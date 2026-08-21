@@ -45,9 +45,24 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
 
 ## Tier 2 — Core infra
 
-- 🔴 **PLAN-5:** Audit Cilium, Envoy Gateway, cert-manager, external-dns,
-  cloudflared, and Longhorn (the engine, not its volumes) for recovery
-  order and gaps. Not started.
+- 🟢 **PLAN-5:** Audit Cilium, Envoy Gateway, cert-manager, external-dns,
+  cloudflared, k8s_gateway, Multus, and Longhorn (the engine, not its
+  volumes) for recovery order and gaps. Done — see the design doc. No
+  critical gaps found; two low-severity follow-ups below.
+
+- 🔴 **PLAN-11 (Low):** Multus's two `NetworkAttachmentDefinition`s
+  hardcode NIC names `ens19`/`ens20` as macvlan masters, with no
+  assertion that a rebuilt node keeps the same NIC naming. Either
+  document the expected NIC-to-master mapping so a rebuild can verify it
+  by hand, or find a more robust selector than a hardcoded interface
+  name.
+
+- 🔴 **PLAN-12 (Low, needs live-cluster access):** Confirm the `README.md`
+  note about manually configuring Longhorn node/disk defaults via the UI
+  is actually stale — i.e. that `defaultSettings` +  the Talos
+  `default-disks-config` annotation fully account for current node/disk
+  state with no un-tracked manual drift. Not verified in this audit (no
+  cluster access from the auditing session).
 
 ## Tier 3 — Data services
 

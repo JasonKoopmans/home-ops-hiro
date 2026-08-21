@@ -38,7 +38,7 @@ tier assumes the tiers below it are already healthy:
 | **3 — Data services** | Longhorn volume backups, MinIO buckets, mariadb-operator/databases, Prometheus/Loki/Thanos TSDB | Tier 2 healthy |
 | **4 — Leaf applications** | The stateless majority (recovered automatically by Flux) + the dozen apps with PVCs (recovered via Tier 3 mechanisms) | Tiers 1–3 healthy |
 
-**Status: Tier 1 audited below (2026-08-21). Tiers 2–4 not yet started.**
+**Status: Tiers 1–2 audited below (2026-08-21). Tiers 3–4 not yet started.**
 
 ---
 
@@ -56,10 +56,10 @@ recovered, nothing else in this document matters.
 | Image Factory schematic | Inline in `talconfig.yaml`'s `schematic:` block per node, not a hand-copied ID | ✅ Git | — |
 | Talos secrets bundle (`talos/talsecret.sops.yaml`) | Committed, SOPS-encrypted (full-document, MAC-only mode per `.sops.yaml`) | ✅ Git | **age.key** |
 | Flux bootstrap seed (`bootstrap/sops-age.sops.yaml`, `bootstrap/github-deploy-key.sops.yaml`) | Committed, SOPS-encrypted | ✅ Git | **age.key** |
-| Flux/Cilium/CoreDNS/spegel install (`bootstrap/helmfile.d/*`) | Committed, plaintext (helmfile) | ✅ Git | — |
+| Cilium/CoreDNS/spegel/**cert-manager**/Flux install (`bootstrap/helmfile.d/*`) | Committed, plaintext (helmfile) | ✅ Git | — |
 | `cluster-secrets` (`kubernetes/components/sops/cluster-secrets.sops.yaml`) | Committed, SOPS-encrypted | ✅ Git | **age.key** |
 | **SOPS age private key (`age.key`)** | Gitignored, local-only | ❌ **No known backup** | — (this *is* the root of trust) |
-| Cloudflare Tunnel credentials (`cloudflare-tunnel.json`) | Gitignored, local-only | ❌ No backup, but the tunnel itself still exists in the Cloudflare account | — |
+| Cloudflare Tunnel credentials (`cloudflare-tunnel.json`) | Gitignored, local-only | ⚠️ No backup of the file itself — see correction below, this is lower-impact than it first appears | — |
 | Flux Git deploy key (`github-deploy.key[.pub]`) | Gitignored, local-only | ❌ No backup | — |
 | Flux webhook token (`github-push-token.txt`) | Gitignored, local-only | ❌ No backup | — |
 | `kubeconfig` / `talosconfig` | Gitignored, local-only | N/A — derived/regenerable | Talos secrets + live node access |
@@ -97,6 +97,19 @@ catastrophic — each can be regenerated and the affected integration
 capturing so a from-scratch bootstrap doesn't stall on "wait, where did
 that come from" — tracked as `PLAN-3`.
 
+**Correction found during the Tier 2 audit:** `cloudflare-tunnel.json` is
+less important than it first looked. The *running* `cloudflare-tunnel`
+HelmRelease doesn't mount that file at all — it authenticates with
+`TUNNEL_TOKEN`, read from `cloudflare-tunnel-secret`
+(`kubernetes/apps/network/cloudflare-tunnel/app/secret.sops.yaml`), which
+**is** committed and SOPS-encrypted like everything else. So the
+credential the cluster actually depends on day to day already inherits
+the `age.key` backup story (`PLAN-1`) rather than being a separate gap.
+`cloudflare-tunnel.json` itself is only the artifact from the one-time
+`cloudflared tunnel create` in `README.md` Stage 3 — it would matter
+again only for imperative `cloudflared tunnel` CLI management (re-routing,
+deleting the tunnel, etc.), not for recovering the cluster.
+
 ### Out of scope for this repo
 
 The four Proxmox VMs themselves (CPU/memory/disk allocation, the extra
@@ -111,9 +124,64 @@ repo can own.
 
 ## Tier 2 — Core infra
 
-Not yet audited. Scope: Cilium, Envoy Gateway, cert-manager,
-external-dns, cloudflared, and Longhorn as an engine (its volumes are
-Tier 3). See `PLAN-5`.
+**Status: audited 2026-08-21.** Scope: Cilium, Envoy Gateway, cert-manager
+(operational config only — its *install* is bootstrap-driven, corrected
+into Tier 1 above), external-dns (`cloudflare-dns`), cloudflared
+(`cloudflare-tunnel`), k8s_gateway, Multus, and Longhorn as an engine
+(its volumes/backups are Tier 3).
+
+### Overall shape: solid — no critical gaps
+
+Unlike Tier 1, this tier turned up nothing critical. Every operational
+secret these components need (`cloudflare-tunnel-secret`'s
+`TUNNEL_TOKEN`, `cloudflare-dns-secret`'s `api-token`,
+`cert-manager-secret`'s `api-token`) is already a committed,
+SOPS-encrypted manifest — they inherit the *already-tracked* `age.key`
+dependency (`PLAN-1`) rather than introducing a separate one.
+LoadBalancer IPs are pinned in Git (`lbipam.cilium.io/ips:
+"192.168.25.101"` / `.102` on the two Gateways), so a rebuild doesn't
+hand out different addresses that would silently break firewall rules,
+DNS pins, or port forwards living outside the cluster.
+
+None of these six components declares an explicit Flux `dependsOn` on
+another (confirmed by grepping every `ks.yaml` for `dependsOn` — none of
+Cilium/Envoy Gateway/cert-manager/cloudflare-tunnel/cloudflare-dns/
+k8s-gateway/multus/longhorn-system appear). They rely on Kubernetes' and
+Flux's own reconcile-loop convergence rather than hand-sequenced
+ordering, which is expected to self-heal after a Tier 1 rebuild the same
+way `README.md` describes several minutes of transient errors as normal
+during initial bootstrap — but it does mean there's no single
+"apply in this order" list for Tier 2; everything reconciles in parallel
+and settles on its own.
+
+### Component notes
+
+| Component | Reproducibility | Notes |
+|---|---|---|
+| Cilium | ✅ Fully Git (installed at bootstrap, Tier 1) | LB IP pool (`192.168.25.0/24`), L2 announcement, and BGP peering (to `192.168.1.1`, a second home LAN reachable via the Multus macvlan below) are all committed `CiliumXxx` CRs in `networks.yaml`. |
+| cert-manager (operational config) | ✅ Fully Git | `letsencrypt-production` `ClusterIssuer` + wildcard `Certificate` are ordinary manifests. Let's Encrypt certs are inherently re-issuable from nothing — no state to restore — modulo ACME rate limits on repeated resets (already called out in `README.md`'s Reset warning). |
+| Envoy Gateway | ✅ Fully Git | `EnvoyProxy`, `GatewayClass`, both `Gateway`s, and traffic policies are all committed. Listeners stay degraded (no valid TLS) until the wildcard `Certificate` above issues — self-resolving, not a gap. |
+| cloudflared (`cloudflare-tunnel`) | ✅ Fully Git | Runs off `TUNNEL_TOKEN` (committed, SOPS-encrypted) — see the Tier 1 correction above. |
+| external-dns (`cloudflare-dns`) | ✅ Fully Git | API token committed, SOPS-encrypted. |
+| k8s_gateway | ✅ Fully Git | No external state. |
+| Longhorn (engine) | ✅ Fully Git — **contradicts a stale README note** | `defaultSettings.createDefaultDiskLabeledNodes: true` (HelmRelease) plus the `node.longhorn.io/create-default-disk` label and `default-disks-config` annotation (Talos, per node in `talconfig.yaml`) fully declare node/disk setup. `README.md`'s "Configure Defaults for Nodes and Disks... 😭 I ended up configuring in the UI" note looks like it predates this and is stale — but that's inferred from Git, **not independently verified against the live cluster** (no cluster access from this session). Worth one live check that no manual UI drift exists beyond what Git declares — `PLAN-12`. |
+| Multus | ⚠️ Fully Git, one fragile assumption | Two `NetworkAttachmentDefinition`s (`macvlan-conf`, `macvlan-conf-lan`) hardcode NIC names `ens19`/`ens20` as the macvlan master interface. Nothing asserts these names survive a node rebuild — Proxmox/Talos NIC enumeration could reorder them, silently breaking macvlan-attached pods (anything wanting a real LAN IP) with no error pointing at the actual cause. Tracked as `PLAN-11`. |
+
+### Recovery order
+
+1. Cilium, cert-manager (install), CoreDNS, and spegel are already up
+   from the Tier 1 bootstrap chain — confirmed via
+   `bootstrap/helmfile.d/01-apps.yaml`: `cilium → coredns → spegel →
+   cert-manager → flux-operator → flux-instance`.
+2. Once Flux starts reconciling `kubernetes/apps/`, the rest of this
+   tier (Envoy Gateway, cloudflared, external-dns, k8s_gateway, the
+   Longhorn engine, Multus) comes up in parallel with no explicit
+   ordering — expect transient errors (Gateway listeners without a cert
+   yet, DNS records not yet created) until reconciliation settles, same
+   as the bootstrap-phase caveat in `README.md`.
+3. Worth checking once the dust settles: Gateway LB IPs actually bound
+   (`kubectl get gateway -n network`), and — if any macvlan-attached
+   pods exist — that `ens19`/`ens20` still map to the expected NICs.
 
 ## Tier 3 — Data services
 

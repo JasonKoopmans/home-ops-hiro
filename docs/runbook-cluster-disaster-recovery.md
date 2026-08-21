@@ -96,7 +96,43 @@ path — it's the reason `PLAN-1` is marked Critical.
 
 ## Tier 2: core infra
 
-Not written yet — see `PLAN-5`.
+Cilium, cert-manager (install only), CoreDNS, and spegel come up
+automatically as part of `task bootstrap:apps` in Tier 1 above — nothing
+further to do for those here.
+
+The rest of this tier — Envoy Gateway, cloudflared, external-dns,
+k8s_gateway, the Longhorn engine, and Multus — has no explicit ordering
+between components (see the design doc's Tier 2 section: none of them
+declare a Flux `dependsOn` on each other) and needs no manual
+intervention beyond letting Flux reconcile:
+
+```sh
+flux get ks -A
+flux get hr -A
+```
+
+Expect transient errors while things settle — Gateway listeners without
+a valid TLS cert until the wildcard `Certificate` issues, DNS records not
+yet created — the same "this is normal" caveat `README.md` gives for the
+initial bootstrap.
+
+Once reconciliation looks stable, check the two things this tier's audit
+flagged as not fully self-verifying:
+
+1. **Gateway LoadBalancer IPs bound correctly** (pinned in Git to
+   `192.168.25.101`/`.102`, but confirm Cilium actually assigned them):
+   ```sh
+   kubectl get gateway -n network
+   ```
+2. **Multus macvlan interfaces resolved**, if any macvlan-attached pods
+   exist. `kubernetes/apps/network/multus/app/NetworkAttachmentDefinition.yaml`
+   hardcodes NIC names `ens19`/`ens20` as macvlan masters — a rebuilt
+   node whose NIC enumeration doesn't match will fail silently rather
+   than with an obvious error (`PLAN-11`):
+   ```sh
+   kubectl get network-attachment-definitions -n network
+   # then check pods actually using macvlan for a real (non-cluster) IP
+   ```
 
 ## Tier 3: data services
 
