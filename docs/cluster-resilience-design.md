@@ -58,7 +58,7 @@ recovered, nothing else in this document matters.
 | Flux bootstrap seed (`bootstrap/sops-age.sops.yaml`, `bootstrap/github-deploy-key.sops.yaml`) | Committed, SOPS-encrypted | ✅ Git | **age.key** |
 | Cilium/CoreDNS/spegel/**cert-manager**/Flux install (`bootstrap/helmfile.d/*`) | Committed, plaintext (helmfile) | ✅ Git | — |
 | `cluster-secrets` (`kubernetes/components/sops/cluster-secrets.sops.yaml`) | Committed, SOPS-encrypted | ✅ Git | **age.key** |
-| **SOPS age private key (`age.key`)** | Gitignored, local-only | ❌ **No known backup** | — (this *is* the root of trust) |
+| **SOPS age private key (`age.key`)** | Gitignored, local-only | ✅ Offline backup established (`PLAN-1`, resolved 2026-08-21) — not yet drilled (`PLAN-2`) | — (this *is* the root of trust) |
 | Cloudflare Tunnel credentials (`cloudflare-tunnel.json`) | Gitignored, local-only | ⚠️ No backup of the file itself — see correction below, this is lower-impact than it first appears | — |
 | Flux Git deploy key (`github-deploy.key[.pub]`) | Gitignored, local-only | ❌ No backup | — |
 | Flux webhook token (`github-push-token.txt`) | Gitignored, local-only | ❌ No backup | — |
@@ -86,6 +86,14 @@ passwords, S3 credentials, everything under
 from scratch, and Git's history of the encrypted files becomes permanent
 write-only noise. This is by a wide margin the biggest single risk this
 audit found — tracked as `PLAN-1` in the plan doc.
+
+**Update (2026-08-21):** `PLAN-1` is resolved — the repo owner confirmed
+`age.key` now has an offline backup, stored alongside other credentials
+of similar sensitivity. The specific storage mechanism/location is
+deliberately not recorded in this doc (tracking *that* it's backed up is
+the point; a map to where would defeat it). Not yet drilled — restoring
+from the backup and confirming it actually decrypts something is
+`PLAN-2`, now unblocked.
 
 ### Lower-severity Tier 1 gaps
 

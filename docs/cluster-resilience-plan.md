@@ -12,24 +12,20 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
 
 ## Tier 1 — Bootstrap layer
 
-- 🔴 **PLAN-1 (Critical, owner decision):** Establish an offline/offsite
-  backup for `age.key`. This key is the sole decryption path for every
-  secret in the repo (see design doc). Options to weigh:
-  - Store a copy in a password manager (1Password, Bitwarden, etc.)
-  - A printed copy in a physical safe
-  - A second age recipient keypair, added to `.sops.yaml` alongside the
-    existing one and re-encrypted across the repo, with *its* private key
-    held completely separately (age natively supports multiple
-    recipients — SOPS encrypts to all of them — so this avoids ever
-    needing to copy the *same* key to a second location)
-  - Some combination of the above
-  No implementation until Jason picks a direction — this is a
-  physical/personal-security decision, not a technical one.
+- 🟢 **PLAN-1 (Critical, owner decision) — resolved 2026-08-21:**
+  `age.key` now has an offline backup, stored alongside other credentials
+  of similar sensitivity. Storage mechanism/location deliberately not
+  recorded here — this doc tracks *that* it's backed up, not a map to
+  where (owner's call, as intended). Options considered were a password
+  manager entry, a printed copy in a physical safe, or a second age
+  recipient keypair held separately.
 
-- 🔴 **PLAN-2:** Once PLAN-1 lands, add a periodic **restore drill** that
+- 🔴 **PLAN-2 (now unblocked):** Add a periodic **restore drill** that
   proves the backup actually decrypts something (e.g. a scheduled manual
   check, or scripted like recording-annotator's monthly drill —
-  `docs/backup-recovery.md` §9). An untested key backup is not a backup.
+  `docs/backup-recovery.md` §9). An untested key backup is not a backup —
+  PLAN-1 being resolved means a copy exists, not that it's been proven to
+  work.
 
 - 🔴 **PLAN-3:** Document the backup/regeneration procedure for the three
   lower-severity local-only bootstrap files: `cloudflare-tunnel.json`,

@@ -21,7 +21,7 @@ recovery cannot proceed without them:
 
 | File | What it's for | Where it should come from |
 |---|---|---|
-| `age.key` | Decrypts every `*.sops.yaml` in the repo | Its offline backup (see `PLAN-1` — if this doesn't exist yet, stop here and read "If `age.key` is truly unrecoverable" below) |
+| `age.key` | Decrypts every `*.sops.yaml` in the repo | Its offline backup (`PLAN-1`, resolved) — not yet drilled (`PLAN-2`), so verify it actually decrypts something before relying on it under pressure; if it turns out to be unrecoverable, read "If `age.key` is truly unrecoverable" below |
 | `cloudflare-tunnel.json` | Cloudflare Tunnel credentials | Re-create via `cloudflared tunnel create` if not separately backed up (`PLAN-3`) |
 | `github-deploy.key` / `.pub` | Flux's read/write Git access | Regenerate and re-add as a repo deploy key if not separately backed up (`PLAN-3`) |
 | `github-push-token.txt` | Flux webhook receiver auth | Regenerate if not separately backed up (`PLAN-3`) |
