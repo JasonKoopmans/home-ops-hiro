@@ -53,12 +53,34 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
   by hand, or find a more robust selector than a hardcoded interface
   name.
 
-- 🔴 **PLAN-12 (Low, needs live-cluster access):** Confirm the `README.md`
-  note about manually configuring Longhorn node/disk defaults via the UI
-  is actually stale — i.e. that `defaultSettings` +  the Talos
-  `default-disks-config` annotation fully account for current node/disk
-  state with no un-tracked manual drift. Not verified in this audit (no
-  cluster access from the auditing session).
+- 🟢 **PLAN-12 (Low) — resolved 2026-08-21, README note confirmed still
+  accurate (not stale):** Checked `kubectl get nodes.longhorn.io -n
+  storage -o yaml` against each node's live `metadata.labels`/
+  `annotations`. Only `hiro-cmp-05` (the newest node, added after the
+  Talos annotation approach was adopted) actually carries the
+  `node.longhorn.io/create-default-disk: "config"` label and
+  `node.longhorn.io/default-disks-config` annotation live — Talos's own
+  `talos.dev/owned-annotations`/`owned-labels` bookkeeping on
+  `hiro-cmp-01`..`04` lists only `extensions.talos.dev/schematic`, i.e.
+  those four nodes' *applied* machine config does not include the
+  Longhorn patch even though `talos/talconfig.yaml` (the committed
+  source) specifies it for all five nodes. Their Longhorn `Node` CRs
+  (`disk-1`, `/var/mnt/longhorn`, `storageReserved: 0`) still match what
+  the annotation would produce, but that's a static leftover from the
+  original manual UI setup the README describes, not something currently
+  being asserted or reconciled — `hiro-cmp-05`'s disk (key
+  `default-disk-081100000000`, `storageReserved: 15Gi`) was created a
+  different way entirely and doesn't match the other four. So: the
+  README note is correct as written, and there's a real, separate gap
+  behind it — `talosctl apply-config`/`upgrade-config` was apparently
+  never re-run against the four original nodes after the Longhorn patch
+  was added to `talconfig.yaml`, so their live machine config has drifted
+  from the repo. Left unfixed here — applying Talos machine config to
+  live control-plane nodes is an infra-level change outside this item's
+  read-only scope (`.github/copilot-instructions.md` also says not to
+  touch `talos/` for application-level issues) and needs Jason's
+  go-ahead given the "never modify Talos configs" guardrail. Worth its
+  own follow-up item if this should be tracked further.
 
 ## Tier 3 — Data services
 
@@ -102,19 +124,18 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
   that turned out stateless is confirmed, not assumed. One real finding
   came out of it — `PLAN-15`.
 
-- 🔴 **PLAN-15 (High):** `n8n` and `scanner-files` mount PVCs
-  (`existingClaim: n8n` / `existingClaim: scanner-files`) that don't
-  exist anywhere in this Git repo — no `pvc.yaml`, no equivalent, nothing.
-  Either they're running today on a PVC created out-of-band (invisible to
-  Flux, would **not** survive any cluster rebuild), or both pods are
-  currently stuck `Pending`. Needs `kubectl get pvc -n default n8n
-  scanner-files` against the live cluster to tell which — not something
-  this session could check (no cluster access). `n8n` is the more urgent
-  of the two: it has its own Grafana dashboard and Prometheus alerting,
-  suggesting real active use, and stores actual workflow data by default.
-  Once confirmed, the fix itself is mechanical (commit a matching or new
-  `pvc.yaml`) — this item is blocked on live-cluster verification, not on
-  a design decision.
+- 🟢 **PLAN-15 (High) — resolved 2026-08-21:** Confirmed live —
+  `kubectl get pvc -n default n8n scanner-files` showed both `Bound`,
+  `storageClassName: longhorn`, `accessModes: [ReadWriteOnce]`,
+  created out-of-band on 2026-02-20 (`n8n` 10Gi, `scanner-files` 250Mi).
+  Neither was ever GitOps-tracked, so a cluster rebuild would have left
+  both pods `Pending` forever with no record of the expected size/class.
+  Wrote `kubernetes/apps/default/n8n/app/pvc.yaml` and
+  `kubernetes/apps/default/scanner-files/app/pvc.yaml` matching the live
+  spec exactly (same name/size/class/accessMode as the existing Bound
+  PVC, so Flux's apply is a no-op adoption, not a recreate) and added
+  both to their app's `kustomization.yaml`. Verified with `kustomize
+  build` on both app dirs before committing.
 
 ---
 
