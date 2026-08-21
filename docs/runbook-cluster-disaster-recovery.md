@@ -1,0 +1,109 @@
+# Runbook: Cluster Disaster Recovery
+
+**Status: Tier 1 only, drafted but not yet drilled.** Treat every step
+below as unverified until it has actually been run against a real or
+staged failure — see `PLAN-2`/`PLAN-4` in
+[`docs/cluster-resilience-plan.md`](./cluster-resilience-plan.md). Tiers
+2–4 are not written yet.
+
+**Scope:** what to do when Tier 1 is gone — some or all of the four Talos
+nodes are unrecoverable and the cluster needs to be rebuilt from Git plus
+whatever lives outside it (Cloudflare account state, the age key backup,
+etc.). If the cluster is otherwise healthy and you're recovering a single
+app or volume, you want a narrower runbook (e.g.
+`docs/runbook-longhorn-volume-trim.md`), not this one.
+
+## Before you start: what you need that isn't in Git
+
+Everything under `kubernetes/`, `talos/`, and `bootstrap/` is in this
+repository. These four files are not, by design (see `.gitignore`), and
+recovery cannot proceed without them:
+
+| File | What it's for | Where it should come from |
+|---|---|---|
+| `age.key` | Decrypts every `*.sops.yaml` in the repo | Its offline backup (see `PLAN-1` — if this doesn't exist yet, stop here and read "If `age.key` is truly unrecoverable" below) |
+| `cloudflare-tunnel.json` | Cloudflare Tunnel credentials | Re-create via `cloudflared tunnel create` if not separately backed up (`PLAN-3`) |
+| `github-deploy.key` / `.pub` | Flux's read/write Git access | Regenerate and re-add as a repo deploy key if not separately backed up (`PLAN-3`) |
+| `github-push-token.txt` | Flux webhook receiver auth | Regenerate if not separately backed up (`PLAN-3`) |
+
+## Tier 1: rebuilding the bootstrap layer
+
+1. **Re-provision the node shells in Proxmox** if the VMs themselves are
+   gone — out of scope for this repo (see the design doc's "Out of
+   scope" note). Boot each from the Talos Image Factory ISO per
+   `README.md` Stage 1. The schematic is declared inline in
+   `talos/talconfig.yaml`'s `schematic:` block per node, so talhelper
+   derives the correct installer URL itself — nothing to hand-copy.
+
+2. **Restore `age.key`** to the repo root from its backup, then confirm
+   it's the right key before proceeding with anything else:
+   ```sh
+   sops --decrypt kubernetes/components/sops/cluster-secrets.sops.yaml >/dev/null \
+     && echo "age.key decrypts cluster-secrets OK"
+   ```
+
+3. **Generate Talos config and bring the nodes up.**
+   `talos/talsecret.sops.yaml` is already committed (encrypted) — this
+   reuses the cluster identity already in Git, it does not create a new
+   one:
+   ```sh
+   task bootstrap:talos
+   ```
+   This one task generates config (`talhelper genconfig`), applies it to
+   each node insecurely, bootstraps etcd, and writes `kubeconfig` at the
+   repo root — see `.taskfiles/bootstrap/Taskfile.yaml`. Expect several
+   minutes of `Ready=False` / API errors while no CNI is installed yet;
+   that's normal (README, Stage 5 warning).
+
+4. **Bootstrap Cilium, CoreDNS, spegel, and Flux itself:**
+   ```sh
+   task bootstrap:apps
+   ```
+   This applies namespaces, then the three SOPS secrets
+   (`bootstrap/github-deploy-key.sops.yaml`, `bootstrap/sops-age.sops.yaml`,
+   `kubernetes/components/sops/cluster-secrets.sops.yaml`) so Flux's
+   kustomize-controller can decrypt going forward, then syncs the
+   Helmfile releases (`bootstrap/helmfile.d/00-crds.yaml`,
+   `01-apps.yaml`).
+
+5. **Confirm Flux is reconciling from Git:**
+   ```sh
+   flux check
+   flux get sources git flux-system
+   flux get ks -A
+   ```
+   From here, Tiers 2–4 should reconcile themselves from the manifests
+   already in Git — proceed to those runbook sections once they exist
+   (`PLAN-5` onward). Run `task cluster:health` once things settle to
+   confirm nothing is silently unhealthy.
+
+## If `age.key` is truly unrecoverable
+
+Until `PLAN-1` closes, this is a real possibility, not a hypothetical.
+Steps 3–4 above still work exactly as written even without a working
+`age.key` for *decryption* — none of that flow actually decrypts
+anything itself, it only applies already-encrypted files as opaque blobs
+(`sops exec-file ... kubectl apply`). What breaks is every application
+secret under `kubernetes/apps/**/*.sops.yaml`: each one has to be
+identified —
+```sh
+grep -rl "kind: Secret" kubernetes/apps --include='*.sops.yaml'
+```
+— regenerated at the source (new database passwords, new API tokens, new
+S3 credentials, ...), and re-encrypted under a fresh age key before the
+corresponding app will come up healthy. There is no shortcut for this
+path — it's the reason `PLAN-1` is marked Critical.
+
+## Tier 2: core infra
+
+Not written yet — see `PLAN-5`.
+
+## Tier 3: data services
+
+Not written yet — see `PLAN-6`, `PLAN-7`, `PLAN-8`.
+
+## Tier 4: leaf applications
+
+Not written yet — see `PLAN-9`. The recording-annotator app already has
+a complete, drilled recovery procedure independent of this runbook — see
+`docs/backup-recovery.md`.
