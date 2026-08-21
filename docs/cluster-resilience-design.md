@@ -194,12 +194,14 @@ disk config from Git alone outside of a full rebuild (which applies
 `talconfig.yaml` fresh to every node regardless — see the runbook's
 Tier 2 section, this drift doesn't survive a real DR event).
 
-Applying the missing machine-config patch to `hiro-cmp-01`..`04` live is
-`PLAN-16`, deliberately left undone by the verifying session — it
-touches live Talos config on control-plane nodes, which needs the
-owner's explicit go-ahead per this repo's own guardrail (`Talos Linux`
-section, `.github/copilot-instructions.md`) rather than being done
-opportunistically while resolving a different item.
+Applying the missing machine-config patch to `hiro-cmp-01`..`04` live was
+tracked as `PLAN-16` and put to Jason: not worth doing. The gap only
+bites in the narrow case of Longhorn's `Node` CRs being lost while the
+Talos nodes themselves stay up unreprovisioned; a real full rebuild
+regenerates every node's machine config fresh from `talconfig.yaml`
+regardless, so it doesn't affect actual DR. The annotation pattern stays
+the standard for any node added the way `hiro-cmp-05` was — this decision
+is only about not back-applying it to the four already-configured nodes.
 
 ### Recovery order
 

@@ -82,15 +82,18 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
   go-ahead given the "never modify Talos configs" guardrail. Worth its
   own follow-up item if this should be tracked further.
 
-- 🔴 **PLAN-16 (Low-Medium, owner decision):** Apply the Longhorn Talos
-  machine-config patch (already declared in `talconfig.yaml`) to
-  `hiro-cmp-01`..`04` live — the follow-up `PLAN-12` surfaced. No current
-  functional impact (their Longhorn `Node` CRs already match what the
-  patch would produce), but Git can't currently be trusted to reproduce
-  those four nodes' disk config outside of a full rebuild. Mechanically
-  simple (`task talos:generate-config` + `task talos:apply-node` per
-  node), but touches live control-plane Talos config, so it needs
-  Jason's go-ahead rather than being done opportunistically.
+- 🟢 **PLAN-16 (Low-Medium, owner decision) — decided 2026-08-21, no
+  action taken:** Jason's call: leave `hiro-cmp-01`..`04` as-is. The gap
+  `PLAN-12` surfaced (live machine config missing the Longhorn label/
+  annotation on these four nodes) only matters for a narrow scenario —
+  Longhorn's own `Node` CRs getting lost while the Talos nodes stay up
+  and unreprovisioned. A genuine full rebuild regenerates every node's
+  machine config fresh from `talconfig.yaml`, which already declares the
+  annotation for all five nodes, so DR-from-git is unaffected. Any
+  **future** node added the same way `hiro-cmp-05` was will pick up the
+  annotation automatically — that pattern stays as-is going forward.
+  Not worth a live control-plane Talos config push for a gap this
+  narrow.
 
 ## Tier 3 — Data services
 
