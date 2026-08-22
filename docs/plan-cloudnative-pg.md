@@ -1,11 +1,21 @@
 # CloudNativePG: Plan and Open Items
 
-Standing up a single-instance PostgreSQL cluster under CloudNativePG, where the
-goal is **data resilience, not uptime resilience**: if the pod, node, or PVC is
-lost, recovery to a known point in time must be possible *and proven*.
+Standing up a PostgreSQL cluster under CloudNativePG. The **primary** goal is
+data resilience: if the pod, node, or PVC is lost, recovery to a known point in
+time must be possible *and proven*. That goal is unchanged and is what phases
+3–5 exist to satisfy.
 
-`instances: 1` is deliberate. No automatic failover, no read replicas. Do not
-"fix" this by proposing a multi-instance topology.
+**Topology history — read §7 before changing this.** The plan began as
+`instances: 1` on the reasoning that data resilience, not uptime, was the
+requirement. That was revised on 2026-08-22 to **`instances: 3`** after working
+through what single-instance actually costs: it makes `kubectl drain`
+permanently impossible on the node hosting the pod (§4), and the storage
+footprint of 3 instances on `longhorn-1-no-backup` is identical to 1 instance on
+`longhorn-no-backup` (§7). Uptime resilience was effectively free; the trap was
+assuming it wasn't.
+
+HA does **not** substitute for backups — replication propagates logical
+corruption instantly. See §4.
 
 Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 
@@ -110,10 +120,13 @@ mid-upload than simply letting it burst.
 That is conservative for a 1–2Gi container, but tuning it without a workload to
 measure would be guessing. Revisit alongside the resource numbers.
 
-**Central `barman-cloud` Deployment is unbounded** (`resources: {}` in the
-vendored manifest). Left alone deliberately: it is a single lightweight gRPC
-service, not a per-instance sidecar, and patching it would mean hand-editing the
-vendored file and re-doing that edit on every plugin upgrade.
+**Central `barman-cloud` Deployment** ships as `resources: {}` in the vendored
+manifest. Bounded at 50m/64Mi requests and a 256Mi memory limit via a Kustomize
+`patches:` entry in the app's `kustomization.yaml` — *not* by editing the
+vendored file, so re-vendoring on upgrade stays a clean copy of the release
+asset. Also an informed guess: it is a single mostly-idle Go gRPC service that
+brokers backup calls and does not move backup data itself (the per-instance
+sidecars do that).
 
 ---
 
@@ -172,11 +185,28 @@ timestamp going stale** rather than on the existence of a failure object.
 - Alerts route to Telegram via the existing shared bot — see
   [[telegram-alerting-identity]].
 
+### Metrics already available (confirmed from the PR #470 render)
+
+The operator ships a `cnpg-default-monitoring` ConfigMap of exporter queries and
+creates the PodMonitor itself. Relevant groups, collected **by default** with no
+extra exporter:
+
+| Query group | Use |
+|---|---|
+| `pg_stat_archiver` | **The backup-health signal.** Exposes `last_archived_time`, `last_failed_time`, `archived_count`, `failed_count` — enough for both "WAL archiving is failing" and a self-clearing last-success-age alert |
+| `pg_replication`, `pg_replication_slots` | Replication lag (phase 9, meaningful once 3 instances run) |
+| `backends`, `backends_waiting` | Connection saturation, long transactions |
+| `pg_database`, `pg_postmaster`, `pg_stat_bgwriter` | General health |
+
+This materially de-risks phases 8 and 9 — the design work is choosing thresholds
+and writing the `PrometheusRule`, not plumbing metrics.
+
 ### To design out
 
-1. Which CNPG metrics actually expose backup state (the operator ships a
-   PodMonitor, already enabled — confirm what it exports for last-backup time,
-   WAL archive failures, and archiver queue depth).
+1. ~~Which CNPG metrics expose backup state~~ — answered above. Remaining: pick
+   the staleness threshold, and decide whether `pg_stat_archiver` alone is
+   sufficient or the `Backup` CR status should also be alerted on (the former
+   covers WAL, the latter covers base backups).
 2. A `PrometheusRule` for: last successful base backup older than ~36h
    (mirroring the recording-annotator staleness window), and WAL archiving
    failing or falling behind.
