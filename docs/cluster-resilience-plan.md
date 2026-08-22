@@ -110,14 +110,25 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
   nothing to audit yet, no app provisions a `MariaDB` CR. Covered going
   forward by the "Adding a New Application" resilience guardrail.
 
-- 🔴 **PLAN-13 (Medium-High):** Run and document an actual Longhorn
-  restore-from-backup drill against the S3 backup target — pick any
-  `default`-group volume, confirm the real current procedure (this
-  session couldn't verify it against Longhorn's docs — outbound access
-  to longhorn.io is blocked in this environment), and write it up as
-  part of `docs/runbook-cluster-disaster-recovery.md`'s Tier 3 section.
-  Covers real application data for a dozen stateful apps, so it's more
-  consequential than PLAN-2/PLAN-11/PLAN-12.
+- 🟢 **PLAN-13 (Medium-High) — resolved 2026-08-22, drilled live:** Ran a
+  real restore against the `kubernetes/apps/default/test/` scratch app's
+  own S3 backup (not a production app — zero risk to real data). Created
+  a temporary `StorageClass` with `parameters.fromBackup` set to the
+  backup's `status.url` (confirmed live: `fromBackup` is a real,
+  currently-empty parameter already on the `longhorn` class), then a PVC
+  using it — this is what actually triggers Longhorn to pull the backup
+  from S3 instead of provisioning empty. Mounted the result in a
+  throwaway pod: the restored file read `Fri Aug 21 02:44:12 UTC 2026`
+  (the backup's timestamp) against the live volume's `Sat Aug 22
+  02:50:15 UTC 2026` — proof real historical data round-tripped through
+  S3, not an empty volume. Cleaned up completely (pod, PVC, StorageClass
+  all deleted; confirmed no orphaned Longhorn volume; confirmed the live
+  `test` PVC/pod were untouched throughout). Also found a real gotcha
+  worth documenting: Longhorn's `BackupVolume` objects aren't reliably
+  named after the current PVC (this one's PVC is `test`, its
+  `BackupVolume` is `test-backup-2bf8416a`) — match by the `Backup`'s
+  embedded `KubernetesStatus` label instead. Full exact procedure now in
+  `docs/runbook-cluster-disaster-recovery.md`'s Tier 3 section.
 
 - 🟢 **PLAN-14 (Medium, owner decision) — decided 2026-08-22, no offsite
   backup, on purpose:** Live numbers: `observability-thanos` is 31GiB,

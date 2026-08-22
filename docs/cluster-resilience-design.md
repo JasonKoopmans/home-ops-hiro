@@ -240,23 +240,28 @@ Tier 2 already found the RecurringJob *policy* fully declarative
 | `scratch` (`longhorn-scratch`) | none | none | `thanos-compactor-data` — genuinely disposable |
 
 Coverage itself is coherent and well-reasoned (the `storageclasses.yaml`
-comments already explain each trade-off in detail). What's missing:
-**nothing proves the daily S3 backup for the `default` group actually
-restores.** Unlike recording-annotator's monthly restore drill
-(`docs/backup-recovery.md` §9 — "an untested backup is not a backup"),
-there's no equivalent check for Longhorn's own backup target. This
-covers real application data for a dozen stateful apps, so it's a more
-consequential gap than it might first look — tracked as `PLAN-13`.
+comments already explain each trade-off in detail).
+
+**Drilled 2026-08-22 (`PLAN-13`), resolved — the daily S3 backup for the
+`default` group does restore.** Ran a real restore against the
+`kubernetes/apps/default/test/` scratch app's own backup (zero risk to
+production data): a temporary `StorageClass` with
+`parameters.fromBackup` set to the backup's S3 URL, then a PVC using it,
+which is what actually triggers Longhorn to pull real data from S3
+instead of provisioning empty. Confirmed with a mounted verification pod
+— the restored file read the backup's timestamp (a day old), not the
+live volume's current one. Fully cleaned up afterward, zero impact on
+the live volume. Exact procedure, including a real gotcha found along
+the way (`BackupVolume` names don't reliably match the current PVC
+name — match via the `Backup`'s `KubernetesStatus` label instead), is
+now in `docs/runbook-cluster-disaster-recovery.md`'s Tier 3 section.
 
 **Operationally important, worth stating plainly for the runbook:**
 recreating a PVC through GitOps (Flux reapplying the manifest after a
 rebuild) provisions a **new, empty** Longhorn volume — it does not
 automatically attach existing S3 backup data. Restoring actual content
-requires a separate, explicit Longhorn restore action per volume. This
-session couldn't verify the exact current procedure against Longhorn's
-own docs (outbound access to longhorn.io is blocked in this
-environment) — `PLAN-13` should nail down and document the real steps by
-actually running a drill, rather than this doc guessing at commands.
+requires a separate, explicit Longhorn restore action per volume, per
+the now-drilled procedure above.
 
 ### MinIO durability gap (`PLAN-7`)
 

@@ -155,26 +155,83 @@ volume, not something that happens automatically because the PVC
 manifest reapplied successfully. Do not declare an app "recovered" just
 because its pod is Running — check that its data actually came back.
 
-The exact current restore procedure needs to be confirmed against
-Longhorn's own documentation at recovery time — this runbook
-deliberately doesn't hardcode steps that could drift across Longhorn
-versions (see `PLAN-13`, which exists specifically to nail this down
-ahead of an actual emergency rather than during one). Longhorn's own UI
-is generally the most reliable place to find the current restore flow
-for a given backup.
+**Drilled and confirmed working, 2026-08-22 (`PLAN-13`).** The procedure
+below was actually run against a real backup on the live cluster (using
+the committed `kubernetes/apps/default/test/` scratch app's volume, not
+a production app's) and verified end to end — a restored file came back
+showing the backup's timestamp (a full day old), not the live volume's,
+proving real historical data round-trips through the S3 target and not
+just an empty new volume. Longhorn's UI can do the same restore
+click-through if you have it open, but the mechanism below is exact,
+scriptable, and was the one actually exercised.
 
 Order of operations:
 
 1. Let Flux reconcile all of `kubernetes/apps/` and confirm pods come up
-   (most will — see Tier 4, mostly stateless).
+   (most will — see Tier 4, mostly stateless). For the `default`-group
+   apps this creates a **new, empty** PVC/volume under each app's normal
+   `storageClassName: longhorn` — expected, not a failure.
 2. For each app whose data actually matters (the `default`-group apps —
    see the design doc's Tier 3 table), restore its volume from the
-   Longhorn S3 backup target **before** trusting the app's state.
+   Longhorn S3 backup target **before** trusting the app's state:
+
+   a. Find the right backup. Longhorn's `BackupVolume` objects are
+      **not reliably named after the current PVC** — match on the
+      embedded `KubernetesStatus` label instead:
+      ```sh
+      kubectl get backups.longhorn.io -n storage -o json | python3 -c "
+      import json,sys
+      d=json.load(sys.stdin)
+      for i in d['items']:
+          ks = json.loads(i['spec']['labels'].get('KubernetesStatus','{}'))
+          if ks.get('pvcName') == 'n8n' and ks.get('namespace') == 'default':
+              print(i['metadata']['name'], i['status']['url'], i['status']['backupCreatedAt'])
+      "
+      ```
+      Pick the most recent `backupCreatedAt`. Copy its `status.url`
+      (looks like
+      `s3://hiro-longhorn-backups@us-east-1/?backup=backup-XXXX&volume=YYYY`).
+
+   b. Delete the empty PVC Flux/the app's chart just created for that
+      app (safe — it's brand new with no real data yet;
+      `reclaimPolicy: Delete` also removes the empty backing volume).
+
+   c. Create a throwaway `StorageClass` whose `parameters` copy the
+      `longhorn` class exactly except `fromBackup` is set to the URL
+      from (a) and `numberOfReplicas` can drop to `"1"` for speed
+      (bump back to 3 once you migrate off it — see (e)). Then create a
+      PVC with **the exact same name and namespace the app expects**
+      (`n8n`, `default`) using that StorageClass. This is what actually
+      triggers Longhorn to pull the backup data from S3 — dynamic
+      provisioning with `fromBackup` set restores instead of creating
+      empty.
+
+   d. Before trusting it, confirm the restore actually finished (don't
+      rely on `Bound` alone — that just means the PV/PVC objects exist):
+      ```sh
+      kubectl get volumes.longhorn.io -n storage <pv-name> \
+        -o jsonpath='{.status.state} {.status.restoreRequired} {.status.actualSize}{"\n"}'
+      ```
+      Expect `detached false <size>`, with `actualSize` matching the
+      backup's `status.size`. Mount it in a scratch pod and check real
+      file content/timestamps if it's not obvious from size alone.
+
+   e. Let the app's pod attach and confirm its data. Its committed
+      `pvc.yaml` still declares `storageClassName: longhorn`, which
+      won't match the restored PVC's actual class — this field is
+      immutable post-creation, so Flux can't and won't try to fix it;
+      it's a harmless, permanent (for that PVC) drift from Git unless
+      you later clone the volume onto a real `longhorn`-class PVC and
+      swap it in. Not worth doing under DR time pressure — same
+      priority as any other post-incident cleanup.
+
 3. `snapshot-only`/`tsdb`-group volumes (MinIO, Prometheus, Loki) have
    no S3 backup to restore from — they come back empty by design. If
    `PLAN-14` is ever implemented, MinIO's buckets would be restored from
    its own offsite mirror instead, the same way
    `docs/backup-recovery.md` §10 does for `recording-annotator-minio`.
+   (`PLAN-14` was decided 2026-08-22: not implementing this — see the
+   plan doc.)
 4. `scratch`-group volumes (`thanos-compactor-data`) need no recovery
    action — they're rebuilt from upstream state as a normal part of the
    app running.
