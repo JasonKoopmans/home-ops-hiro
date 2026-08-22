@@ -36,6 +36,6 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 "aqua:stackrox/kube-linter" = "0.8.3"
 "aqua:aquasecurity/trivy" = "0.74.0"
 "aqua:open-policy-agent/conftest" = "0.69.0"
-"npm:@anthropic-ai/claude-code" = "2.1.233"
+"npm:@anthropic-ai/claude-code" = "2.1.239"
 node = "26.7.0"
 aws = { version = "latest", symlink_bins = "true" }
