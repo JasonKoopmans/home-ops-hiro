@@ -278,9 +278,22 @@ worth sizing correctly: the data at risk is observability history
 a full rebuild is annoying, not catastrophic.
 `recording-annotator-minio` already solves the identical problem for its
 own instance with an hourly `mc mirror` to a dedicated, Object-Locked S3
-bucket (`docs/backup-recovery.md` §2) — the same technique is the
-obvious template here if the history is judged worth protecting. Tracked
-as `PLAN-14`, owner decision on priority.
+bucket (`docs/backup-recovery.md` §2) — the same technique would be the
+obvious template here if the history were judged worth protecting.
+
+**Decided 2026-08-22 (`PLAN-14`): no offsite backup, on purpose.** Live
+sizing: ~32GiB today (31GiB thanos + ~1GiB loki) against a 47GiB quota
+ceiling, growing ~0.89GiB/day. A real compression test against live
+Thanos chunk data (xz, ~7x smaller — TSDB's XOR/delta encoding leaves
+real room for a general compressor, unlike already-compressed formats)
+confirmed compression genuinely works here, but it turned out to be the
+wrong lever: uncompressed 47GiB on S3 standard is ~$1.08/month, so
+storage cost was never the actual blocker. The real cost of an offsite
+copy is that `mc mirror` doesn't compress in flight, so getting the
+compression benefit would mean custom compress/upload/restore tooling —
+more failure surface than the proven `recording-annotator-minio` pattern
+— to protect data that's already regenerable metrics/log history, not
+primary application data. Not worth building.
 
 ### mariadb-operator (`PLAN-8`)
 

@@ -119,13 +119,26 @@ Status legend: 🔴 not started · 🟡 in progress · 🟢 done
   Covers real application data for a dozen stateful apps, so it's more
   consequential than PLAN-2/PLAN-11/PLAN-12.
 
-- 🔴 **PLAN-14 (Medium, owner decision):** Decide whether the
-  `storage/minio` instance's `observability-thanos`/`observability-loki`
-  buckets are worth an offsite backup, given the data at risk is
-  metrics/log history rather than primary application data. If yes,
-  `recording-annotator-minio` already has a working template to copy —
-  an hourly `mc mirror` to a dedicated Object-Locked S3 bucket
-  (`docs/backup-recovery.md` §2).
+- 🟢 **PLAN-14 (Medium, owner decision) — decided 2026-08-22, no offsite
+  backup, on purpose:** Live numbers: `observability-thanos` is 31GiB,
+  `observability-loki` ~1GiB (32GiB today), against bucket quotas of
+  45GiB/2GiB (47GiB steady-state ceiling), growing ~0.89GiB/day
+  (post-cardinality-fix rate from
+  `docs/incident-thanos-compactor-disk-pressure.md`). Compressed a real
+  sample of live Thanos chunk data to check Jason's stated bar
+  ("significant compression or it's not worth it"): xz got it to ~14%
+  of original size (~7x) — genuinely significant, because TSDB's XOR/
+  delta encoding isn't a general entropy coder, unlike already-compressed
+  formats. But it turned out to be the wrong lever: uncompressed 47GiB on
+  S3 standard costs ~$1.08/month, compressed ~$0.15-0.20/month — storage
+  cost was never the real blocker either way. The actual cost is
+  engineering effort: `mc mirror` (the proven `recording-annotator-minio`
+  pattern) doesn't compress in flight, so a compressed offsite copy needs
+  custom download/compress/upload/restore tooling — more failure surface
+  than the existing pattern, for data already classified as regenerable
+  metrics/log history rather than primary application data. Decision:
+  skip it. Revisit only if the underlying calculus changes (e.g. this
+  data starts being relied on for something non-regenerable).
 
 ## Tier 4 — Leaf applications
 
