@@ -21,6 +21,7 @@ resources:
   - ./prometheusrule-envoy.yaml
   - ./prometheusrule-pod-limit-pressure.yaml
   - ./prometheusrule-recording-annotator.yaml
+  - ./prometheusrule-pocket-bridge.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml

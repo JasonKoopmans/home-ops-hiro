@@ -1,0 +1,96 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app pocket-bridge
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: pocket-bridge
+  interval: 1h
+  values:
+    fullnameOverride: *app
+    controllers:
+      sync:
+        type: cronjob
+        annotations:
+          reloader.stakater.com/auto: "true"
+        cronjob:
+          schedule: "17 */12 * * *"   # matches the cadence of the n8n workflow this replaces
+          concurrencyPolicy: Forbid   # two overlapping runs would race each other's dedupe check
+          startingDeadlineSeconds: 300
+          activeDeadlineSeconds: 1800   # large recordings; tune once real runs have been observed
+          backoffLimit: 2
+          successfulJobsHistory: 3
+          failedJobsHistory: 3
+          # failedJobsHistory alone retains failed Jobs *forever* — it caps how many are kept, not how long.
+          # This repo has already been bitten by exactly that: transient failures sat in the cluster until
+          # deleted by hand, and the alert keyed on them latched permanently. TTL deletes the Job and its
+          # pods (so the logs go too), so it is scaled to the schedule — 48h is four runs' worth of context
+          # on a 12h cadence: long enough to diagnose after the fact, short enough not to accumulate.
+          ttlSecondsAfterFinished: 172800   # 48h
+        pod:
+          imagePullSecrets:
+            # This app's OWN pull secret. Deliberately NOT recording-annotator-pullsecret: that Secret is
+            # owned by a different Flux Kustomization, and sharing it would make it co-owned and liable to
+            # be pruned when either app is removed.
+            - name: pocket-bridge-pullsecret
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1654   # the .NET image's $APP_UID
+            runAsGroup: 1654
+        containers:
+          app:
+            image:
+              repository: ghcr.io/jasonkoopmans/pocket-bridge
+              # PLACEHOLDER: this tag does not exist yet. The source repo is scaffolded in a sibling PR and
+              # has not published its first CI build, so the CronJob will ImagePullBackOff until it does.
+              tag: "0.1.0"
+            args: ["sync"]
+            envFrom:
+              - secretRef:
+                  name: pocket-bridge-secret
+            env:
+              Pocket__BaseUrl: https://public.heypocketai.com/api/v1
+              Pocket__FilterTag: to-process
+              Obsidian__BaseUrl: http://obsidian.default.svc.cluster.local:27124
+              Obsidian__NoteFolder: Interactions
+              Annotator__BaseUrl: http://recording-annotator.default.svc.cluster.local:8080
+              # Browser-reachable URL of the RecordingAnnotator *UI*, embedded as a link in the Obsidian note
+              # — NOT the cluster-internal address above. Three similarly-named hosts exist and none of them
+              # is the UI: recording-annotator-media.${SECRET_DOMAIN} is the MinIO S3 endpoint used for
+              # presigned playback, recording-annotator-minio.${SECRET_DOMAIN} is the MinIO console, and the
+              # bare `recording-annotator` is the in-cluster Service name. Note that
+              # recording-annotator.${SECRET_DOMAIN} is not routed at all — the UI host is `recordings`,
+              # matching route.app.hostnames in the recording-annotator HelmRelease.
+              Annotator__PublicBaseUrl: https://recordings.${SECRET_DOMAIN}
+              Sync__MaxRecordingsPerRun: "10"
+              # Phase-1 safety: the run logs what it *would* write without touching Pocket tags or the
+              # Obsidian vault. Flipped to "false" as a deliberate follow-up after one verified real run.
+              Sync__DryRun: "true"
+              TZ: ${TIMEZONE}
+            securityContext:
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 384Mi
+
+    persistence:
+      # readOnlyRootFilesystem leaves .NET with nowhere to put its diagnostic IPC socket (/tmp/.dotnet) or
+      # the DataProtection key ring. Both degrade to warnings rather than failing outright, but the fallback
+      # is *silent*, so give it a real scratch dir instead of debugging that later. Nothing larger is needed:
+      # audio streams through in 8 MiB chunks on the way to the annotator and is never spooled to disk.
+      tmp:
+        type: emptyDir
+        sizeLimit: 256Mi
+        advancedMounts:
+          sync:
+            app:
+              - path: /tmp

@@ -30,3 +30,4 @@ resources:
   - ./audacity/ks.yaml
   - ./recording-annotator/ks.yaml
   - ./freshrss/ks.yaml
+  - ./pocket-bridge/ks.yaml
