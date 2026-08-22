@@ -104,7 +104,7 @@ data:
             description: Virtualization Management
         - Omada:
             icon: tp-link
-            href: https://docker01:8043
+            href: https://omada.${SECRET_DOMAIN}:8043
             description: Wireless Controller
         - Portainer:
             icon: portainer
