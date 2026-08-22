@@ -196,15 +196,50 @@ Order of operations:
       app (safe — it's brand new with no real data yet;
       `reclaimPolicy: Delete` also removes the empty backing volume).
 
-   c. Create a throwaway `StorageClass` whose `parameters` copy the
-      `longhorn` class exactly except `fromBackup` is set to the URL
-      from (a) and `numberOfReplicas` can drop to `"1"` for speed
-      (bump back to 3 once you migrate off it — see (e)). Then create a
-      PVC with **the exact same name and namespace the app expects**
-      (`n8n`, `default`) using that StorageClass. This is what actually
-      triggers Longhorn to pull the backup data from S3 — dynamic
-      provisioning with `fromBackup` set restores instead of creating
-      empty.
+   c. Create a throwaway `StorageClass` — this is the exact manifest the
+      2026-08-22 drill used, `parameters` copied verbatim from the real
+      `longhorn` class (`kubectl get sc longhorn -o yaml`) except
+      `fromBackup` and a `numberOfReplicas` dropped to `"1"` for restore
+      speed (this class is temporary — bump back to 3 only if you decide
+      to keep the PVC on it long-term, see (f)):
+      ```yaml
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: longhorn-restore-drill   # anything unused; delete when done
+      provisioner: driver.longhorn.io
+      allowVolumeExpansion: true
+      reclaimPolicy: Delete
+      volumeBindingMode: Immediate
+      parameters:
+        numberOfReplicas: "1"
+        staleReplicaTimeout: "30"
+        fromBackup: "<URL_FROM_STEP_A>"
+        fsType: "ext4"
+        dataLocality: "best-effort"
+        unmapMarkSnapChainRemoved: "ignored"
+        disableRevisionCounter: "true"
+        dataEngine: "v1"
+        backupTargetName: "default"
+      ```
+      Then a PVC with **the exact same name and namespace the app
+      expects** (`n8n`, `default`), sized to match the original:
+      ```yaml
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: n8n            # must match what the app's helmrelease.yaml
+        namespace: default    # references via existingClaim/persistence
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: longhorn-restore-drill
+        resources:
+          requests:
+            storage: 10Gi     # match the original PVC's size
+      ```
+      `kubectl apply -f` both. Creating the PVC is what actually triggers
+      Longhorn to pull the backup data from S3 — dynamic provisioning
+      with `fromBackup` set restores instead of creating empty.
 
    d. Before trusting it, confirm the restore actually finished (don't
       rely on `Bound` alone — that just means the PV/PVC objects exist):
@@ -213,17 +248,29 @@ Order of operations:
         -o jsonpath='{.status.state} {.status.restoreRequired} {.status.actualSize}{"\n"}'
       ```
       Expect `detached false <size>`, with `actualSize` matching the
-      backup's `status.size`. Mount it in a scratch pod and check real
-      file content/timestamps if it's not obvious from size alone.
+      backup's `status.size` from step (a). If it's not obvious from size
+      alone, mount it in a scratch pod and check real content:
+      ```sh
+      kubectl run restore-check -n default --image=alpine --restart=Never \
+        --overrides='{"spec":{"containers":[{"name":"restore-check","image":"alpine","command":["sleep","3600"],"volumeMounts":[{"name":"data","mountPath":"/data"}]}],"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"n8n"}}]}}'
+      kubectl wait --for=condition=Ready pod/restore-check -n default --timeout=90s
+      kubectl exec -n default restore-check -- ls -la /data
+      kubectl delete pod -n default restore-check
+      ```
 
-   e. Let the app's pod attach and confirm its data. Its committed
-      `pvc.yaml` still declares `storageClassName: longhorn`, which
-      won't match the restored PVC's actual class — this field is
-      immutable post-creation, so Flux can't and won't try to fix it;
-      it's a harmless, permanent (for that PVC) drift from Git unless
-      you later clone the volume onto a real `longhorn`-class PVC and
-      swap it in. Not worth doing under DR time pressure — same
-      priority as any other post-incident cleanup.
+   e. Let the app's pod attach and confirm its data through the app
+      itself (not just the filesystem).
+
+   f. Clean up the temporary `StorageClass`
+      (`kubectl delete storageclass longhorn-restore-drill`) — it only
+      mattered at PVC-creation time, nothing references it afterward.
+      The restored PVC stays; its committed `pvc.yaml` still declares
+      `storageClassName: longhorn`, which won't match the PVC's actual
+      class — this field is immutable post-creation, so Flux can't and
+      won't try to fix it. That's a harmless, permanent (for that one
+      PVC) drift from Git unless you later clone the volume onto a real
+      `longhorn`-class PVC and swap it in. Not worth doing under DR time
+      pressure — same priority as any other post-incident cleanup.
 
 3. `snapshot-only`/`tsdb`-group volumes (MinIO, Prometheus, Loki) have
    no S3 backup to restore from — they come back empty by design. If
