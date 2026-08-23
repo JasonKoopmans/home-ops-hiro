@@ -25,19 +25,75 @@ Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | CloudNativePG operator (Helm) | **Live** — merged #470, reconciled, operator + plugin healthy |
-| 2 | 3-instance `Cluster` (see §7) | **Ready to apply** — credential provisioned |
-| 3 | Continuous WAL archiving to S3 | Ready to apply (ships with phase 2) |
-| 4 | Scheduled base backup + retention | Ready to apply (ships with phase 2) |
-| 5 | **Restore drill** (the part that matters) | Not started |
-| 6 | Teardown scratch cluster + recovery runbook | Not started |
-| 7 | PDB / failure-mode writeup | Not started |
-| 8 | **Backup observability** (see §5) | To design |
-| 9 | **Cluster/runtime observability** (see §6) | To design |
-| ~~10~~ | HA topology (see §7) | **Decided — folded into phase 2** |
+| 1 | CloudNativePG operator (Helm) | **Live** — #470, operator + plugin healthy |
+| 2 | 3-instance `Cluster` (see §7) | **Live** — #495, 3/3 ready on 3 distinct nodes |
+| 3 | Continuous WAL archiving to S3 | **Live and verified** — `ContinuousArchiving=True` |
+| 4 | Scheduled base backup + retention | **Deployed, UNVERIFIED** — see §1b |
+| 5 | **Restore drill** (the part that matters) | Blocked on §1b |
+| 6 | Teardown scratch cluster + recovery runbook | Blocked on phase 5 |
+| 7 | PDB / failure-mode writeup | **Unblocked** — evidence gathered, see §4 |
+| 8 | **Backup observability** (see §5) | **Unblocked** — to design |
+| 9 | **Cluster/runtime observability** (see §6) | **Unblocked** — to design |
+| ~~10~~ | HA topology (see §7) | Decided — folded into phase 2 |
 
-The operator and Barman Cloud plugin are **live** in the `database` namespace
-(merged #470, resources bounded in #494). No `Cluster` exists yet.
+The operator, plugin, and a 3-instance `Cluster` are **live** in the `database`
+namespace (#470, #494, #495).
+
+### §1a Verified in the cluster 2026-08-23
+
+| Check | Observed |
+|---|---|
+| Cluster | `Cluster in healthy state`, 3/3 ready, primary `postgres-1` |
+| Placement | `postgres-1` cmp-05, `-2` cmp-04, `-3` cmp-01 — 3 distinct nodes, `required` anti-affinity holding |
+| Storage | 3 PVCs bound on `longhorn-1-no-backup` |
+| PDBs | `postgres` allowed-disruptions **1**, `postgres-primary` **0** |
+| WAL archiving | `ContinuousArchiving=True`, 7 segments archived |
+
+The PDB row is the topology decision proving itself: the replicas PDB
+(`postgres`) exists only at 3+ instances, and it is what permits a drain. At
+`instances: 1` there would be a single `postgres-primary` row with 0 allowed
+disruptions and nothing else to evict — the deadlock described in §4.
+
+**Transient archive failures on startup.** WAL segment 5 failed twice with
+`Could not connect to the endpoint URL` before succeeding on retry. Both
+failures fall inside one 8-second window with successful archives either side,
+so this reads as network settling, not credentials — an auth problem surfaces as
+`AccessDenied`. Harmless here because PostgreSQL retries, but it is precisely
+the failure class phase 8 exists to catch, and nothing would have told us.
+
+### §1b ⚠ Backups are NOT yet proven — come back to this
+
+```
+firstRecoverabilityPoint:  <empty>
+lastSuccessfulBackup:      <empty>
+Backup CRs:                none
+```
+
+**WAL is archiving, but no base backup exists, so nothing is recoverable yet.**
+WAL segments are a diff against a base; with no base there is nothing to replay
+them onto. Archiving being green is not the same as being able to restore.
+
+The operator scheduled the first run for **2026-08-24 03:00:00 +0000 UTC**
+(`BackupSchedule` event on `scheduledbackup/postgres-nightly`).
+
+**The schedule is UTC, not local.** The operator image is distroless with no `TZ`
+set, so its cron runs in UTC — meaning `0 0 3 * * *` fires at **22:00 local
+(CDT)**, not 3 AM. Deliberately left as-is: CNPG has no timezone field on
+`ScheduledBackup`, so a hardcoded local-looking offset would silently drift an
+hour at each DST boundary. A stable UTC time that is documented beats a local
+time that moves twice a year.
+
+To close this out once it has fired:
+
+```sh
+kubectl -n database get backup
+kubectl -n database get cluster postgres \
+  -o jsonpath='{.status.firstRecoverabilityPoint}{"\n"}{.status.lastSuccessfulBackup}{"\n"}'
+aws s3 ls s3://hiro-postgres-backups/postgres/ --recursive | head
+```
+
+`firstRecoverabilityPoint` becoming non-empty is the signal that PITR is
+actually possible, and it is what unblocks phase 5.
 
 **Credential prerequisite — satisfied 2026-08-23.** Provisioned via
 [`scripts/provision-postgres-backup-iam.sh`](../scripts/provision-postgres-backup-iam.sh),
@@ -72,19 +128,7 @@ plaintext key ID in the file.
 > until it fills the PVC and takes the database down.
 >
 > A green Kustomization is not evidence that backups work. Verify against the
-> object store — see the post-deploy checks in §1a.
-
-### §1a Post-deploy verification (run after phase 2 reconciles)
-
-```sh
-kubectl -n database get cluster postgres
-kubectl -n database get objectstore postgres-backup
-kubectl -n database get pods -l cnpg.io/cluster=postgres -o wide   # expect 3, on 3 distinct nodes
-kubectl -n database logs -l cnpg.io/cluster=postgres -c plugin-barman-cloud --tail=50
-
-# The one that actually proves archiving works — bytes in the bucket:
-aws s3 ls s3://hiro-postgres-backups/postgres/ --recursive | head
-```
+> object store — see §1a and §1b.
 
 ---
 
