@@ -32,10 +32,19 @@
 # one is live.
 #
 # Usage:
-#   bash scripts/provision-postgres-backup-iam.sh [--bucket NAME] [--region REGION]
-#                                                 [--user NAME] [--dry-run] [--yes]
+#   bash scripts/provision-postgres-backup-iam.sh [--region REGION] [--user NAME]
+#                                                 [--dry-run] [--yes]
 #
-#   --dry-run   Print every AWS call without executing it. Start here.
+# There is deliberately no --bucket flag. The bucket is read from
+# destinationPath in the ObjectStore manifest, which is what Barman actually
+# reads at runtime, so the two cannot drift. To target a different bucket, edit
+# the manifest first.
+#
+#   --dry-run   Make no changes. Read-only discovery still runs (caller identity,
+#               head-bucket, get-policy, get-user) because the point of a dry run
+#               is to report what *would* happen given real state — so it does
+#               need working AWS credentials. Every mutating call is printed
+#               rather than executed. Start here.
 #   --yes       Skip the confirmation prompt.
 #
 # Note the `bash scripts/...` invocation: in the devcontainer the repo is a
@@ -51,27 +60,25 @@ set -euo pipefail
 # awscli pipes through a pager that does not exist in the devcontainer.
 export AWS_PAGER=""
 
-BUCKET="hiro-postgres-backups"
 REGION="us-east-1"
 IAM_USER="hiro-postgres-backup"
-POLICY_NAME="hiro-postgres-backup-s3"
-PREFIX="postgres"
 DRY_RUN=false
 ASSUME_YES=false
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SECRET_FILE="${REPO_ROOT}/kubernetes/apps/database/postgres/app/s3-credentials.sops.yaml"
+APP_DIR="${REPO_ROOT}/kubernetes/apps/database/postgres/app"
+SECRET_FILE="${APP_DIR}/s3-credentials.sops.yaml"
+OBJECTSTORE_FILE="${APP_DIR}/objectstore.yaml"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --bucket) BUCKET="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
     --user)   IAM_USER="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --yes|-y) ASSUME_YES=true; shift ;;
     # `\?` is a GNU-sed extension; use two portable expressions instead so this
     # also works under BSD sed on macOS.
-    -h|--help) sed -n '2,47p' "${BASH_SOURCE[0]}" | sed -e 's/^# //' -e 's/^#$//'; exit 0 ;;
+    -h|--help) sed -n '2,52p' "${BASH_SOURCE[0]}" | sed -e 's/^# //' -e 's/^#$//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -79,6 +86,31 @@ done
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
+
+# The bucket is NOT a parameter of this script. It is read out of the
+# ObjectStore manifest, which is the thing Barman actually reads at runtime.
+# An earlier version took --bucket, which meant `--bucket other` would create
+# and authorize `other` while Barman kept writing to whatever the manifest said
+# — provisioning "succeeds" and every backup then fails with AccessDenied.
+# To target a different bucket, edit destinationPath first; the manifest leads.
+[[ -f "$OBJECTSTORE_FILE" ]] || die "ObjectStore manifest not found: $OBJECTSTORE_FILE"
+
+DEST_PATH="$(grep -E '^[[:space:]]*destinationPath:' "$OBJECTSTORE_FILE" \
+  | head -1 | sed -E 's/^[^:]*:[[:space:]]*//; s/^"//; s/"$//; s#^s3://##; s#/$##')"
+[[ -n "$DEST_PATH" ]] || die "could not parse destinationPath from $OBJECTSTORE_FILE"
+
+BUCKET="${DEST_PATH%%/*}"
+PREFIX="${DEST_PATH#*/}"
+[[ "$PREFIX" == "$BUCKET" ]] && PREFIX=""   # destinationPath had no key prefix
+[[ -n "$BUCKET" ]] || die "parsed an empty bucket from destinationPath '$DEST_PATH'"
+
+# Fixed name, not bucket-suffixed. The risk of a fixed name — silently reusing a
+# policy created for a different bucket — is handled by validating the existing
+# policy's Resource ARNs before attaching it (see below), which fails loudly
+# instead. Encoding the bucket in the name would additionally leave the previous
+# policy created-and-attached, so the user ends up with two, one of which grants
+# the wrong bucket. Validation is the better half of that pair.
+POLICY_NAME="hiro-postgres-backup-s3"
 
 run() {
   if [[ "$DRY_RUN" == true ]]; then
@@ -88,6 +120,12 @@ run() {
   "$@"
 }
 
+# Every S3 call goes through this so --region is never accidentally omitted.
+# Without it the CLI falls back to its *configured* region while the Secret
+# still tells Barman $REGION — the bucket gets created correctly and then
+# configuration calls fail or hit the wrong endpoint.
+s3api() { aws s3api --region "$REGION" "$@"; }
+
 # ---------------------------------------------------------------- preflight --
 
 for bin in aws jq sops; do
@@ -95,6 +133,30 @@ for bin in aws jq sops; do
 done
 
 [[ -f "$SECRET_FILE" ]] || die "secret file not found: $SECRET_FILE"
+
+# Prove SOPS can actually encrypt BEFORE anything irreversible happens.
+#
+# This ordering is the whole point: minting the access key first means a missing
+# or invalid age key leaves you holding a live AWS credential *and* a plaintext
+# secret on disk — and the two-key guard further down then refuses to mint a
+# replacement, so the next run cannot recover either. Fail here instead, where
+# nothing has been created yet and there is nothing to clean up.
+AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-${REPO_ROOT}/age.key}"
+[[ -f "$AGE_KEY_FILE" ]] || die "age key not found: ${AGE_KEY_FILE} (set SOPS_AGE_KEY_FILE)"
+
+SOPS_PROBE="$(mktemp)"
+trap 'rm -f "$SOPS_PROBE"' EXIT
+cat >"$SOPS_PROBE" <<'PROBE'
+apiVersion: v1
+kind: Secret
+stringData:
+  probe: canary
+PROBE
+if ! SOPS_AGE_KEY_FILE="$AGE_KEY_FILE" \
+     sops --encrypt --input-type yaml --output-type yaml "$SOPS_PROBE" >/dev/null 2>&1; then
+  die "sops cannot encrypt with ${AGE_KEY_FILE} — fix this before provisioning anything"
+fi
+log "sops encryption verified against ${AGE_KEY_FILE#"$REPO_ROOT"/}"
 
 CALLER="$(aws sts get-caller-identity --output json 2>/dev/null)" \
   || die "aws sts get-caller-identity failed — configure AWS credentials first"
@@ -113,51 +175,70 @@ fi
 
 # ------------------------------------------------------------------- bucket --
 
-if aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
+if s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
   log "bucket ${BUCKET} already exists — skipping creation"
+
+  # Object Lock can only be turned on at creation time. Skipping the creation
+  # branch would otherwise mean this script reports the capability as enabled
+  # while silently accepting a bucket that can never have it.
+  if s3api get-object-lock-configuration --bucket "$BUCKET" >/dev/null 2>&1; then
+    log "existing bucket has Object Lock enabled"
+  else
+    warn "bucket ${BUCKET} exists WITHOUT Object Lock enabled."
+    warn "It cannot be added to an existing bucket. Everything else here still"
+    warn "applies, but the deferred Object Lock option (see"
+    warn "docs/plan-cloudnative-pg.md) is unavailable unless the bucket is"
+    warn "recreated. Continuing."
+  fi
+
+  ACTUAL_REGION="$(s3api get-bucket-location --bucket "$BUCKET" \
+    --query 'LocationConstraint' --output text 2>/dev/null || echo "")"
+  # us-east-1 is reported as the literal string "None".
+  [[ "$ACTUAL_REGION" == "None" || -z "$ACTUAL_REGION" ]] && ACTUAL_REGION="us-east-1"
+  if [[ "$ACTUAL_REGION" != "$REGION" ]]; then
+    die "bucket ${BUCKET} is in ${ACTUAL_REGION} but --region says ${REGION}. The Secret would tell Barman the wrong region — re-run with --region ${ACTUAL_REGION}"
+  fi
 else
   log "creating bucket ${BUCKET}"
   # us-east-1 is the one region that rejects an explicit LocationConstraint.
   if [[ "$REGION" == "us-east-1" ]]; then
-    run aws s3api create-bucket \
+    run s3api create-bucket \
       --bucket "$BUCKET" \
-      --region "$REGION" \
       --object-lock-enabled-for-bucket
   else
-    run aws s3api create-bucket \
+    run s3api create-bucket \
       --bucket "$BUCKET" \
-      --region "$REGION" \
       --create-bucket-configuration "LocationConstraint=${REGION}" \
       --object-lock-enabled-for-bucket
   fi
 fi
 
 log "blocking all public access"
-run aws s3api put-public-access-block \
+run s3api put-public-access-block \
   --bucket "$BUCKET" \
   --public-access-block-configuration \
     "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 
 log "enforcing bucket-owner ownership (disables ACLs)"
-run aws s3api put-bucket-ownership-controls \
+run s3api put-bucket-ownership-controls \
   --bucket "$BUCKET" \
   --ownership-controls "Rules=[{ObjectOwnership=BucketOwnerEnforced}]"
 
 # Object Lock forces versioning on, but set it explicitly so this stays correct
 # if --object-lock-enabled-for-bucket is ever dropped.
 log "enabling versioning"
-run aws s3api put-bucket-versioning \
+run s3api put-bucket-versioning \
   --bucket "$BUCKET" \
   --versioning-configuration "Status=Enabled"
 
 log "enabling default server-side encryption (SSE-S3)"
-run aws s3api put-bucket-encryption \
+run s3api put-bucket-encryption \
   --bucket "$BUCKET" \
   --server-side-encryption-configuration \
     '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
 
 log "applying lifecycle rules (orphaned multipart parts, noncurrent versions)"
-run aws s3api put-bucket-lifecycle-configuration \
+run s3api put-bucket-lifecycle-configuration \
   --bucket "$BUCKET" \
   --lifecycle-configuration '{
     "Rules": [
@@ -216,9 +297,26 @@ EOF
 POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}"
 
 if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
-  log "policy ${POLICY_NAME} already exists — leaving as-is"
-  warn "if the policy needs updating, publish a new version explicitly:"
-  warn "  aws iam create-policy-version --policy-arn ${POLICY_ARN} --set-as-default --policy-document '<json>'"
+  log "policy ${POLICY_NAME} already exists — verifying it actually grants ${BUCKET}"
+
+  # Never attach a pre-existing policy without checking what it authorizes.
+  # Attaching one scoped to a different bucket leaves the workload with
+  # credentials that authenticate fine and are denied on every operation.
+  DEFAULT_VER="$(aws iam get-policy --policy-arn "$POLICY_ARN" \
+    --query 'Policy.DefaultVersionId' --output text 2>/dev/null)"
+  POLICY_RESOURCES="$(aws iam get-policy-version \
+    --policy-arn "$POLICY_ARN" --version-id "$DEFAULT_VER" \
+    --query 'PolicyVersion.Document.Statement[].Resource' --output json 2>/dev/null || echo '[]')"
+
+  if grep -q "arn:aws:s3:::${BUCKET}\"" <<<"$POLICY_RESOURCES" \
+     || grep -q "arn:aws:s3:::${BUCKET}/" <<<"$POLICY_RESOURCES"; then
+    log "existing policy grants ${BUCKET} — leaving as-is"
+  else
+    warn "policy ${POLICY_NAME} does NOT reference arn:aws:s3:::${BUCKET}"
+    warn "Its current resources: ${POLICY_RESOURCES}"
+    die "refusing to attach a policy that does not authorize the configured bucket. Publish a corrected version, then re-run:
+  aws iam create-policy-version --policy-arn ${POLICY_ARN} --set-as-default --policy-document '<json>'"
+  fi
 else
   log "creating policy ${POLICY_NAME}"
   run aws iam create-policy \
