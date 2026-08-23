@@ -30,7 +30,6 @@ spec:
               - secretRef:
                   name: n8n-smtp-secret
             env:
-              DB_SQLITE_VACUUM_ON_STARTUP: true
               EXECUTIONS_DATA_PRUNE: true
               EXECUTIONS_DATA_MAX_AGE: 336
               EXECUTIONS_DATA_PRUNE_MAX_COUNT: 10000
