@@ -1,0 +1,43 @@
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgres-backup
+spec:
+  # Recovery-window retention: keeps whatever backups + WAL are needed to
+  # restore to any point in the last 7 days. Older backups are pruned after
+  # the next one completes.
+  retentionPolicy: "7d"
+
+  # Bounds the barman-cloud sidecar injected into the Postgres pod. Without
+  # this it runs unbounded, and two of the four nodes only have 2 CPU total.
+  #
+  # INFORMED GUESS — not measured. The sidecar is idle between WAL segments and
+  # bursts during gzip + multipart upload (base backups burst hardest). Requests
+  # reflect expected steady state; the memory limit is deliberately ~4x that to
+  # absorb upload buffers. No CPU limit by repo convention — throttling a backup
+  # mid-upload is worse than letting it burst. Revisit with real data:
+  # see docs/plan-cloudnative-pg.md.
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  configuration:
+    destinationPath: "s3://hiro-postgres-backups/postgres"
+    s3Credentials:
+      accessKeyId:
+        name: postgres-s3-backup-secret
+        key: AWS_ACCESS_KEY_ID
+      secretAccessKey:
+        name: postgres-s3-backup-secret
+        key: AWS_SECRET_ACCESS_KEY
+      region:
+        name: postgres-s3-backup-secret
+        key: AWS_REGION
+    wal:
+      compression: gzip
+    data:
+      compression: gzip

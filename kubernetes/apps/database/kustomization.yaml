@@ -10,3 +10,4 @@ resources:
   - ./namespace.yaml
   - ./mariadb-operator/ks.yaml
   - ./cloudnative-pg/ks.yaml
+  - ./postgres/ks.yaml
