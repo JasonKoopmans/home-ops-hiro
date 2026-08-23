@@ -144,18 +144,36 @@ done
 AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-${REPO_ROOT}/age.key}"
 [[ -f "$AGE_KEY_FILE" ]] || die "age key not found: ${AGE_KEY_FILE} (set SOPS_AGE_KEY_FILE)"
 
-SOPS_PROBE="$(mktemp)"
-trap 'rm -f "$SOPS_PROBE"' EXIT
-cat >"$SOPS_PROBE" <<'PROBE'
+# The probe MUST live inside the repo under a *.sops.yaml name. SOPS resolves
+# its recipient from the `creation_rules` path_regex in .sops.yaml, which only
+# matches `(bootstrap|kubernetes)/.*\.sops\.ya?ml`. A probe under /tmp matches
+# nothing and dies with "no matching creation rules found" — which would abort
+# this preflight on *every* invocation, before any provisioning happens.
+CLEANUP_FILES=()
+cleanup() {
+  local f
+  for f in ${CLEANUP_FILES[@]+"${CLEANUP_FILES[@]}"}; do
+    [[ -n "$f" ]] && rm -f "$f"
+  done
+}
+trap cleanup EXIT INT TERM
+
+SOPS_PROBE="${APP_DIR}/.sops-preflight-probe.sops.yaml"
+CLEANUP_FILES+=("$SOPS_PROBE")
+(
+  umask 077
+  cat >"$SOPS_PROBE" <<'PROBE'
 apiVersion: v1
 kind: Secret
 stringData:
   probe: canary
 PROBE
+)
 if ! SOPS_AGE_KEY_FILE="$AGE_KEY_FILE" \
-     sops --encrypt --input-type yaml --output-type yaml "$SOPS_PROBE" >/dev/null 2>&1; then
-  die "sops cannot encrypt with ${AGE_KEY_FILE} — fix this before provisioning anything"
+     sops --encrypt --in-place "$SOPS_PROBE" >/dev/null 2>&1; then
+  die "sops cannot encrypt ${SOPS_PROBE#"$REPO_ROOT"/} using ${AGE_KEY_FILE##*/} — fix this before provisioning anything"
 fi
+rm -f "$SOPS_PROBE"
 log "sops encryption verified against ${AGE_KEY_FILE#"$REPO_ROOT"/}"
 
 CALLER="$(aws sts get-caller-identity --output json 2>/dev/null)" \
@@ -231,11 +249,13 @@ run s3api put-bucket-versioning \
   --bucket "$BUCKET" \
   --versioning-configuration "Status=Enabled"
 
+# BucketKeyEnabled is deliberately absent: S3 Bucket Keys are an SSE-KMS
+# request-cost optimization and carry no meaning under SSE-S3 (AES256).
 log "enabling default server-side encryption (SSE-S3)"
 run s3api put-bucket-encryption \
   --bucket "$BUCKET" \
   --server-side-encryption-configuration \
-    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 
 log "applying lifecycle rules (orphaned multipart parts, noncurrent versions)"
 run s3api put-bucket-lifecycle-configuration \
@@ -304,17 +324,46 @@ if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
   # credentials that authenticate fine and are denied on every operation.
   DEFAULT_VER="$(aws iam get-policy --policy-arn "$POLICY_ARN" \
     --query 'Policy.DefaultVersionId' --output text 2>/dev/null)"
-  POLICY_RESOURCES="$(aws iam get-policy-version \
-    --policy-arn "$POLICY_ARN" --version-id "$DEFAULT_VER" \
-    --query 'PolicyVersion.Document.Statement[].Resource' --output json 2>/dev/null || echo '[]')"
 
-  if grep -q "arn:aws:s3:::${BUCKET}\"" <<<"$POLICY_RESOURCES" \
-     || grep -q "arn:aws:s3:::${BUCKET}/" <<<"$POLICY_RESOURCES"; then
-    log "existing policy grants ${BUCKET} — leaving as-is"
+  # `PolicyVersion.Document` comes back as a URL-encoded JSON *string*, not an
+  # object, so a `--query 'Document.Statement[].Resource'` yields nothing and
+  # every rerun would fall into the refusal branch below. Decode explicitly, and
+  # tolerate an already-decoded object in case the CLI ever changes.
+  #
+  # Compare against the exact expected ARN set rather than merely checking that
+  # the bucket is mentioned: a policy granting "*" or extra buckets also
+  # "mentions" this one, and attaching it would quietly hand the backup user far
+  # more than it needs.
+  POLICY_RESOURCES="$(aws iam get-policy-version \
+    --policy-arn "$POLICY_ARN" --version-id "$DEFAULT_VER" --output json 2>/dev/null \
+    | python3 -c '
+import json, sys, urllib.parse
+try:
+    doc = json.load(sys.stdin)["PolicyVersion"]["Document"]
+except Exception:
+    print("[]"); raise SystemExit(0)
+if isinstance(doc, str):
+    doc = json.loads(urllib.parse.unquote(doc))
+out = []
+for st in doc.get("Statement", []):
+    r = st.get("Resource", [])
+    out.extend(r if isinstance(r, list) else [r])
+print(json.dumps(sorted(set(out))))
+' 2>/dev/null || echo '[]')"
+
+  EXPECTED_RESOURCES="$(python3 -c '
+import json, sys
+b = sys.argv[1]
+print(json.dumps(sorted({f"arn:aws:s3:::{b}", f"arn:aws:s3:::{b}/*"})))
+' "$BUCKET")"
+
+  if [[ "$POLICY_RESOURCES" == "$EXPECTED_RESOURCES" ]]; then
+    log "existing policy grants exactly ${BUCKET} — leaving as-is"
   else
-    warn "policy ${POLICY_NAME} does NOT reference arn:aws:s3:::${BUCKET}"
-    warn "Its current resources: ${POLICY_RESOURCES}"
-    die "refusing to attach a policy that does not authorize the configured bucket. Publish a corrected version, then re-run:
+    warn "policy ${POLICY_NAME} does not grant exactly the expected resources."
+    warn "  expected: ${EXPECTED_RESOURCES}"
+    warn "  actual:   ${POLICY_RESOURCES}"
+    die "refusing to attach it — it may authorize the wrong bucket, or more than this user needs. Publish a corrected version, then re-run:
   aws iam create-policy-version --policy-arn ${POLICY_ARN} --set-as-default --policy-document '<json>'"
   fi
 else
@@ -346,10 +395,14 @@ if [[ "$DRY_RUN" == true ]]; then
   exit 0
 fi
 
-EXISTING_KEYS="$(aws iam list-access-keys --user-name "$IAM_USER" \
-  --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null || true)"
+# `--output text` renders an empty JMESPath result as the literal "None" rather
+# than an empty string, which would make the very first run — the one that has
+# no keys yet — report a key called "None" and exit without creating one. Parse
+# JSON and test the array instead.
+EXISTING_KEYS="$(aws iam list-access-keys --user-name "$IAM_USER" --output json 2>/dev/null \
+  | jq -r '[.AccessKeyMetadata[]?.AccessKeyId] | join(" ")' 2>/dev/null || true)"
 
-if [[ -n "$EXISTING_KEYS" ]]; then
+if [[ -n "${EXISTING_KEYS// /}" ]]; then
   warn "user ${IAM_USER} already has access key(s): ${EXISTING_KEYS}"
   warn "Refusing to mint another — IAM allows only two, and a spare you cannot"
   warn "identify is worse than none. To rotate deliberately:"
@@ -366,12 +419,22 @@ unset KEY_JSON
 
 # ------------------------------------------------------- write + encrypt -----
 
-# The secret is only ever plaintext on disk between these two commands, and only
-# with a 0600 umask. Do not add steps in between.
+# Write plaintext to a 0600 scratch file, encrypt it *there*, and only then move
+# the already-encrypted result over the tracked path. Writing plaintext directly
+# to the tracked file meant an interrupted run — killed sops, Ctrl-C, power loss
+# — could leave a live AWS secret sitting at a git-tracked path, staged by the
+# next `git add`. With this ordering the tracked file is either untouched or
+# encrypted, never plaintext, and the trap removes the scratch file on any exit.
+#
+# The scratch file has to live beside the real one and keep a *.sops.yaml name,
+# for the same creation_rules reason as the preflight probe above.
+SECRET_TMP="${APP_DIR}/.s3-credentials.provisioning.sops.yaml"
+CLEANUP_FILES+=("$SECRET_TMP")
+
 log "writing and encrypting ${SECRET_FILE#"$REPO_ROOT"/}"
 (
   umask 077
-  cat >"$SECRET_FILE" <<EOF
+  cat >"$SECRET_TMP" <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -384,16 +447,19 @@ EOF
 )
 unset SECRET_ACCESS_KEY
 
-SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-${REPO_ROOT}/age.key}" \
-  sops --encrypt --in-place "$SECRET_FILE" \
-  || die "sops encryption FAILED — ${SECRET_FILE} currently holds a PLAINTEXT secret. Encrypt or delete it before committing."
+SOPS_AGE_KEY_FILE="$AGE_KEY_FILE" \
+  sops --encrypt --in-place "$SECRET_TMP" \
+  || die "sops encryption FAILED. The tracked secret was left untouched; the plaintext scratch file is being removed. Access key ${ACCESS_KEY_ID} is live — delete it with: aws iam delete-access-key --user-name ${IAM_USER} --access-key-id ${ACCESS_KEY_ID}"
 
-# Prove it actually encrypted rather than trusting the exit code.
-if grep -q "^sops:" "$SECRET_FILE" && ! grep -q "${ACCESS_KEY_ID}" "$SECRET_FILE"; then
-  log "verified: file is encrypted and contains no plaintext key id"
-else
-  die "post-encryption check FAILED — inspect ${SECRET_FILE} before committing"
+# Verify the scratch file before it is allowed anywhere near the tracked path.
+if ! grep -q "^sops:" "$SECRET_TMP" || grep -q "${ACCESS_KEY_ID}" "$SECRET_TMP"; then
+  die "post-encryption check FAILED — scratch file is not properly encrypted and will be removed. Access key ${ACCESS_KEY_ID} is live; delete it with: aws iam delete-access-key --user-name ${IAM_USER} --access-key-id ${ACCESS_KEY_ID}"
 fi
+
+# Atomic: the tracked path goes straight from old content to fully-encrypted.
+mv -f "$SECRET_TMP" "$SECRET_FILE"
+chmod 0600 "$SECRET_FILE"
+log "verified: ${SECRET_FILE#"$REPO_ROOT"/} is encrypted and contains no plaintext key id"
 
 # ------------------------------------------------------------------- next ----
 
