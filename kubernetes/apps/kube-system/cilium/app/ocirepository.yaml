@@ -10,4 +10,9 @@ spec:
     operation: copy
   ref:
     tag: 1.18.13
-  url: oci://ghcr.io/home-operations/charts-mirror/cilium
+  url: oci://quay.io/cilium/charts/cilium
+  verify:
+    provider: cosign
+    matchOIDCIdentity:
+      - issuer: ^https://token.actions.githubusercontent.com$
+        subject: ^https://github.com/cilium/cilium/.*$
