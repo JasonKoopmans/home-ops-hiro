@@ -329,14 +329,14 @@ on a live cluster means recreating volumes. Instance count is not: CNPG scales
 | cmp-02 | 2950m | 67% | ~969m | ~10.7Gi | ~2.7Gi |
 | cmp-03 | 1950m | 63% | ~707m | ~10.7Gi | ~6.2Gi |
 | cmp-04 | 1950m | 77% | ~444m | ~10.7Gi | ~3.9Gi |
-| cmp-05 | 3950m | 16% | ~3287m | ~4.5Gi (stale, see below) | ~3.1Gi |
+| cmp-05 | 3950m | 16% | ~3287m | ~10.7Gi | ~3.1Gi |
 
 - **cmp-04 cannot host an instance** at the current 500m request (444m free).
-- **cmp-05's RAM row above is stale.** The 2026-07-27 undersized-RAM issue
-  (OOM → etcd flap → iSCSI drop) is now **resolved**: host RAM was bumped to
-  16GiB on 2026-08-23 and verified in-cluster at ~10.7Gi allocatable, matching
-  cmp-01..04. Combined with its 3950m CPU allocatable (highest in the
-  cluster), cmp-05 is now the cluster's strongest node, not its constraint.
+- **cmp-05 was previously constrained by undersized RAM** (2026-07-27: OOM →
+  etcd flap → iSCSI drop); host RAM was bumped to 16GiB on 2026-08-23 and
+  verified in-cluster at ~10.7Gi allocatable, matching cmp-01..04. Combined
+  with its 3950m CPU allocatable (highest in the cluster), cmp-05 is now the
+  cluster's strongest node.
 - Three instances fit today on cmp-01/02/03, but push cmp-03 to ~89% CPU
   requested. With cmp-05 fixed, it's the better host — the placement math
   below should be re-run against cmp-05 rather than treating cmp-03 as the
