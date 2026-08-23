@@ -24,3 +24,14 @@ spec:
   values:
     monitoring:
       podMonitorEnabled: true
+    # Chart default is `resources: {}`. Measured 2026-08-22 shortly after
+    # install, idle with no Cluster to manage: 5m CPU / 78Mi. The request sits
+    # above that idle floor because the operator does real work once it is
+    # reconciling instances; the limit is deliberate headroom over an
+    # unmeasured busy state. Memory limit only, per repo convention.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
