@@ -1,0 +1,141 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: postgres-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: postgres.rules
+      rules:
+        # Scope note: every expression here is scoped by namespace only, because
+        # `database` currently holds exactly one CNPG cluster. The `cnpg_*`
+        # series carry pod/namespace labels but not a cluster name on most
+        # families, so a *second* CNPG cluster in this namespace would make the
+        # aggregate rules below ambiguous. If one is ever added, split these by
+        # the `cnpg.io/cluster` pod label rather than widening the thresholds.
+        #
+        # Deliberately NOT covered here, because generic rules already own them
+        # and duplicate alerts are the failure mode this repo has actually hit:
+        #   * PVC filling (the pg_wal-runaway symptom) -> LonghornVolumeUsageHigh
+        #     fires at >85% for any Longhorn volume, postgres PVCs included.
+        #   * Container memory/CPU against limits -> PodMemoryLimitPressure* and
+        #     PodCpuLimitPressure* already match every container with limits set.
+
+        # --- backup freshness ------------------------------------------------
+        #
+        # `cnpg_collector_last_available_backup_timestamp` is published as 0
+        # before the first successful backup rather than being absent, so a bare
+        # `time() - <metric> > threshold` evaluates to ~1.7e9 immediately and
+        # would fire on a cluster that is behaving perfectly and simply has not
+        # reached its first scheduled run. The `> 0` guard prevents that; the
+        # paired NeverSucceeded rule below closes the hole the guard opens, so a
+        # backup that has genuinely never run still pages.
+        - alert: PostgresBackupStale
+          expr: |
+            max(cnpg_collector_last_available_backup_timestamp{namespace="database"}) > 0
+            and
+            time() - max(cnpg_collector_last_available_backup_timestamp{namespace="database"}) > 129600
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: Postgres has no recent successful base backup
+            description: The most recent CloudNativePG base backup is over 36 hours old against a nightly schedule (docs/plan-cloudnative-pg.md §1b). WAL archiving may still be working, but WAL is a diff against a base backup — without a recent one the recovery window is shrinking. 36h allows one missed run plus margin before paging.
+
+        # A gauge pinned at 0 means no backup has EVER completed. Uses `for:`
+        # rather than a range-vector window so it measures real elapsed time and
+        # behaves correctly on a fresh install instead of evaluating against a
+        # window that is not full yet. 12h is deliberately longer than the gap
+        # between deploying this rule and the first nightly run, so standing the
+        # cluster up does not page; anything longer than that is a real failure.
+        # Caveat inherited from the recording-annotator rules: a Prometheus
+        # restart resets `for:` state, so a long-pending alert starts over.
+        - alert: PostgresBackupNeverSucceeded
+          expr: |
+            max(cnpg_collector_last_available_backup_timestamp{namespace="database"}) == 0
+          for: 12h
+          labels:
+            severity: critical
+          annotations:
+            summary: Postgres has never completed a base backup
+            description: CloudNativePG reports no successful base backup has ever completed for this cluster. Point-in-time recovery is NOT possible in this state regardless of what WAL archiving reports — there is no base to replay WAL onto. Check `kubectl -n database get backup` and the barman sidecar logs.
+
+        # --- WAL archiving ---------------------------------------------------
+        #
+        # Compares the two archiver timestamps per pod rather than alerting on
+        # `failed_count`, which is cumulative and never decreases — a counter
+        # rule would latch forever after a single transient failure. This form
+        # fires only while the most recent attempt is a failure and clears by
+        # itself the moment one succeeds, which is exactly the behaviour wanted:
+        # the two transient S3 connection errors seen during cluster bring-up on
+        # 2026-08-23 retried successfully within 8 seconds and should not page.
+        #
+        # Replicas do not archive, so both series sit at 0 there and 0 > 0 is
+        # false — no spurious firing from the non-primary instances.
+        #
+        # This is the alert that matters most operationally: a failing
+        # archive_command makes PostgreSQL refuse to recycle WAL, so the first
+        # visible symptom is otherwise a *disk* alert from Longhorn, long after
+        # the backup chain has actually broken.
+        - alert: PostgresWalArchivingFailing
+          expr: |
+            cnpg_pg_stat_archiver_last_failed_time{namespace="database"}
+              > on (namespace, pod)
+            cnpg_pg_stat_archiver_last_archived_time{namespace="database"}
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: Postgres WAL archiving to S3 is failing
+            description: "The most recent WAL archive attempt on {{ $$labels.pod }} failed and none has succeeded since. Continuous archiving is broken, so the recovery window has stopped advancing and pg_wal will grow until it fills the PVC. Check the plugin-barman-cloud sidecar logs and the S3 credential."
+
+        # --- replication -----------------------------------------------------
+        #
+        # Warning, not critical: losing a replica costs redundancy and blocks a
+        # clean drain, but the database keeps serving and backups are unaffected.
+        # It is the standing HA posture that has degraded, not availability.
+        - alert: PostgresReplicationDegraded
+          expr: |
+            max(cnpg_pg_replication_streaming_replicas{namespace="database"}) < 2
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Postgres has fewer than two streaming replicas
+            description: "Only {{ $$value }} streaming replica(s) are connected to the primary, against an expected 2. The cluster is no longer able to lose an instance and stay redundant, and a node drain that requires switchover may block. Check `kubectl -n database get cluster postgres`."
+
+        # --- the meta-alert --------------------------------------------------
+        #
+        # Every rule above is scoped to `cnpg_*` series. If the PodMonitor is
+        # removed, mis-labelled, or `monitoring.enablePodMonitor` is flipped back
+        # to false, those series disappear and all of the rules above silently
+        # stop evaluating — no data means no alert, so backup monitoring would
+        # fail open exactly like a check that cannot tell "nothing wrong" from
+        # "not looking". `absent()` is the only thing that catches that, and it
+        # is why this rule exists rather than being redundant with the pod-level
+        # alerts. This is the same reasoning as N8nWorkflowMetricsMissing.
+        - alert: PostgresMetricsMissing
+          expr: |
+            absent(cnpg_collector_up{namespace="database"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Postgres cluster metrics are not being scraped
+            description: No cnpg_* metrics are present for the database namespace. Every other Postgres alert — including backup staleness and WAL archiving — depends on these series and is currently blind. Check the PodMonitor and `spec.monitoring.enablePodMonitor` on the Cluster.
+
+        # Distinct from the above: the series exist, but the in-instance exporter
+        # cannot query PostgreSQL. Metrics are then stale rather than missing,
+        # which absent() will not catch.
+        - alert: PostgresMetricsCollectorFailing
+          expr: |
+            min(cnpg_collector_up{namespace="database"}) == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Postgres metrics collector is failing on at least one instance
+            description: The CloudNativePG metrics exporter reports it cannot collect from at least one instance. Values for the backup and archiver alerts may be stale rather than missing, so treat those as unreliable until this clears.

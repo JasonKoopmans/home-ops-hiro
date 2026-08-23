@@ -36,6 +36,15 @@ spec:
   # Trade-off: losing a node destroys that instance's volume outright, so CNPG
   # re-clones the replica from the primary rather than re-attaching. Normal
   # CNPG behaviour, but I/O-heavy for a large database.
+  # Without this, nothing scrapes the instances. The operator's own PodMonitor
+  # (from the Helm chart) covers only the controller; the ~460 `cnpg_*` series
+  # that actually describe this database — backup age, WAL archiver counters,
+  # replication lag — are served on port 9187 of each instance pod and were
+  # being generated and discarded. `cnpg-default-monitoring` defines the queries
+  # but does not cause anything to collect their results.
+  monitoring:
+    enablePodMonitor: true
+
   storage:
     storageClass: longhorn-1-no-backup
     size: 10Gi
