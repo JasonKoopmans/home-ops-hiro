@@ -95,8 +95,17 @@ See [[local-render-and-memory-sizing]] for the measurement method — in short,
 size limits at roughly 2x observed peak, because a 30s scrape cannot sample the
 spike that actually triggers an OOM kill.
 
+**First real measurements (2026-08-22, shortly after install, no `Cluster` yet):**
+operator `5m CPU / 78Mi`, plugin controller `1m CPU / 29Mi`. Both idle — no
+Postgres instances exist to manage and no backup has ever run, so these are
+*floors for the idle case*, not peaks. They were enough to size the operator's
+own requests/limits (previously missing entirely) but say nothing yet about
+behaviour under load.
+
 | Setting | Current | Basis | Revisit when |
 |---|---|---|---|
+| Operator `requests` / `limit` | 50m / 128Mi, limit 512Mi | Measured 78Mi idle; headroom for reconciling 3 instances | After phase 2 runs |
+| Plugin controller `requests` / `limit` | 50m / 64Mi, limit 256Mi | Measured 29Mi idle | After first base backups |
 | Postgres `requests` | 500m CPU / 1Gi | Homelab-modest starting point | 14d of data exists |
 | Postgres memory `limit` | 2Gi | ~2x the request | 14d of data exists |
 | Sidecar `requests` | 50m CPU / 128Mi | Idle between WAL segments; matches repo's 50m convention | After first few base backups |
