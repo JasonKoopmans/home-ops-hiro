@@ -32,8 +32,8 @@ Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 | 5 | **Restore drill** (the part that matters) | Blocked on §1b |
 | 6 | Teardown scratch cluster + recovery runbook | Blocked on phase 5 |
 | 7 | PDB / failure-mode writeup | **Unblocked** — evidence gathered, see §4 |
-| 8 | **Backup observability** (see §5) | **Unblocked** — to design |
-| 9 | **Cluster/runtime observability** (see §6) | **Unblocked** — to design |
+| 8 | **Backup observability** (see §5) | **Implemented** — `prometheusrule-postgres.yaml` |
+| 9 | **Cluster/runtime observability** (see §6) | **Implemented** — same rule file + instance PodMonitor |
 | ~~10~~ | HA topology (see §7) | Decided — folded into phase 2 |
 
 The operator, plugin, and a 3-instance `Cluster` are **live** in the `database`
@@ -238,7 +238,29 @@ which is why phases 3–5 do not get easier because of §7.
 
 ---
 
-## §5 Phase 8 — Backup observability (to design, then implement)
+## §5 Phases 8 & 9 — Observability (implemented 2026-08-23)
+
+Shipped as `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-postgres.yaml`
+plus `spec.monitoring.enablePodMonitor: true` on the Cluster. The design notes
+below are kept because they explain *why* each rule is shaped the way it is.
+
+> **The instances were not being scraped at all.** The operator's PodMonitor
+> from the Helm chart covers only the controller. The ~460 `cnpg_*` series that
+> describe the database — backup age, WAL archiver counters, replication lag —
+> are served on port 9187 of each instance pod, and `enablePodMonitor` defaults
+> to **false**, so they were generated and discarded. Confirmed by
+> port-forwarding an instance directly: 462 series there, zero in Prometheus.
+> The `cnpg-default-monitoring` ConfigMap defines the queries but nothing
+> collected their results — having the queries is not the same as having the
+> metrics.
+
+**Two alerts deliberately not written**, because generic rules already own them
+and duplicate alerts are a failure mode this repo has actually hit:
+
+| Signal | Already covered by |
+|---|---|
+| PVC filling (the `pg_wal` runaway symptom) | `LonghornVolumeUsageHigh` — >85% on any Longhorn volume |
+| Container memory / CPU against limits | `PodMemoryLimitPressure*`, `PodCpuLimitPressure*` |
 
 **Why this is a real phase and not a nice-to-have.** Phases 3–5 prove the backup
 mechanism works *at one moment in time*. They do nothing about silent rot
@@ -304,17 +326,27 @@ Implement only once the design is settled.
 
 ---
 
-## §6 Phase 9 — Cluster/runtime observability (to design, then implement)
+## §6 Phase 9 — Cluster/runtime observability (implemented; dashboard still open)
 
 Phase 8 covers *"are backups still working."* This covers *"is the database
 healthy."* Different metrics, different alerts — but one design conversation and
 probably one PR.
 
-**Already in place:** the operator's PodMonitor is enabled
-(`monitoring.podMonitorEnabled: true`). Verified that this cluster's Prometheus
-uses empty selectors (`podMonitorSelector: {}`, `podMonitorNamespaceSelector: {}`),
-so it selects **all** PodMonitors in **all** namespaces — the metrics will be
-scraped with no extra wiring.
+**Correction — an earlier revision of this section was wrong.** It claimed that
+because the operator's PodMonitor was enabled and this cluster's Prometheus uses
+empty selectors (`podMonitorSelector: {}`, `podMonitorNamespaceSelector: {}`,
+which is true and does mean all PodMonitors in all namespaces get selected), the
+database metrics would be scraped "with no extra wiring". They were not.
+
+Two different PodMonitors are involved. The chart's covers the **operator**; the
+instances need their own, created only when `spec.monitoring.enablePodMonitor`
+is set on the **Cluster**, and it defaults to false. Selecting every PodMonitor
+does not help when the PodMonitor does not exist.
+
+The lesson worth keeping: "the queries are configured" and "the exporter is
+running" are both true statements that still leave you with no metrics. Only
+querying Prometheus for the series settles it — port-forwarding the instance
+showed 462 `cnpg_*` series available while Prometheus held zero.
 
 ### Repo conventions to follow
 
