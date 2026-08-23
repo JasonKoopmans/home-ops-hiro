@@ -222,6 +222,22 @@ fi
 if s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
   log "bucket ${BUCKET} already exists — skipping creation"
 
+  # A bucket this script creates has no bucket policy. A pre-existing one might,
+  # and a *resource*-based policy grants access independently of the identity
+  # policy validated further down — so the least-privilege boundary this script
+  # claims to establish would simply not hold. Refuse rather than provision a
+  # credential into a permission surface that was never inspected.
+  #
+  # `get-bucket-policy` exits non-zero for NoSuchBucketPolicy, which is the
+  # normal case, so distinguish "no policy" from "could not check".
+  BUCKET_POLICY="$(s3api get-bucket-policy --bucket "$BUCKET" --query Policy --output text 2>/dev/null || true)"
+  if [[ -n "$BUCKET_POLICY" && "$BUCKET_POLICY" != "None" ]]; then
+    warn "bucket ${BUCKET} carries a bucket policy:"
+    warn "  ${BUCKET_POLICY}"
+    die "refusing to provision against it — a resource policy can grant access beyond the identity policy this script validates, so least privilege cannot be established. Review and remove it, or point destinationPath at a dedicated bucket."
+  fi
+  log "no bucket policy present — identity policy is the only grant path"
+
   # Object Lock can only be turned on at creation time. Skipping the creation
   # branch would otherwise mean this script reports the capability as enabled
   # while silently accepting a bucket that can never have it.
@@ -439,10 +455,30 @@ if aws iam get-user --user-name "$IAM_USER" >/dev/null 2>&1; then
   # make the credentials this script hands to Barman far broader than the
   # bucket-scoped policy above implies — the policy check means nothing if the
   # user has another one too.
-  UNEXPECTED_ATTACHED="$(aws iam list-attached-user-policies --user-name "$IAM_USER" --output json 2>/dev/null \
-    | jq -r --arg want "$POLICY_ARN" '[.AttachedPolicies[] | select(.PolicyArn != $want) | .PolicyArn] | join(" ")')"
-  INLINE_POLICIES="$(aws iam list-user-policies --user-name "$IAM_USER" --output json 2>/dev/null \
-    | jq -r '.PolicyNames | join(" ")')"
+  # Every one of these three probes must FAIL CLOSED. Piping the AWS call
+  # straight into jq — `aws ... 2>/dev/null | jq ...` — swallows any error
+  # (denied, throttled, network) into an empty jq result, which reads as "no
+  # policies" and lets a privileged user through with a fresh credential. A
+  # security check that cannot distinguish "nothing found" from "could not look"
+  # is worse than no check, because it prints reassurance either way. So capture
+  # the call, abort if it failed, and only then interpret the payload.
+  ATTACHED_JSON="$(aws iam list-attached-user-policies --user-name "$IAM_USER" --output json 2>/dev/null)" \
+    || die "could not list attached policies for ${IAM_USER} — refusing to assume it has none"
+  INLINE_JSON="$(aws iam list-user-policies --user-name "$IAM_USER" --output json 2>/dev/null)" \
+    || die "could not list inline policies for ${IAM_USER} — refusing to assume it has none"
+  # Group membership is the third way a user acquires permissions and the
+  # easiest to miss: both policy lists can be empty while the user sits in a
+  # group carrying AdministratorAccess.
+  GROUPS_JSON="$(aws iam list-groups-for-user --user-name "$IAM_USER" --output json 2>/dev/null)" \
+    || die "could not list group memberships for ${IAM_USER} — refusing to assume it has none"
+
+  UNEXPECTED_ATTACHED="$(jq -r --arg want "$POLICY_ARN" \
+    '[.AttachedPolicies[]? | select(.PolicyArn != $want) | .PolicyArn] | join(" ")' <<<"$ATTACHED_JSON")" \
+    || die "could not parse attached-policy list for ${IAM_USER}"
+  INLINE_POLICIES="$(jq -r '[.PolicyNames[]?] | join(" ")' <<<"$INLINE_JSON")" \
+    || die "could not parse inline-policy list for ${IAM_USER}"
+  USER_GROUPS="$(jq -r '[.Groups[]?.GroupName] | join(" ")' <<<"$GROUPS_JSON")" \
+    || die "could not parse group list for ${IAM_USER}"
 
   if [[ -n "${UNEXPECTED_ATTACHED// /}" ]]; then
     die "IAM user ${IAM_USER} already has other managed policies attached: ${UNEXPECTED_ATTACHED}
@@ -452,14 +488,6 @@ This script only grants ${POLICY_ARN}. Detach the others (or use --user to pick 
     die "IAM user ${IAM_USER} already has inline polic$([[ "$INLINE_POLICIES" == *" "* ]] && echo ies || echo y): ${INLINE_POLICIES}
 This script does not manage inline policies and cannot verify their scope. Remove them (or use --user to pick a dedicated name) before re-running."
   fi
-
-  # Group membership is the third way a user acquires permissions, and the
-  # easiest to miss: attached and inline policies can both be empty while the
-  # user sits in a group carrying AdministratorAccess. Checking only the first
-  # two would report "no policies beyond what this script expects" about an
-  # effectively unrestricted identity.
-  USER_GROUPS="$(aws iam list-groups-for-user --user-name "$IAM_USER" --output json 2>/dev/null \
-    | jq -r '[.Groups[]?.GroupName] | join(" ")')"
   if [[ -n "${USER_GROUPS// /}" ]]; then
     die "IAM user ${IAM_USER} belongs to group$([[ "$USER_GROUPS" == *" "* ]] && echo s): ${USER_GROUPS}
 Groups grant permissions this script cannot see or scope. Remove the membership (or use --user to pick a dedicated name) before re-running."
