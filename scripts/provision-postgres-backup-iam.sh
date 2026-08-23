@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+# provision-postgres-backup-iam.sh
+#
+# One-time bootstrap of the AWS side of the CloudNativePG backup target:
+# an S3 bucket, a least-privilege IAM user scoped to *only* that bucket, and
+# the SOPS-encrypted Secret the Barman Cloud plugin reads its credentials from.
+#
+# Why a dedicated IAM user (not the Longhorn backup identity):
+#   The Longhorn credential can read and delete the cluster's volume backups.
+#   Sharing it would mean a compromise of the Postgres backup sidecar also
+#   reaches the volume backups — the two recovery paths would fail together,
+#   which defeats the point of having both.
+#
+# Why the bucket hygiene below is not optional:
+#   * Versioning + a noncurrent-version lifecycle rule. Barman prunes by issuing
+#     DELETEs. On a versioned bucket a DELETE only writes a delete marker, so
+#     without an expiry rule the "pruned" data is still billed forever.
+#   * Aborting incomplete multipart uploads. Base backups upload in parts. A
+#     sidecar killed mid-upload (OOM, node loss, failover) orphans those parts.
+#     They are invisible in the console and billed indefinitely.
+#
+# Object Lock: this script enables the *capability* at bucket creation but sets
+#   no retention rule, because retention interacts with Barman's own pruning and
+#   is a deliberate decision deferred to the observability phase (see
+#   docs/plan-cloudnative-pg.md §5). Enabling the capability later is awkward,
+#   so it is turned on now while it is free to do so. No object is locked until
+#   a retention rule is configured.
+#
+# Safe to re-run: every step checks for existing state first. The only step that
+# refuses rather than adapts is access-key creation, since IAM caps a user at
+# two keys and silently creating a second is how you end up not knowing which
+# one is live.
+#
+# Usage:
+#   bash scripts/provision-postgres-backup-iam.sh [--bucket NAME] [--region REGION]
+#                                                 [--user NAME] [--dry-run] [--yes]
+#
+#   --dry-run   Print every AWS call without executing it. Start here.
+#   --yes       Skip the confirmation prompt.
+#
+# Note the `bash scripts/...` invocation: in the devcontainer the repo is a
+# fakeowner mount and the executable bit does not survive, so `./scripts/...`
+# fails. Run it from the repo root.
+#
+# Requires: awscli v2, sops, jq, and an age key at ./age.key for the final
+# encrypt step. AWS credentials must already be configured with rights to
+# create S3 buckets and IAM users — this script does not manage that identity.
+
+set -euo pipefail
+
+# awscli pipes through a pager that does not exist in the devcontainer.
+export AWS_PAGER=""
+
+BUCKET="hiro-postgres-backups"
+REGION="us-east-1"
+IAM_USER="hiro-postgres-backup"
+POLICY_NAME="hiro-postgres-backup-s3"
+PREFIX="postgres"
+DRY_RUN=false
+ASSUME_YES=false
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SECRET_FILE="${REPO_ROOT}/kubernetes/apps/database/postgres/app/s3-credentials.sops.yaml"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bucket) BUCKET="$2"; shift 2 ;;
+    --region) REGION="$2"; shift 2 ;;
+    --user)   IAM_USER="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    --yes|-y) ASSUME_YES=true; shift ;;
+    # `\?` is a GNU-sed extension; use two portable expressions instead so this
+    # also works under BSD sed on macOS.
+    -h|--help) sed -n '2,47p' "${BASH_SOURCE[0]}" | sed -e 's/^# //' -e 's/^#$//'; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
+
+run() {
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '\033[0;90m  [dry-run] %s\033[0m\n' "$*"
+    return 0
+  fi
+  "$@"
+}
+
+# ---------------------------------------------------------------- preflight --
+
+for bin in aws jq sops; do
+  command -v "$bin" >/dev/null 2>&1 || die "missing required binary: $bin"
+done
+
+[[ -f "$SECRET_FILE" ]] || die "secret file not found: $SECRET_FILE"
+
+CALLER="$(aws sts get-caller-identity --output json 2>/dev/null)" \
+  || die "aws sts get-caller-identity failed — configure AWS credentials first"
+ACCOUNT_ID="$(jq -r .Account <<<"$CALLER")"
+
+log "AWS account : $ACCOUNT_ID"
+log "Identity    : $(jq -r .Arn <<<"$CALLER")"
+log "Bucket      : s3://${BUCKET}/${PREFIX}  (region ${REGION})"
+log "IAM user    : ${IAM_USER}"
+log "Secret file : ${SECRET_FILE#"$REPO_ROOT"/}"
+
+if [[ "$DRY_RUN" == false && "$ASSUME_YES" == false ]]; then
+  read -r -p "Create these resources in account ${ACCOUNT_ID}? [y/N] " reply
+  [[ "$reply" =~ ^[Yy]$ ]] || die "aborted"
+fi
+
+# ------------------------------------------------------------------- bucket --
+
+if aws s3api head-bucket --bucket "$BUCKET" >/dev/null 2>&1; then
+  log "bucket ${BUCKET} already exists — skipping creation"
+else
+  log "creating bucket ${BUCKET}"
+  # us-east-1 is the one region that rejects an explicit LocationConstraint.
+  if [[ "$REGION" == "us-east-1" ]]; then
+    run aws s3api create-bucket \
+      --bucket "$BUCKET" \
+      --region "$REGION" \
+      --object-lock-enabled-for-bucket
+  else
+    run aws s3api create-bucket \
+      --bucket "$BUCKET" \
+      --region "$REGION" \
+      --create-bucket-configuration "LocationConstraint=${REGION}" \
+      --object-lock-enabled-for-bucket
+  fi
+fi
+
+log "blocking all public access"
+run aws s3api put-public-access-block \
+  --bucket "$BUCKET" \
+  --public-access-block-configuration \
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+log "enforcing bucket-owner ownership (disables ACLs)"
+run aws s3api put-bucket-ownership-controls \
+  --bucket "$BUCKET" \
+  --ownership-controls "Rules=[{ObjectOwnership=BucketOwnerEnforced}]"
+
+# Object Lock forces versioning on, but set it explicitly so this stays correct
+# if --object-lock-enabled-for-bucket is ever dropped.
+log "enabling versioning"
+run aws s3api put-bucket-versioning \
+  --bucket "$BUCKET" \
+  --versioning-configuration "Status=Enabled"
+
+log "enabling default server-side encryption (SSE-S3)"
+run aws s3api put-bucket-encryption \
+  --bucket "$BUCKET" \
+  --server-side-encryption-configuration \
+    '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
+
+log "applying lifecycle rules (orphaned multipart parts, noncurrent versions)"
+run aws s3api put-bucket-lifecycle-configuration \
+  --bucket "$BUCKET" \
+  --lifecycle-configuration '{
+    "Rules": [
+      {
+        "ID": "abort-incomplete-multipart-uploads",
+        "Status": "Enabled",
+        "Filter": {"Prefix": ""},
+        "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}
+      },
+      {
+        "ID": "expire-noncurrent-versions",
+        "Status": "Enabled",
+        "Filter": {"Prefix": ""},
+        "NoncurrentVersionExpiration": {"NoncurrentDays": 30}
+      }
+    ]
+  }'
+
+# ---------------------------------------------------------------------- IAM --
+
+# Scoped to this bucket only. Deliberately NOT scoped further to the
+# "${PREFIX}/" key prefix: the bucket is dedicated to these backups, so prefix
+# conditions buy no isolation while adding a way for a destinationPath change to
+# silently break archiving.
+POLICY_DOC="$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BucketLevel",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": "arn:aws:s3:::${BUCKET}"
+    },
+    {
+      "Sid": "ObjectLevel",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::${BUCKET}/*"
+    }
+  ]
+}
+EOF
+)"
+
+POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}"
+
+if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
+  log "policy ${POLICY_NAME} already exists — leaving as-is"
+  warn "if the policy needs updating, publish a new version explicitly:"
+  warn "  aws iam create-policy-version --policy-arn ${POLICY_ARN} --set-as-default --policy-document '<json>'"
+else
+  log "creating policy ${POLICY_NAME}"
+  run aws iam create-policy \
+    --policy-name "$POLICY_NAME" \
+    --description "Least-privilege access to s3://${BUCKET} for CloudNativePG Barman Cloud backups" \
+    --policy-document "$POLICY_DOC"
+fi
+
+if aws iam get-user --user-name "$IAM_USER" >/dev/null 2>&1; then
+  log "IAM user ${IAM_USER} already exists — skipping creation"
+else
+  log "creating IAM user ${IAM_USER}"
+  run aws iam create-user \
+    --user-name "$IAM_USER" \
+    --tags "Key=purpose,Value=cloudnative-pg-backups" "Key=managed-by,Value=home-ops-hiro"
+fi
+
+log "attaching policy to user"
+run aws iam attach-user-policy --user-name "$IAM_USER" --policy-arn "$POLICY_ARN"
+
+# ------------------------------------------------------------- access key ----
+
+if [[ "$DRY_RUN" == true ]]; then
+  printf '\033[0;90m  [dry-run] aws iam create-access-key --user-name %s\033[0m\n' "$IAM_USER"
+  printf '\033[0;90m  [dry-run] write + sops --encrypt --in-place %s\033[0m\n' "${SECRET_FILE#"$REPO_ROOT"/}"
+  log "dry run complete — no resources created"
+  exit 0
+fi
+
+EXISTING_KEYS="$(aws iam list-access-keys --user-name "$IAM_USER" \
+  --query 'AccessKeyMetadata[].AccessKeyId' --output text 2>/dev/null || true)"
+
+if [[ -n "$EXISTING_KEYS" ]]; then
+  warn "user ${IAM_USER} already has access key(s): ${EXISTING_KEYS}"
+  warn "Refusing to mint another — IAM allows only two, and a spare you cannot"
+  warn "identify is worse than none. To rotate deliberately:"
+  warn "  aws iam delete-access-key --user-name ${IAM_USER} --access-key-id <OLD_ID>"
+  warn "  then re-run this script."
+  die "no access key created; bucket and IAM state above are correct and re-runnable"
+fi
+
+log "creating access key"
+KEY_JSON="$(aws iam create-access-key --user-name "$IAM_USER" --output json)"
+ACCESS_KEY_ID="$(jq -r .AccessKey.AccessKeyId <<<"$KEY_JSON")"
+SECRET_ACCESS_KEY="$(jq -r .AccessKey.SecretAccessKey <<<"$KEY_JSON")"
+unset KEY_JSON
+
+# ------------------------------------------------------- write + encrypt -----
+
+# The secret is only ever plaintext on disk between these two commands, and only
+# with a 0600 umask. Do not add steps in between.
+log "writing and encrypting ${SECRET_FILE#"$REPO_ROOT"/}"
+(
+  umask 077
+  cat >"$SECRET_FILE" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-s3-backup-secret
+stringData:
+  AWS_ACCESS_KEY_ID: ${ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${SECRET_ACCESS_KEY}
+  AWS_REGION: ${REGION}
+EOF
+)
+unset SECRET_ACCESS_KEY
+
+SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-${REPO_ROOT}/age.key}" \
+  sops --encrypt --in-place "$SECRET_FILE" \
+  || die "sops encryption FAILED — ${SECRET_FILE} currently holds a PLAINTEXT secret. Encrypt or delete it before committing."
+
+# Prove it actually encrypted rather than trusting the exit code.
+if grep -q "^sops:" "$SECRET_FILE" && ! grep -q "${ACCESS_KEY_ID}" "$SECRET_FILE"; then
+  log "verified: file is encrypted and contains no plaintext key id"
+else
+  die "post-encryption check FAILED — inspect ${SECRET_FILE} before committing"
+fi
+
+# ------------------------------------------------------------------- next ----
+
+cat <<EOF
+
+$(log "done")
+
+  Bucket        s3://${BUCKET}/${PREFIX}
+  IAM user      ${IAM_USER}  (access key ${ACCESS_KEY_ID})
+  Secret        ${SECRET_FILE#"$REPO_ROOT"/}  [encrypted]
+
+Next, to bring up the cluster:
+
+  1. Register the app — add this line to
+     kubernetes/apps/database/kustomization.yaml under resources:
+
+       - ./postgres/ks.yaml
+
+  2. Verify it renders:
+
+       kubectl kustomize kubernetes/apps/database >/dev/null && echo OK
+
+  3. Commit the postgres app together with that registration line. Committing
+     one without the other breaks the whole database group build, mariadb
+     included.
+
+  4. After Flux reconciles, confirm archiving actually works — a green
+     Kustomization does not mean backups run:
+
+       kubectl -n database get cluster postgres
+       kubectl -n database get objectstore postgres-backup
+       kubectl -n database logs -l cnpg.io/cluster=postgres -c plugin-barman-cloud --tail=50
+       aws s3 ls s3://${BUCKET}/${PREFIX}/ --recursive | head
+
+EOF

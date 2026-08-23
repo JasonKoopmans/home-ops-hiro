@@ -25,10 +25,10 @@ Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | CloudNativePG operator (Helm) | **Committed** — `feat/cloudnative-pg-operator` |
-| 2 | 3-instance `Cluster` (see §7) | Drafted, not applied |
-| 3 | Continuous WAL archiving to S3 | Drafted, not applied |
-| 4 | Scheduled base backup + retention | Drafted, not applied |
+| 1 | CloudNativePG operator (Helm) | **Live** — merged #470, reconciled, operator + plugin healthy |
+| 2 | 3-instance `Cluster` (see §7) | **Ready to apply** — credential provisioned |
+| 3 | Continuous WAL archiving to S3 | Ready to apply (ships with phase 2) |
+| 4 | Scheduled base backup + retention | Ready to apply (ships with phase 2) |
 | 5 | **Restore drill** (the part that matters) | Not started |
 | 6 | Teardown scratch cluster + recovery runbook | Not started |
 | 7 | PDB / failure-mode writeup | Not started |
@@ -36,31 +36,45 @@ Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 | 9 | **Cluster/runtime observability** (see §6) | To design |
 | ~~10~~ | HA topology (see §7) | **Decided — folded into phase 2** |
 
-Nothing has touched the cluster. The `postgres-s3-backup-secret` is a
-placeholder and will not decrypt until filled in — by design, so this cannot go
-live half-configured.
+The operator and Barman Cloud plugin are **live** in the `database` namespace
+(merged #470, resources bounded in #494). No `Cluster` exists yet.
 
-**Blocking prerequisite:** a scoped IAM user for `hiro-postgres-backups`
-(least-privilege, separate from the Longhorn backup identity), with its
-credentials filled into
-`kubernetes/apps/database/postgres/app/s3-credentials.sops.yaml` and encrypted
-via `sops --encrypt --in-place`.
+**Credential prerequisite — satisfied 2026-08-23.** A bucket-scoped IAM user for
+`hiro-postgres-backups` was provisioned via
+[`scripts/provision-postgres-backup-iam.sh`](../scripts/provision-postgres-backup-iam.sh),
+separate from the Longhorn backup identity. Its credentials are encrypted in
+`kubernetes/apps/database/postgres/app/s3-credentials.sops.yaml`. Verified: SOPS
+metadata block present, all three values `ENC[AES256_GCM,...]`, decrypts to the
+three keys the ObjectStore references, no plaintext key ID in the file.
 
-> ### ⚠ Do not push the `postgres` app before that secret is real
+> ### ⚠ Why the placeholder had to be replaced before applying
 >
-> The placeholder has **no SOPS metadata block** — `sops --decrypt` on it
-> returns `sops metadata not found`. Flux does not treat that as an error: it
-> skips decryption and applies the Secret verbatim, with the literal string
+> Kept as a warning for anyone re-running this from scratch. The original
+> placeholder had **no SOPS metadata block** — `sops --decrypt` returned
+> `sops metadata not found`. Flux does not treat that as an error: it skips
+> decryption and applies the Secret verbatim, with the literal string
 > `ENC[AES256_GCM,data:PLACEHOLDER,type:str]` as the AWS access key.
 >
-> The result is the worst kind of failure — one that looks fine. The
-> Kustomization reports healthy, the Cluster starts, Postgres serves traffic,
-> and **every** WAL archive and base backup fails against S3. Worse, a failing
+> That is the worst kind of failure — one that looks fine. The Kustomization
+> reports healthy, the Cluster starts, Postgres serves traffic, and **every**
+> WAL archive and base backup fails against S3. Worse, a failing
 > `archive_command` makes PostgreSQL refuse to recycle WAL, so `pg_wal` grows
-> until it fills the 10Gi PVC and takes the database down.
+> until it fills the PVC and takes the database down.
 >
-> Deploy the operator (phase 1) first — it has no such dependency. Hold the
-> `postgres` app until the credential exists.
+> A green Kustomization is not evidence that backups work. Verify against the
+> object store — see the post-deploy checks in §1a.
+
+### §1a Post-deploy verification (run after phase 2 reconciles)
+
+```sh
+kubectl -n database get cluster postgres
+kubectl -n database get objectstore postgres-backup
+kubectl -n database get pods -l cnpg.io/cluster=postgres -o wide   # expect 3, on 3 distinct nodes
+kubectl -n database logs -l cnpg.io/cluster=postgres -c plugin-barman-cloud --tail=50
+
+# The one that actually proves archiving works — bytes in the bucket:
+aws s3 ls s3://hiro-postgres-backups/postgres/ --recursive | head
+```
 
 ---
 
@@ -321,34 +335,33 @@ is I/O-heavy for a large database.
 on a live cluster means recreating volumes. Instance count is not: CNPG scales
 1 → 3 by cloning, so deferring the scale-up costs nothing.
 
-### Capacity reality (measured 2026-08-22)
+### Capacity reality (re-measured 2026-08-23, after the cmp-05 RAM fix)
 
 | Node | CPU allocatable | CPU requested | CPU free | Mem allocatable | Mem free |
 |---|---|---|---|---|---|
-| cmp-01 | 2950m | 51% | ~1439m | ~10.7Gi | ~5.9Gi |
-| cmp-02 | 2950m | 67% | ~969m | ~10.7Gi | ~2.7Gi |
-| cmp-03 | 1950m | 63% | ~707m | ~10.7Gi | ~6.2Gi |
-| cmp-04 | 1950m | 77% | ~444m | ~10.7Gi | ~3.9Gi |
-| cmp-05 | 3950m | 16% | ~3287m | **~4.5Gi** | ~3.1Gi |
+| cmp-01 | 2950m | 47% | ~1554m | ~10.7Gi | ~6.0Gi |
+| cmp-02 | 2950m | 63% | ~1069m | ~10.7Gi | ~2.8Gi |
+| cmp-03 | 1950m | 74% | ~507m | ~10.7Gi | ~5.3Gi |
+| cmp-04 | 1950m | 62% | ~724m | ~10.7Gi | ~5.6Gi |
+| cmp-05 | **3950m** | 26% | **~2892m** | **~10.7Gi** | ~8.0Gi |
 
-- **cmp-04 cannot host an instance** at the current 500m request (444m free).
-- **cmp-05 is still degraded** — 4.5Gi allocatable against ~10.7Gi on every
-  other node. This is the unresolved undersized-RAM issue from 2026-07-27
-  (OOM → etcd flap → iSCSI drop). It has by far the most free CPU in the
-  cluster and would be the natural Postgres host *if its RAM were fixed*.
-- Three instances fit today on cmp-01/02/03, but push cmp-03 to ~89% CPU
-  requested. Either lower the per-instance request (250m is defensible for a
-  lightly-loaded replica, given no CPU limit means it can still burst) or fix
-  cmp-05 first.
+**cmp-05's undersized-RAM problem is fixed and verified.** It now reports
+`11239632Ki` (~10.7Gi) allocatable, matching every other node, and retains the
+largest CPU allocation in the cluster at 3950m. The long-running starvation
+condition (OOM → etcd flap → iSCSI drop, 2026-07-27) is closed.
 
-**Fixing cmp-05 is the real unlock** and is a prerequisite worth doing on its
-own merits, independent of this plan.
+This removes the constraint the earlier version of this section was built
+around. cmp-05 is no longer "CPU-rich but unusable" — it is simply the strongest
+node, with ~2892m free CPU and ~8Gi free memory, and is the natural home for a
+Postgres instance rather than a node to avoid.
 
-**Incoming capacity (as of 2026-08-22):** RAM for cmp-05 arrives today, and a
-sixth node is planned once other equipment lands. Both materially relieve the
-pressure above — a fixed cmp-05 alone absorbs a Postgres instance comfortably on
-its ~3287m of free CPU. Re-check the placement math after each lands rather than
-treating the table above as current.
+Three instances at 500m/1Gi now place comfortably without pushing any node near
+its ceiling. Every node except cmp-03 has room for one at the current request;
+cmp-03 at ~507m free is the tightest and is the one to watch. A sixth node is
+planned, which adds further slack.
+
+Re-measure rather than trusting this table — it is a snapshot, and requests
+shift as other apps change.
 
 ### Anti-affinity is `required`, not the default
 
