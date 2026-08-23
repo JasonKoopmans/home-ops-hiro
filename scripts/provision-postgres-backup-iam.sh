@@ -452,7 +452,20 @@ This script only grants ${POLICY_ARN}. Detach the others (or use --user to pick 
     die "IAM user ${IAM_USER} already has inline polic$([[ "$INLINE_POLICIES" == *" "* ]] && echo ies || echo y): ${INLINE_POLICIES}
 This script does not manage inline policies and cannot verify their scope. Remove them (or use --user to pick a dedicated name) before re-running."
   fi
-  log "IAM user ${IAM_USER} carries no policies beyond what this script expects"
+
+  # Group membership is the third way a user acquires permissions, and the
+  # easiest to miss: attached and inline policies can both be empty while the
+  # user sits in a group carrying AdministratorAccess. Checking only the first
+  # two would report "no policies beyond what this script expects" about an
+  # effectively unrestricted identity.
+  USER_GROUPS="$(aws iam list-groups-for-user --user-name "$IAM_USER" --output json 2>/dev/null \
+    | jq -r '[.Groups[]?.GroupName] | join(" ")')"
+  if [[ -n "${USER_GROUPS// /}" ]]; then
+    die "IAM user ${IAM_USER} belongs to group$([[ "$USER_GROUPS" == *" "* ]] && echo s): ${USER_GROUPS}
+Groups grant permissions this script cannot see or scope. Remove the membership (or use --user to pick a dedicated name) before re-running."
+  fi
+
+  log "IAM user ${IAM_USER} carries no policies or group memberships beyond what this script expects"
 else
   log "creating IAM user ${IAM_USER}"
   run aws iam create-user \
