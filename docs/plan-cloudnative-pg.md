@@ -377,9 +377,8 @@ shift as other apps change.
 
 The operator's `podAntiAffinityType` default is **`preferred`**, which permits
 all three instances onto a single node under scheduling pressure — HA that looks
-correct and tolerates nothing. Given cmp-04 currently cannot fit an instance and
-cmp-05 is RAM-starved, that pressure is real here, so the manifest sets
-`required` explicitly.
+correct and tolerates nothing. Given cmp-04 currently cannot fit an instance,
+that pressure is real here, so the manifest sets `required` explicitly.
 
 The trade-off is that instances stay `Pending` instead of co-locating when fewer
 than three eligible nodes exist. That is the correct failure mode: visible rather
