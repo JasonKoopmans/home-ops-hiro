@@ -51,9 +51,10 @@
 # fakeowner mount and the executable bit does not survive, so `./scripts/...`
 # fails. Run it from the repo root.
 #
-# Requires: awscli v2, sops, jq, and an age key at ./age.key for the final
-# encrypt step. AWS credentials must already be configured with rights to
-# create S3 buckets and IAM users — this script does not manage that identity.
+# Requires: awscli v2, sops, jq, python3 (used to decode IAM policy documents
+# for the reuse check), and an age key at ./age.key for the final encrypt step.
+# AWS credentials must already be configured with rights to create S3 buckets
+# and IAM users — this script does not manage that identity.
 
 set -euo pipefail
 
@@ -128,7 +129,7 @@ s3api() { aws s3api --region "$REGION" "$@"; }
 
 # ---------------------------------------------------------------- preflight --
 
-for bin in aws jq sops; do
+for bin in aws jq sops python3; do
   command -v "$bin" >/dev/null 2>&1 || die "missing required binary: $bin"
 done
 
