@@ -152,11 +152,6 @@ done
 AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-${REPO_ROOT}/age.key}"
 [[ -f "$AGE_KEY_FILE" ]] || die "age key not found: ${AGE_KEY_FILE} (set SOPS_AGE_KEY_FILE)"
 
-# The probe MUST live inside the repo under a *.sops.yaml name. SOPS resolves
-# its recipient from the `creation_rules` path_regex in .sops.yaml, which only
-# matches `(bootstrap|kubernetes)/.*\.sops\.ya?ml`. A probe under /tmp matches
-# nothing and dies with "no matching creation rules found" — which would abort
-# this preflight on *every* invocation, before any provisioning happens.
 CLEANUP_FILES=()
 cleanup() {
   local f
@@ -166,7 +161,21 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-SOPS_PROBE="${APP_DIR}/.sops-preflight-probe.sops.yaml"
+# Scratch files live OUTSIDE the worktree.
+#
+# SOPS resolves its recipient from the `creation_rules` path_regex in
+# .sops.yaml, which only matches `(bootstrap|kubernetes)/.*\.sops\.ya?ml`. An
+# earlier version satisfied that by putting scratch files beside the real
+# secret — at the cost that a SIGKILL or power loss, where the EXIT trap never
+# runs, could strand a live plaintext credential in a hidden, untracked,
+# `git add .`-able file inside the repo.
+#
+# `--filename-override` gets both properties: SOPS applies the rules for the
+# real path while the bytes sit in $TMPDIR, outside the repo, on a filesystem
+# the OS clears. Nothing a crash leaves behind is ever inside the worktree.
+SOPS_RULE_PATH="kubernetes/apps/database/postgres/app/s3-credentials.sops.yaml"
+
+SOPS_PROBE="$(mktemp)"
 CLEANUP_FILES+=("$SOPS_PROBE")
 (
   umask 077
@@ -178,11 +187,20 @@ stringData:
 PROBE
 )
 if ! SOPS_AGE_KEY_FILE="$AGE_KEY_FILE" \
-     sops --encrypt --in-place "$SOPS_PROBE" >/dev/null 2>&1; then
-  die "sops cannot encrypt ${SOPS_PROBE#"$REPO_ROOT"/} using ${AGE_KEY_FILE##*/} — fix this before provisioning anything"
+     sops --encrypt --in-place --filename-override "$SOPS_RULE_PATH" \
+     "$SOPS_PROBE" >/dev/null 2>&1; then
+  die "sops cannot encrypt using ${AGE_KEY_FILE##*/} under the rules for ${SOPS_RULE_PATH} — fix this before provisioning anything"
 fi
 rm -f "$SOPS_PROBE"
 log "sops encryption verified against ${AGE_KEY_FILE#"$REPO_ROOT"/}"
+
+# Refuse to run if an interrupted earlier version stranded a scratch file in the
+# worktree — it may still hold a live plaintext credential.
+for stale in "${APP_DIR}/.sops-preflight-probe.sops.yaml" \
+             "${APP_DIR}/.s3-credentials.provisioning.sops.yaml"; do
+  [[ -e "$stale" ]] && die "stale scratch file present: ${stale#"$REPO_ROOT"/}
+It may hold a PLAINTEXT credential from an interrupted run. Inspect it, revoke the key if so, delete it, then re-run."
+done
 
 CALLER="$(aws sts get-caller-identity --output json 2>/dev/null)" \
   || die "aws sts get-caller-identity failed — configure AWS credentials first"
@@ -324,54 +342,71 @@ EOF
 
 POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}"
 
-if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
-  log "policy ${POLICY_NAME} already exists — verifying it actually grants ${BUCKET}"
+# Reduce a policy to a canonical form so an existing one can be compared against
+# what this script would create. Handles the AWS response wrapper, the
+# URL-encoded `Document` string, scalar-vs-list Action/Resource, and ordering.
+#
+# Comparing the WHOLE document matters: checking Resource ARNs alone would
+# accept a policy granting `s3:*` — or carrying an extra statement, a weakened
+# Condition, or a Deny flipped to Allow — on those same two ARNs, which is
+# exactly the over-permissive case the check exists to prevent.
+normalize_policy() {
+  python3 -c '
+import json, sys, urllib.parse
+try:
+    data = json.loads(sys.stdin.read())
+except Exception:
+    print(""); raise SystemExit(0)
+doc = data
+if isinstance(data, dict) and "PolicyVersion" in data:
+    doc = data["PolicyVersion"].get("Document", {})
+if isinstance(doc, str):
+    try:
+        doc = json.loads(urllib.parse.unquote(doc))
+    except Exception:
+        print(""); raise SystemExit(0)
+def lst(v):
+    if v is None: return []
+    return sorted(v) if isinstance(v, list) else [v]
+stmts = []
+for st in doc.get("Statement", []) or []:
+    stmts.append({
+        "Effect":      st.get("Effect", ""),
+        "Action":      lst(st.get("Action")),
+        "NotAction":   lst(st.get("NotAction")),
+        "Resource":    lst(st.get("Resource")),
+        "NotResource": lst(st.get("NotResource")),
+        "Principal":   st.get("Principal", {}),
+        "Condition":   st.get("Condition", {}),
+    })
+stmts.sort(key=lambda s: json.dumps(s, sort_keys=True))
+print(json.dumps({"Version": doc.get("Version", ""), "Statement": stmts}, sort_keys=True))
+' 2>/dev/null || printf ''
+}
 
-  # Never attach a pre-existing policy without checking what it authorizes.
-  # Attaching one scoped to a different bucket leaves the workload with
-  # credentials that authenticate fine and are denied on every operation.
+if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
+  log "policy ${POLICY_NAME} already exists — verifying it matches what this script would create"
+
+  # Never attach a pre-existing policy without checking what it authorizes: one
+  # scoped elsewhere leaves credentials that authenticate fine and are denied on
+  # every call, and one scoped wider silently over-grants.
   DEFAULT_VER="$(aws iam get-policy --policy-arn "$POLICY_ARN" \
     --query 'Policy.DefaultVersionId' --output text 2>/dev/null)"
 
-  # `PolicyVersion.Document` comes back as a URL-encoded JSON *string*, not an
-  # object, so a `--query 'Document.Statement[].Resource'` yields nothing and
-  # every rerun would fall into the refusal branch below. Decode explicitly, and
-  # tolerate an already-decoded object in case the CLI ever changes.
-  #
-  # Compare against the exact expected ARN set rather than merely checking that
-  # the bucket is mentioned: a policy granting "*" or extra buckets also
-  # "mentions" this one, and attaching it would quietly hand the backup user far
-  # more than it needs.
-  POLICY_RESOURCES="$(aws iam get-policy-version \
+  ACTUAL_CANON="$(aws iam get-policy-version \
     --policy-arn "$POLICY_ARN" --version-id "$DEFAULT_VER" --output json 2>/dev/null \
-    | python3 -c '
-import json, sys, urllib.parse
-try:
-    doc = json.load(sys.stdin)["PolicyVersion"]["Document"]
-except Exception:
-    print("[]"); raise SystemExit(0)
-if isinstance(doc, str):
-    doc = json.loads(urllib.parse.unquote(doc))
-out = []
-for st in doc.get("Statement", []):
-    r = st.get("Resource", [])
-    out.extend(r if isinstance(r, list) else [r])
-print(json.dumps(sorted(set(out))))
-' 2>/dev/null || echo '[]')"
+    | normalize_policy)"
+  EXPECTED_CANON="$(printf '%s' "$POLICY_DOC" | normalize_policy)"
 
-  EXPECTED_RESOURCES="$(python3 -c '
-import json, sys
-b = sys.argv[1]
-print(json.dumps(sorted({f"arn:aws:s3:::{b}", f"arn:aws:s3:::{b}/*"})))
-' "$BUCKET")"
+  [[ -n "$EXPECTED_CANON" ]] || die "could not normalize the expected policy document — aborting rather than guessing"
 
-  if [[ "$POLICY_RESOURCES" == "$EXPECTED_RESOURCES" ]]; then
-    log "existing policy grants exactly ${BUCKET} — leaving as-is"
+  if [[ "$ACTUAL_CANON" == "$EXPECTED_CANON" ]]; then
+    log "existing policy is canonical for ${BUCKET} — leaving as-is"
   else
-    warn "policy ${POLICY_NAME} does not grant exactly the expected resources."
-    warn "  expected: ${EXPECTED_RESOURCES}"
-    warn "  actual:   ${POLICY_RESOURCES}"
-    die "refusing to attach it — it may authorize the wrong bucket, or more than this user needs. Publish a corrected version, then re-run:
+    warn "policy ${POLICY_NAME} differs from the canonical least-privilege document."
+    warn "  expected: ${EXPECTED_CANON}"
+    warn "  actual:   ${ACTUAL_CANON:-<unreadable>}"
+    die "refusing to attach it — it may target the wrong bucket, grant broader actions, or carry extra statements. Publish a corrected version, then re-run:
   aws iam create-policy-version --policy-arn ${POLICY_ARN} --set-as-default --policy-document '<json>'"
   fi
 else
@@ -427,16 +462,13 @@ unset KEY_JSON
 
 # ------------------------------------------------------- write + encrypt -----
 
-# Write plaintext to a 0600 scratch file, encrypt it *there*, and only then move
-# the already-encrypted result over the tracked path. Writing plaintext directly
-# to the tracked file meant an interrupted run — killed sops, Ctrl-C, power loss
-# — could leave a live AWS secret sitting at a git-tracked path, staged by the
-# next `git add`. With this ordering the tracked file is either untouched or
-# encrypted, never plaintext, and the trap removes the scratch file on any exit.
-#
-# The scratch file has to live beside the real one and keep a *.sops.yaml name,
-# for the same creation_rules reason as the preflight probe above.
-SECRET_TMP="${APP_DIR}/.s3-credentials.provisioning.sops.yaml"
+# Write plaintext to a 0600 scratch file outside the worktree, encrypt it
+# *there*, and only then move the already-encrypted result over the tracked
+# path. The tracked file is therefore either untouched or fully encrypted, never
+# plaintext awaiting a `git add`, and a crash that outruns the trap leaves its
+# debris in $TMPDIR rather than in the repo. Same --filename-override mechanism
+# as the preflight probe.
+SECRET_TMP="$(mktemp)"
 CLEANUP_FILES+=("$SECRET_TMP")
 
 log "writing and encrypting ${SECRET_FILE#"$REPO_ROOT"/}"
@@ -456,7 +488,7 @@ EOF
 unset SECRET_ACCESS_KEY
 
 SOPS_AGE_KEY_FILE="$AGE_KEY_FILE" \
-  sops --encrypt --in-place "$SECRET_TMP" \
+  sops --encrypt --in-place --filename-override "$SOPS_RULE_PATH" "$SECRET_TMP" \
   || die "sops encryption FAILED. The tracked secret was left untouched; the plaintext scratch file is being removed. Access key ${ACCESS_KEY_ID} is live — delete it with: aws iam delete-access-key --user-name ${IAM_USER} --access-key-id ${ACCESS_KEY_ID}"
 
 # Verify the scratch file before it is allowed anywhere near the tracked path.
