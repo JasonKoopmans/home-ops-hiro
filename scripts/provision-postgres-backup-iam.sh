@@ -55,6 +55,10 @@
 # for the reuse check), and an age key at ./age.key for the final encrypt step.
 # AWS credentials must already be configured with rights to create S3 buckets
 # and IAM users — this script does not manage that identity.
+#
+# The IAM user it creates defaults to `hiro-postgres-backup` (singular). That is
+# a different string from the bucket `hiro-postgres-backups` (plural) — easy to
+# conflate when reading logs or writing docs, so they are called out here.
 
 set -euo pipefail
 
@@ -79,7 +83,7 @@ while [[ $# -gt 0 ]]; do
     --yes|-y) ASSUME_YES=true; shift ;;
     # `\?` is a GNU-sed extension; use two portable expressions instead so this
     # also works under BSD sed on macOS.
-    -h|--help) sed -n '2,52p' "${BASH_SOURCE[0]}" | sed -e 's/^# //' -e 's/^#$//'; exit 0 ;;
+    -h|--help) sed -n '2,61p' "${BASH_SOURCE[0]}" | sed -e 's/^# //' -e 's/^#$//'; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -129,6 +133,9 @@ s3api() { aws s3api --region "$REGION" "$@"; }
 
 # ---------------------------------------------------------------- preflight --
 
+# python3 matters here beyond convenience: without it the first policy parser is
+# silently masked by its `|| echo '[]'` fallback while the second dies under
+# `set -e`, so the run fails with a confusing error rather than this clear one.
 for bin in aws jq sops python3; do
   command -v "$bin" >/dev/null 2>&1 || die "missing required binary: $bin"
 done

@@ -39,13 +39,23 @@ Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 The operator and Barman Cloud plugin are **live** in the `database` namespace
 (merged #470, resources bounded in #494). No `Cluster` exists yet.
 
-**Credential prerequisite — satisfied 2026-08-23.** A bucket-scoped IAM user for
-`hiro-postgres-backups` was provisioned via
+**Credential prerequisite — satisfied 2026-08-23.** Provisioned via
 [`scripts/provision-postgres-backup-iam.sh`](../scripts/provision-postgres-backup-iam.sh),
-separate from the Longhorn backup identity. Its credentials are encrypted in
-`kubernetes/apps/database/postgres/app/s3-credentials.sops.yaml`. Verified: SOPS
-metadata block present, all three values `ENC[AES256_GCM,...]`, decrypts to the
-three keys the ObjectStore references, no plaintext key ID in the file.
+separate from the Longhorn backup identity:
+
+| | |
+|---|---|
+| IAM user | `hiro-postgres-backup` — **singular**, the script's default |
+| Bucket | `hiro-postgres-backups` — **plural** |
+| Credentials | `kubernetes/apps/database/postgres/app/s3-credentials.sops.yaml` |
+
+The two names differ by one character and are easy to conflate when reading logs
+or revoking access — the user is not named after the bucket. To rotate or revoke,
+target the *user*: `aws iam list-access-keys --user-name hiro-postgres-backup`.
+
+Secret verified: SOPS metadata block present, all three values
+`ENC[AES256_GCM,...]`, decrypts to the three keys the ObjectStore references, no
+plaintext key ID in the file.
 
 > ### ⚠ Why the placeholder had to be replaced before applying
 >
@@ -391,11 +401,23 @@ recovery path for logical damage.
 3. Failover becomes a new incident class to understand.
 4. Placement constraints, per the capacity table above.
 
-### Sequencing rationale
+### Sequencing rationale — superseded
 
-Deferring to after phase 5 avoids compounding unknowns: prove the backup and
-restore path against one instance, get real sizing data, *then* triple it.
-The only thing that must be decided before phase 2 applies is the storage class.
+An earlier revision of this plan deferred the scale-up until after phase 5:
+prove backup and restore against one instance, gather sizing data, then triple
+it. **That is no longer the plan** and following it would contradict the
+manifests, which ship 3 instances in phase 2.
+
+What changed: the storage class is the one decision that is expensive to reverse
+(changing it on a live cluster means recreating volumes), and picking
+`longhorn-1-no-backup` only makes sense at 3 instances. Deferring the instance
+count while committing the storage class now would have meant either a migration
+later or a single instance sitting on single-replica storage in the interim —
+strictly worse than going straight to the target topology.
+
+The restore drill in phase 5 is unaffected. It exercises the same object store
+and the same plugin regardless of instance count, and remains the gate on
+calling this trustworthy.
 
 ---
 
