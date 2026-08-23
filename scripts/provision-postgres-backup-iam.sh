@@ -299,9 +299,23 @@ run s3api put-bucket-lifecycle-configuration \
         "Status": "Enabled",
         "Filter": {"Prefix": ""},
         "NoncurrentVersionExpiration": {"NoncurrentDays": 30}
+      },
+      {
+        "ID": "expire-delete-markers",
+        "Status": "Enabled",
+        "Filter": {"Prefix": ""},
+        "Expiration": {"ExpiredObjectDeleteMarker": true}
       }
     ]
   }'
+# On a versioned bucket, a Barman prune DELETE does not remove the object — it
+# writes a current delete marker and pushes the prior content to a noncurrent
+# version. NoncurrentVersionExpiration above reclaims that noncurrent version,
+# but leaves the delete marker itself: once nothing noncurrent remains under it,
+# it is a marker with no versions beneath it, and AWS never expires those on its
+# own. This is the exact ghost-object accumulation the MinIO backend hit
+# (thanos-compactor cleanup loop) — ExpiredObjectDeleteMarker is a separate rule
+# because AWS rejects combining it with Days/NoncurrentDays in the same one.
 
 # ---------------------------------------------------------------------- IAM --
 
@@ -418,7 +432,27 @@ else
 fi
 
 if aws iam get-user --user-name "$IAM_USER" >/dev/null 2>&1; then
-  log "IAM user ${IAM_USER} already exists — skipping creation"
+  log "IAM user ${IAM_USER} already exists — checking it carries no unexpected grants"
+
+  # Reusing an existing user is only safe if this policy is the only thing it
+  # can do. A pre-existing user with, say, AdministratorAccess attached would
+  # make the credentials this script hands to Barman far broader than the
+  # bucket-scoped policy above implies — the policy check means nothing if the
+  # user has another one too.
+  UNEXPECTED_ATTACHED="$(aws iam list-attached-user-policies --user-name "$IAM_USER" --output json 2>/dev/null \
+    | jq -r --arg want "$POLICY_ARN" '[.AttachedPolicies[] | select(.PolicyArn != $want) | .PolicyArn] | join(" ")')"
+  INLINE_POLICIES="$(aws iam list-user-policies --user-name "$IAM_USER" --output json 2>/dev/null \
+    | jq -r '.PolicyNames | join(" ")')"
+
+  if [[ -n "${UNEXPECTED_ATTACHED// /}" ]]; then
+    die "IAM user ${IAM_USER} already has other managed policies attached: ${UNEXPECTED_ATTACHED}
+This script only grants ${POLICY_ARN}. Detach the others (or use --user to pick a dedicated name) before re-running."
+  fi
+  if [[ -n "${INLINE_POLICIES// /}" ]]; then
+    die "IAM user ${IAM_USER} already has inline polic$([[ "$INLINE_POLICIES" == *" "* ]] && echo ies || echo y): ${INLINE_POLICIES}
+This script does not manage inline policies and cannot verify their scope. Remove them (or use --user to pick a dedicated name) before re-running."
+  fi
+  log "IAM user ${IAM_USER} carries no policies beyond what this script expects"
 else
   log "creating IAM user ${IAM_USER}"
   run aws iam create-user \
