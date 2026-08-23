@@ -26,42 +26,82 @@ spec:
 
         # --- backup freshness ------------------------------------------------
         #
-        # `cnpg_collector_last_available_backup_timestamp` is published as 0
-        # before the first successful backup rather than being absent, so a bare
+        # These use the `barman_cloud_cloudnative_pg_io_*` family, NOT the
+        # `cnpg_collector_*` backup gauges. This cluster backs up with
+        # `method: plugin` via the CNPG-I Barman Cloud plugin, and the plugin's
+        # own documentation states its metrics "supersede the previously
+        # available in-core metrics that used the cnpg_collector prefix".
+        #
+        # Getting this wrong is not a subtle degradation, it is silent failure
+        # in both directions: the superseded gauge stays pinned at 0 forever, so
+        # a guarded staleness rule can never fire, while the paired
+        # NeverSucceeded rule fires permanently and never clears — a critical
+        # alert that is always on, which is precisely how a channel gets ignored.
+        #
+        # Note that `cnpg_pg_stat_archiver_*` below is NOT affected. That comes
+        # from PostgreSQL's own pg_stat_archiver view via the default queries
+        # ConfigMap, not from the in-core backup collector, and remains accurate.
+        #
+        # The `> 0` guard: the metric is published as 0 before the first
+        # successful backup rather than being absent, so a bare
         # `time() - <metric> > threshold` evaluates to ~1.7e9 immediately and
-        # would fire on a cluster that is behaving perfectly and simply has not
-        # reached its first scheduled run. The `> 0` guard prevents that; the
-        # paired NeverSucceeded rule below closes the hole the guard opens, so a
-        # backup that has genuinely never run still pages.
+        # would fire on a cluster behaving perfectly that simply has not reached
+        # its first scheduled run. The paired NeverSucceeded rule closes the hole
+        # the guard opens.
         - alert: PostgresBackupStale
           expr: |
-            max(cnpg_collector_last_available_backup_timestamp{namespace="database"}) > 0
+            max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"}) > 0
             and
-            time() - max(cnpg_collector_last_available_backup_timestamp{namespace="database"}) > 129600
+            time() - max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"}) > 129600
           for: 15m
           labels:
             severity: critical
           annotations:
             summary: Postgres has no recent successful base backup
-            description: The most recent CloudNativePG base backup is over 36 hours old against a nightly schedule (docs/plan-cloudnative-pg.md §1b). WAL archiving may still be working, but WAL is a diff against a base backup — without a recent one the recovery window is shrinking. 36h allows one missed run plus margin before paging.
+            description: The most recent base backup is over 36 hours old against a nightly schedule (docs/plan-cloudnative-pg.md §1b). WAL archiving may still be working, but WAL is a diff against a base backup — without a recent one the recovery window is shrinking. 36h allows one missed run plus margin before paging.
 
-        # A gauge pinned at 0 means no backup has EVER completed. Uses `for:`
-        # rather than a range-vector window so it measures real elapsed time and
-        # behaves correctly on a fresh install instead of evaluating against a
-        # window that is not full yet. 12h is deliberately longer than the gap
-        # between deploying this rule and the first nightly run, so standing the
-        # cluster up does not page; anything longer than that is a real failure.
-        # Caveat inherited from the recording-annotator rules: a Prometheus
-        # restart resets `for:` state, so a long-pending alert starts over.
+        # A gauge pinned at 0 means no backup has EVER completed.
+        #
+        # The grace period must exceed one FULL schedule interval, not merely the
+        # gap between deploying this rule and the next run. The schedule is daily
+        # at 03:00 UTC, so a cluster created at 03:01 waits 23h59m for its first
+        # backup; a shorter grace (12h was the first attempt) would page roughly
+        # twelve hours *before* that cluster's first backup was even due. 26h is
+        # one full interval plus ~2h for the backup to run, be recorded, and be
+        # scraped.
+        #
+        # Uses `for:` rather than a range-vector window because `max_over_time`
+        # on a young series evaluates against a window that is not full yet and
+        # would fire early on a fresh install — the same trap the
+        # recording-annotator rules document. The known cost is that a Prometheus
+        # restart resets `for:` state; acceptable here because Prometheus restarts
+        # only on chart upgrades (weekly at most), comfortably less often than 26h.
         - alert: PostgresBackupNeverSucceeded
           expr: |
-            max(cnpg_collector_last_available_backup_timestamp{namespace="database"}) == 0
-          for: 12h
+            max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"}) == 0
+          for: 26h
           labels:
             severity: critical
           annotations:
             summary: Postgres has never completed a base backup
-            description: CloudNativePG reports no successful base backup has ever completed for this cluster. Point-in-time recovery is NOT possible in this state regardless of what WAL archiving reports — there is no base to replay WAL onto. Check `kubectl -n database get backup` and the barman sidecar logs.
+            description: No successful base backup has ever completed for this cluster. Point-in-time recovery is NOT possible in this state regardless of what WAL archiving reports — there is no base to replay WAL onto. Check `kubectl -n database get backup` and the plugin-barman-cloud sidecar logs.
+
+        # Distinct from staleness: a backup ran and FAILED. Same self-clearing
+        # timestamp-comparison shape as the WAL rule below — fires only while the
+        # most recent attempt is a failure, clears when one succeeds. Catches a
+        # nightly job that is failing every night well before the 36h staleness
+        # threshold would notice.
+        - alert: PostgresBackupFailing
+          expr: |
+            max(barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp{namespace="database"})
+              >
+            max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"})
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: Postgres base backup is failing
+            description: The most recent base backup attempt failed and none has succeeded since. Check `kubectl -n database get backup` for the failure reason and the plugin-barman-cloud sidecar logs. Compare against barman_cloud_cloudnative_pg_io_first_recoverability_point to see how far back recovery is still possible.
 
         # --- WAL archiving ---------------------------------------------------
         #

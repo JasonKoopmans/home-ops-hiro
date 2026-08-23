@@ -292,7 +292,8 @@ extra exporter:
 
 | Query group | Use |
 |---|---|
-| `pg_stat_archiver` | **The backup-health signal.** Exposes `last_archived_time`, `last_failed_time`, `archived_count`, `failed_count` — enough for both "WAL archiving is failing" and a self-clearing last-success-age alert |
+| `pg_stat_archiver` | **The WAL-archiving signal**, not the base-backup one. Exposes `last_archived_time`, `last_failed_time`, `archived_count`, `failed_count`. Comparing the two timestamps gives a self-clearing "archiving is stuck" alert. Says nothing about base backups — those come from the `barman_cloud_cloudnative_pg_io_*` family below |
+| `barman_cloud_cloudnative_pg_io_*` | **The base-backup signal.** `last_available_backup_timestamp`, `last_failed_backup_timestamp`, `first_recoverability_point`. Published by the plugin, not the in-core collector |
 | `pg_replication`, `pg_replication_slots` | Replication lag (phase 9, meaningful once 3 instances run) |
 | `backends`, `backends_waiting` | Connection saturation, long transactions |
 | `pg_database`, `pg_postmaster`, `pg_stat_bgwriter` | General health |
@@ -300,29 +301,43 @@ extra exporter:
 This materially de-risks phases 8 and 9 — the design work is choosing thresholds
 and writing the `PrometheusRule`, not plumbing metrics.
 
-### To design out
+### Shipped
 
-1. ~~Which CNPG metrics expose backup state~~ — answered above. Remaining: pick
-   the staleness threshold, and decide whether `pg_stat_archiver` alone is
-   sufficient or the `Backup` CR status should also be alerted on (the former
-   covers WAL, the latter covers base backups).
-2. A `PrometheusRule` for: last successful base backup older than ~36h
-   (mirroring the recording-annotator staleness window), and WAL archiving
-   failing or falling behind.
-3. Whether S3-side signals are worth adding (bucket size trend, object count) or
+1. ~~Which metrics expose backup state~~ — resolved, and the first answer was
+   wrong. See the **metric family** note below.
+2. ~~A `PrometheusRule` for backup staleness and WAL archiving~~ —
+   `prometheusrule-postgres.yaml`, seven alerts.
+
+> **The `cnpg_collector_*` backup gauges are superseded and must not be used
+> here.** This cluster backs up with `method: plugin`, and the Barman Cloud
+> Plugin publishes its own family — `barman_cloud_cloudnative_pg_io_*` — which
+> its documentation states "supersede the previously available in-core metrics
+> that used the `cnpg_collector` prefix".
+>
+> The first version of these rules used `cnpg_collector_last_available_backup_timestamp`
+> and would have failed silently in both directions: that gauge stays pinned at
+> 0 forever under plugin backups, so the guarded staleness rule could never fire,
+> while the paired NeverSucceeded rule would fire permanently and never clear.
+> A critical alert that is always on is how a channel gets ignored.
+>
+> `cnpg_pg_stat_archiver_*` is **not** affected — it comes from PostgreSQL's own
+> `pg_stat_archiver` view via the default queries ConfigMap, and stays accurate.
+
+### Still open
+
+1. Whether S3-side signals are worth adding (bucket size trend, object count) or
    whether cluster-side metrics are sufficient.
-4. Whether to enable **S3 Object Lock in compliance mode** on
+2. Whether to enable **S3 Object Lock in compliance mode** on
    `hiro-postgres-backups`, matching what `hiro-recording-annotator-media-backup`
-   already does ([backup-recovery.md](backup-recovery.md) §6). This protects
-   backups from deletion by their own credentials — worth doing, but it interacts
-   with the `7d` retention policy's ability to prune, so the lock window must be
-   chosen deliberately rather than copied.
-5. Whether to schedule a **periodic automated restore-and-verify job**, so
+   already does ([backup-recovery.md](backup-recovery.md) §6). The bucket was
+   created **with the Object Lock capability enabled but no retention rule**, so
+   this remains available without recreating it. It protects backups from
+   deletion by their own credentials, but interacts with the `7d` retention
+   policy's ability to prune, so the lock window must be chosen deliberately.
+3. Whether to schedule a **periodic automated restore-and-verify job**, so
    confidence persists over time rather than existing only at setup. There is
    precedent: [backup-recovery.md](backup-recovery.md) §9 defines a monthly
    restore drill.
-
-Implement only once the design is settled.
 
 ---
 
@@ -356,24 +371,53 @@ Dashboards and alert rules do **not** live in the app directory. Both live in
 - `grafana-dashboard-<name>.yaml` (9 existing examples)
 - `prometheusrule-<name>.yaml` (7 existing examples)
 
-### To design out
+### Shipped
 
-1. **Dashboard.** The `cloudnative-pg` chart has an optional dependency on
-   `cloudnative-pg/grafana-dashboards` gated behind
-   `monitoring.grafanaDashboard.create`. Decide between enabling that versus
-   vendoring a dashboard JSON as `grafana-dashboard-cloudnative-pg.yaml` to match
-   how every other dashboard in this repo is shipped. Lean toward the repo
-   convention.
-2. **Alert rules** (`prometheusrule-postgres.yaml`) — candidate signals:
-   cluster not in healthy state, instance down, PVC approaching full,
-   connection count near `max_connections`, replication lag (only meaningful
-   once phase 10 lands), and long-running transactions.
-3. **`pg_wal` growth is a sleeper.** If `archive_command` fails, PostgreSQL
-   refuses to recycle WAL and `pg_wal` grows until the PVC fills and the
-   database stops. This is the failure mode that connects phases 8 and 9 —
-   a backup failure presents as a *disk* problem. Alert on it explicitly.
-4. Reuse the noise constraints from §5 — self-clearing alerts, the `absent()`
-   trap, and checking what already fires before adding rules.
+**Alert rules** — `prometheusrule-postgres.yaml`. Seven alerts, all validated
+against live Prometheus for parse and behaviour:
+
+| Alert | Severity | Shape |
+|---|---|---|
+| `PostgresBackupStale` | critical | last-success age, `> 0` guarded, 36h |
+| `PostgresBackupNeverSucceeded` | critical | `for: 26h` — see grace-period note |
+| `PostgresBackupFailing` | critical | last-failed newer than last-available |
+| `PostgresWalArchivingFailing` | critical | timestamp comparison, not counter |
+| `PostgresReplicationDegraded` | warning | `streaming_replicas < 2` |
+| `PostgresMetricsMissing` | warning | `absent()` meta-alert |
+| `PostgresMetricsCollectorFailing` | warning | stale ≠ missing |
+
+**Deliberately not written**, because generic rules already own them:
+
+| Signal | Already covered by |
+|---|---|
+| PVC filling — the `pg_wal` runaway symptom | `LonghornVolumeUsageHigh`, >85% any volume |
+| Container memory / CPU vs limits | `PodMemoryLimitPressure*`, `PodCpuLimitPressure*` |
+
+An earlier draft of this section listed the `pg_wal` sleeper as needing its own
+alert. It does not — Longhorn already watches every volume, and adding a second
+rule for the same condition is how the ~200-message incident happened. The
+insight still holds and is why `PostgresWalArchivingFailing` is critical: a
+backup failure otherwise surfaces as a *disk* alert long after the chain broke.
+
+**Grace-period note.** `PostgresBackupNeverSucceeded` uses `for: 26h`, which must
+exceed one full schedule interval rather than merely the gap to the next run. At
+daily 03:00 UTC, a cluster created at 03:01 waits 23h59m for its first backup;
+the initial 12h value would have paged roughly twelve hours *before* that
+cluster's first backup was due. 26h is one interval plus ~2h to run, record, and
+scrape. The cost is that a Prometheus restart resets `for:` state — acceptable
+because Prometheus here restarts only on chart upgrades, weekly at most.
+
+### Still open
+
+**Dashboard.** The `cloudnative-pg` chart has an optional dependency on
+`cloudnative-pg/grafana-dashboards` gated behind
+`monitoring.grafanaDashboard.create`. Decide between enabling that versus
+vendoring a dashboard JSON as `grafana-dashboard-cloudnative-pg.yaml` to match
+how every other dashboard in this repo is shipped. Lean toward the repo
+convention.
+
+Lower priority than it looks: alerts tell you when something breaks, a dashboard
+helps you understand it afterwards. The alerting was the gap worth closing first.
 
 ---
 
