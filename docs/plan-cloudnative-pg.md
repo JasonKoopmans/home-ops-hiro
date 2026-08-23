@@ -329,34 +329,28 @@ on a live cluster means recreating volumes. Instance count is not: CNPG scales
 | cmp-02 | 2950m | 67% | ~969m | ~10.7Gi | ~2.7Gi |
 | cmp-03 | 1950m | 63% | ~707m | ~10.7Gi | ~6.2Gi |
 | cmp-04 | 1950m | 77% | ~444m | ~10.7Gi | ~3.9Gi |
-| cmp-05 | 3950m | 16% | ~3287m | **~4.5Gi** | ~3.1Gi |
+| cmp-05 | 3950m | 16% | ~3287m | ~4.5Gi (stale, see below) | ~3.1Gi |
 
 - **cmp-04 cannot host an instance** at the current 500m request (444m free).
-- **cmp-05 is still degraded** — 4.5Gi allocatable against ~10.7Gi on every
-  other node. This is the unresolved undersized-RAM issue from 2026-07-27
-  (OOM → etcd flap → iSCSI drop). It has by far the most free CPU in the
-  cluster and would be the natural Postgres host *if its RAM were fixed*.
+- **cmp-05's RAM row above is stale.** The 2026-07-27 undersized-RAM issue
+  (OOM → etcd flap → iSCSI drop) is now **resolved**: host RAM was bumped to
+  16GiB on 2026-08-23 and verified in-cluster at ~10.7Gi allocatable, matching
+  cmp-01..04. Combined with its 3950m CPU allocatable (highest in the
+  cluster), cmp-05 is now the cluster's strongest node, not its constraint.
 - Three instances fit today on cmp-01/02/03, but push cmp-03 to ~89% CPU
-  requested. Either lower the per-instance request (250m is defensible for a
-  lightly-loaded replica, given no CPU limit means it can still burst) or fix
-  cmp-05 first.
+  requested. With cmp-05 fixed, it's the better host — the placement math
+  below should be re-run against cmp-05 rather than treating cmp-03 as the
+  ceiling.
 
-**Fixing cmp-05 is the real unlock** and is a prerequisite worth doing on its
-own merits, independent of this plan.
-
-**Incoming capacity (as of 2026-08-22):** RAM for cmp-05 arrives today, and a
-sixth node is planned once other equipment lands. Both materially relieve the
-pressure above — a fixed cmp-05 alone absorbs a Postgres instance comfortably on
-its ~3287m of free CPU. Re-check the placement math after each lands rather than
-treating the table above as current.
+**cmp-05 was the real unlock and is now fixed** (2026-08-23) — re-evaluate
+instance placement against it rather than cmp-01/02/03.
 
 ### Anti-affinity is `required`, not the default
 
 The operator's `podAntiAffinityType` default is **`preferred`**, which permits
 all three instances onto a single node under scheduling pressure — HA that looks
-correct and tolerates nothing. Given cmp-04 currently cannot fit an instance and
-cmp-05 is RAM-starved, that pressure is real here, so the manifest sets
-`required` explicitly.
+correct and tolerates nothing. Given cmp-04 currently cannot fit an instance,
+that pressure is real here, so the manifest sets `required` explicitly.
 
 The trade-off is that instances stay `Pending` instead of co-locating when fewer
 than three eligible nodes exist. That is the correct failure mode: visible rather
