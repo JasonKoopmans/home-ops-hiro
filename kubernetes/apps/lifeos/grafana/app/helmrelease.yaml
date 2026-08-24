@@ -78,7 +78,12 @@ spec:
     # goes on working. To actually rotate:
     #   kubectl -n lifeos exec deploy/grafana -- \
     #     grafana cli admin reset-admin-password '<new>'
-    # then update the Secret to match, so a future rebuild agrees with reality.
+    # then update the Secret to match. That second step is not just tidiness:
+    # the dashboard sidecar authenticates to Grafana with these same two keys
+    # (REQ_USERNAME/REQ_PASSWORD) to POST the provisioning-reload endpoint, so a
+    # Secret left stale gives a permanent 401 loop in the sidecar's logs. Not
+    # fatal — the provider re-scans its path every 30s on its own — but it turns
+    # dashboard reloads into a polling delay and buries a real error in noise.
     admin:
       existingSecret: grafana-secret
       userKey: admin-user

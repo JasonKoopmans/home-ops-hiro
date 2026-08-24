@@ -189,9 +189,15 @@ comes up without it and every dashboard depending on it breaks.
     grafana cli admin reset-admin-password '<new-password>'
   ```
 
-  Then update the Secret to match, so a future rebuild from Git agrees with
-  what is in the database. (`secret-key` is different — it *is* read from the
-  environment on every start, which is why it must never change.)
+  Then update the Secret to match. That step is load-bearing, not tidiness: the
+  dashboard sidecar authenticates to Grafana with these same two keys to call
+  the provisioning-reload endpoint, so a stale Secret leaves it 401-looping in
+  the logs. Not fatal — the provider re-scans its path every 30s regardless —
+  but it turns dashboard reloads into a polling delay and buries a genuine error
+  in noise.
+
+  (`secret-key` behaves the opposite way: it *is* read from the environment on
+  every start, which is exactly why it must never change.)
 - **Chart source**: the standalone Grafana chart left `grafana/helm-charts` on
   2026-01-30 and is now maintained at `grafana-community/helm-charts`, pulled
   here over OCI from `ghcr.io/grafana-community/helm-charts/grafana`. Note the
