@@ -25,19 +25,75 @@ Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | CloudNativePG operator (Helm) | **Live** — merged #470, reconciled, operator + plugin healthy |
-| 2 | 3-instance `Cluster` (see §7) | **Ready to apply** — credential provisioned |
-| 3 | Continuous WAL archiving to S3 | Ready to apply (ships with phase 2) |
-| 4 | Scheduled base backup + retention | Ready to apply (ships with phase 2) |
-| 5 | **Restore drill** (the part that matters) | Not started |
-| 6 | Teardown scratch cluster + recovery runbook | Not started |
-| 7 | PDB / failure-mode writeup | Not started |
-| 8 | **Backup observability** (see §5) | To design |
-| 9 | **Cluster/runtime observability** (see §6) | To design |
-| ~~10~~ | HA topology (see §7) | **Decided — folded into phase 2** |
+| 1 | CloudNativePG operator (Helm) | **Live** — #470, operator + plugin healthy |
+| 2 | 3-instance `Cluster` (see §7) | **Live** — #495, 3/3 ready on 3 distinct nodes |
+| 3 | Continuous WAL archiving to S3 | **Live and verified** — `ContinuousArchiving=True` |
+| 4 | Scheduled base backup + retention | **Deployed, UNVERIFIED** — see §1b |
+| 5 | **Restore drill** (the part that matters) | Blocked on §1b |
+| 6 | Teardown scratch cluster + recovery runbook | Blocked on phase 5 |
+| 7 | PDB / failure-mode writeup | **Unblocked** — evidence gathered, see §4 |
+| 8 | **Backup observability** (see §5) | **Implemented** — `prometheusrule-postgres.yaml` |
+| 9 | **Cluster/runtime observability** (see §6) | **Implemented** — same rule file + instance PodMonitor |
+| ~~10~~ | HA topology (see §7) | Decided — folded into phase 2 |
 
-The operator and Barman Cloud plugin are **live** in the `database` namespace
-(merged #470, resources bounded in #494). No `Cluster` exists yet.
+The operator, plugin, and a 3-instance `Cluster` are **live** in the `database`
+namespace (#470, #494, #495).
+
+### §1a Verified in the cluster 2026-08-23
+
+| Check | Observed |
+|---|---|
+| Cluster | `Cluster in healthy state`, 3/3 ready, primary `postgres-1` |
+| Placement | `postgres-1` cmp-05, `-2` cmp-04, `-3` cmp-01 — 3 distinct nodes, `required` anti-affinity holding |
+| Storage | 3 PVCs bound on `longhorn-1-no-backup` |
+| PDBs | `postgres` allowed-disruptions **1**, `postgres-primary` **0** |
+| WAL archiving | `ContinuousArchiving=True`, 7 segments archived |
+
+The PDB row is the topology decision proving itself: the replicas PDB
+(`postgres`) exists only at 3+ instances, and it is what permits a drain. At
+`instances: 1` there would be a single `postgres-primary` row with 0 allowed
+disruptions and nothing else to evict — the deadlock described in §4.
+
+**Transient archive failures on startup.** WAL segment 5 failed twice with
+`Could not connect to the endpoint URL` before succeeding on retry. Both
+failures fall inside one 8-second window with successful archives either side,
+so this reads as network settling, not credentials — an auth problem surfaces as
+`AccessDenied`. Harmless here because PostgreSQL retries, but it is precisely
+the failure class phase 8 exists to catch, and nothing would have told us.
+
+### §1b ⚠ Backups are NOT yet proven — come back to this
+
+```
+firstRecoverabilityPoint:  <empty>
+lastSuccessfulBackup:      <empty>
+Backup CRs:                none
+```
+
+**WAL is archiving, but no base backup exists, so nothing is recoverable yet.**
+WAL segments are a diff against a base; with no base there is nothing to replay
+them onto. Archiving being green is not the same as being able to restore.
+
+The operator scheduled the first run for **2026-08-24 03:00:00 +0000 UTC**
+(`BackupSchedule` event on `scheduledbackup/postgres-nightly`).
+
+**The schedule is UTC, not local.** The operator image is distroless with no `TZ`
+set, so its cron runs in UTC — meaning `0 0 3 * * *` fires at **22:00 local
+(CDT)**, not 3 AM. Deliberately left as-is: CNPG has no timezone field on
+`ScheduledBackup`, so a hardcoded local-looking offset would silently drift an
+hour at each DST boundary. A stable UTC time that is documented beats a local
+time that moves twice a year.
+
+To close this out once it has fired:
+
+```sh
+kubectl -n database get backup
+kubectl -n database get cluster postgres \
+  -o jsonpath='{.status.firstRecoverabilityPoint}{"\n"}{.status.lastSuccessfulBackup}{"\n"}'
+aws s3 ls s3://hiro-postgres-backups/postgres/ --recursive | head
+```
+
+`firstRecoverabilityPoint` becoming non-empty is the signal that PITR is
+actually possible, and it is what unblocks phase 5.
 
 **Credential prerequisite — satisfied 2026-08-23.** Provisioned via
 [`scripts/provision-postgres-backup-iam.sh`](../scripts/provision-postgres-backup-iam.sh),
@@ -72,19 +128,7 @@ plaintext key ID in the file.
 > until it fills the PVC and takes the database down.
 >
 > A green Kustomization is not evidence that backups work. Verify against the
-> object store — see the post-deploy checks in §1a.
-
-### §1a Post-deploy verification (run after phase 2 reconciles)
-
-```sh
-kubectl -n database get cluster postgres
-kubectl -n database get objectstore postgres-backup
-kubectl -n database get pods -l cnpg.io/cluster=postgres -o wide   # expect 3, on 3 distinct nodes
-kubectl -n database logs -l cnpg.io/cluster=postgres -c plugin-barman-cloud --tail=50
-
-# The one that actually proves archiving works — bytes in the bucket:
-aws s3 ls s3://hiro-postgres-backups/postgres/ --recursive | head
-```
+> object store — see §1a and §1b.
 
 ---
 
@@ -194,7 +238,50 @@ which is why phases 3–5 do not get easier because of §7.
 
 ---
 
-## §5 Phase 8 — Backup observability (to design, then implement)
+## §5 Phases 8 & 9 — Observability (implemented 2026-08-23)
+
+Shipped as two pieces:
+
+- `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-postgres.yaml` — the alerts
+- `kubernetes/apps/database/postgres/app/podmonitor.yaml` — an **explicitly owned**
+  PodMonitor for the instance pods, plus a `dependsOn` on `kube-prometheus-stack`
+  in the app's `ks.yaml` so the CRD exists first
+
+The Cluster deliberately carries **no `monitoring` stanza**. Its
+`spec.monitoring.enablePodMonitor` field would generate an equivalent
+PodMonitor, but the CNPG API marks it Deprecated and slated for removal, so a
+future operator upgrade could silently delete the generated object and take
+every alert here blind. Owning the resource avoids that.
+
+The design notes below are kept because they explain *why* each rule is shaped
+the way it is.
+
+> **The instances were not being scraped at all.** The operator's PodMonitor
+> from the Helm chart covers only the controller. Port 9187 on each instance pod
+> serves **two** families, and nothing collected either:
+>
+> | Family | Covers |
+> |---|---|
+> | `cnpg_*` (~460 series) | WAL archiver counters, replication, connections, exporter health |
+> | `barman_cloud_cloudnative_pg_io_*` | **base-backup timestamps** — age, last failure, first recoverability point |
+>
+> Backup age is **not** in the `cnpg_*` family. It is published by the Barman
+> Cloud plugin under its own prefix, and the in-core `cnpg_collector_*` backup
+> gauges it supersedes stay pinned at 0 under `method: plugin` — see the metric
+> note further down, which is the bug that mattered most in this work.
+>
+> Confirmed by port-forwarding an instance directly: both families present
+> there, zero in Prometheus. The `cnpg-default-monitoring` ConfigMap defines
+> queries but nothing collected their results — having the queries is not the
+> same as having the metrics.
+
+**Two alerts deliberately not written**, because generic rules already own them
+and duplicate alerts are a failure mode this repo has actually hit:
+
+| Signal | Already covered by |
+|---|---|
+| PVC filling (the `pg_wal` runaway symptom) | `LonghornVolumeUsageHigh` — >85% on any Longhorn volume |
+| Container memory / CPU against limits | `PodMemoryLimitPressure*`, `PodCpuLimitPressure*` |
 
 **Why this is a real phase and not a nice-to-have.** Phases 3–5 prove the backup
 mechanism works *at one moment in time*. They do nothing about silent rot
@@ -226,7 +313,8 @@ extra exporter:
 
 | Query group | Use |
 |---|---|
-| `pg_stat_archiver` | **The backup-health signal.** Exposes `last_archived_time`, `last_failed_time`, `archived_count`, `failed_count` — enough for both "WAL archiving is failing" and a self-clearing last-success-age alert |
+| `pg_stat_archiver` | **The WAL-archiving signal**, not the base-backup one. Exposes `last_archived_time`, `last_failed_time`, `archived_count`, `failed_count`. Comparing the two timestamps gives a self-clearing "archiving is stuck" alert. Says nothing about base backups — those come from the `barman_cloud_cloudnative_pg_io_*` family below |
+| `barman_cloud_cloudnative_pg_io_*` | **The base-backup signal.** `last_available_backup_timestamp`, `last_failed_backup_timestamp`, `first_recoverability_point`. Published by the plugin, not the in-core collector |
 | `pg_replication`, `pg_replication_slots` | Replication lag (phase 9, meaningful once 3 instances run) |
 | `backends`, `backends_waiting` | Connection saturation, long transactions |
 | `pg_database`, `pg_postmaster`, `pg_stat_bgwriter` | General health |
@@ -234,43 +322,81 @@ extra exporter:
 This materially de-risks phases 8 and 9 — the design work is choosing thresholds
 and writing the `PrometheusRule`, not plumbing metrics.
 
-### To design out
+### Shipped
 
-1. ~~Which CNPG metrics expose backup state~~ — answered above. Remaining: pick
-   the staleness threshold, and decide whether `pg_stat_archiver` alone is
-   sufficient or the `Backup` CR status should also be alerted on (the former
-   covers WAL, the latter covers base backups).
-2. A `PrometheusRule` for: last successful base backup older than ~36h
-   (mirroring the recording-annotator staleness window), and WAL archiving
-   failing or falling behind.
-3. Whether S3-side signals are worth adding (bucket size trend, object count) or
+1. ~~Which metrics expose backup state~~ — resolved, and the first answer was
+   wrong. See the **metric family** note below.
+2. ~~A `PrometheusRule` for backup staleness and WAL archiving~~ —
+   `prometheusrule-postgres.yaml`, seven alerts.
+
+> **The `cnpg_collector_*` backup gauges are superseded and must not be used
+> here.** This cluster backs up with `method: plugin`, and the Barman Cloud
+> Plugin publishes its own family — `barman_cloud_cloudnative_pg_io_*` — which
+> its documentation states "supersede the previously available in-core metrics
+> that used the `cnpg_collector` prefix".
+>
+> The first version of these rules used `cnpg_collector_last_available_backup_timestamp`
+> and would have failed silently in both directions: that gauge stays pinned at
+> 0 forever under plugin backups, so the guarded staleness rule could never fire,
+> while the paired NeverSucceeded rule would fire permanently and never clear.
+> A critical alert that is always on is how a channel gets ignored.
+>
+> `cnpg_pg_stat_archiver_*` is **not** affected — it comes from PostgreSQL's own
+> `pg_stat_archiver` view via the default queries ConfigMap, and stays accurate.
+
+### Still open
+
+1. Whether S3-side signals are worth adding (bucket size trend, object count) or
    whether cluster-side metrics are sufficient.
-4. Whether to enable **S3 Object Lock in compliance mode** on
+2. Whether to enable **S3 Object Lock in compliance mode** on
    `hiro-postgres-backups`, matching what `hiro-recording-annotator-media-backup`
-   already does ([backup-recovery.md](backup-recovery.md) §6). This protects
-   backups from deletion by their own credentials — worth doing, but it interacts
-   with the `7d` retention policy's ability to prune, so the lock window must be
-   chosen deliberately rather than copied.
-5. Whether to schedule a **periodic automated restore-and-verify job**, so
+   already does ([backup-recovery.md](backup-recovery.md) §6). The bucket was
+   created **with the Object Lock capability enabled but no retention rule**, so
+   this remains available without recreating it. It protects backups from
+   deletion by their own credentials, but interacts with the `7d` retention
+   policy's ability to prune, so the lock window must be chosen deliberately.
+3. Whether to schedule a **periodic automated restore-and-verify job**, so
    confidence persists over time rather than existing only at setup. There is
    precedent: [backup-recovery.md](backup-recovery.md) §9 defines a monthly
    restore drill.
 
-Implement only once the design is settled.
-
 ---
 
-## §6 Phase 9 — Cluster/runtime observability (to design, then implement)
+## §6 Phase 9 — Cluster/runtime observability (implemented; dashboard still open)
 
 Phase 8 covers *"are backups still working."* This covers *"is the database
 healthy."* Different metrics, different alerts — but one design conversation and
 probably one PR.
 
-**Already in place:** the operator's PodMonitor is enabled
-(`monitoring.podMonitorEnabled: true`). Verified that this cluster's Prometheus
-uses empty selectors (`podMonitorSelector: {}`, `podMonitorNamespaceSelector: {}`),
-so it selects **all** PodMonitors in **all** namespaces — the metrics will be
-scraped with no extra wiring.
+**Correction — an earlier revision of this section was wrong.** It claimed that
+because the operator's PodMonitor was enabled and this cluster's Prometheus uses
+empty selectors (`podMonitorSelector: {}`, `podMonitorNamespaceSelector: {}`,
+which is true and does mean all PodMonitors in all namespaces get selected), the
+database metrics would be scraped "with no extra wiring". They were not.
+
+Two different PodMonitors are involved. The chart's covers the **operator**; the
+instances need their own, and none existed. Selecting every PodMonitor does not
+help when the PodMonitor does not exist.
+
+**How the instance PodMonitor is created matters too.** The Cluster field
+`spec.monitoring.enablePodMonitor` will generate one, but the CNPG API marks it
+*Deprecated: This feature will be removed in an upcoming release. If you need
+this functionality, you can create a PodMonitor manually.* Depending on it would
+mean a future operator upgrade silently deletes the generated object and takes
+every alert here blind — the same fail-open condition this section exists to
+close, just deferred. So the app owns an explicit
+`kubernetes/apps/database/postgres/app/podmonitor.yaml` instead, and the
+Cluster carries no `monitoring` stanza at all.
+
+Because the app now ships a Prometheus CR, its `ks.yaml` also gained
+`dependsOn: [{name: kube-prometheus-stack, namespace: monitoring}]` — the
+contract that file documents for exactly this case. Without it a fresh bootstrap
+can reconcile postgres before the PodMonitor CRD is registered.
+
+The lesson worth keeping: "the queries are configured" and "the exporter is
+running" are both true statements that still leave you with no metrics. Only
+querying Prometheus for the series settles it — port-forwarding the instance
+showed 462 `cnpg_*` series available while Prometheus held zero.
 
 ### Repo conventions to follow
 
@@ -280,24 +406,53 @@ Dashboards and alert rules do **not** live in the app directory. Both live in
 - `grafana-dashboard-<name>.yaml` (9 existing examples)
 - `prometheusrule-<name>.yaml` (7 existing examples)
 
-### To design out
+### Shipped
 
-1. **Dashboard.** The `cloudnative-pg` chart has an optional dependency on
-   `cloudnative-pg/grafana-dashboards` gated behind
-   `monitoring.grafanaDashboard.create`. Decide between enabling that versus
-   vendoring a dashboard JSON as `grafana-dashboard-cloudnative-pg.yaml` to match
-   how every other dashboard in this repo is shipped. Lean toward the repo
-   convention.
-2. **Alert rules** (`prometheusrule-postgres.yaml`) — candidate signals:
-   cluster not in healthy state, instance down, PVC approaching full,
-   connection count near `max_connections`, replication lag (only meaningful
-   once phase 10 lands), and long-running transactions.
-3. **`pg_wal` growth is a sleeper.** If `archive_command` fails, PostgreSQL
-   refuses to recycle WAL and `pg_wal` grows until the PVC fills and the
-   database stops. This is the failure mode that connects phases 8 and 9 —
-   a backup failure presents as a *disk* problem. Alert on it explicitly.
-4. Reuse the noise constraints from §5 — self-clearing alerts, the `absent()`
-   trap, and checking what already fires before adding rules.
+**Alert rules** — `prometheusrule-postgres.yaml`. Seven alerts, all validated
+against live Prometheus for parse and behaviour:
+
+| Alert | Severity | Shape |
+|---|---|---|
+| `PostgresBackupStale` | critical | last-success age, `> 0` guarded, 36h |
+| `PostgresBackupNeverSucceeded` | critical | `for: 26h` — see grace-period note |
+| `PostgresBackupFailing` | critical | last-failed newer than last-available |
+| `PostgresWalArchivingFailing` | critical | timestamp comparison, not counter |
+| `PostgresReplicationDegraded` | warning | `streaming_replicas < 2` |
+| `PostgresMetricsMissing` | warning | `absent()` meta-alert |
+| `PostgresMetricsCollectorFailing` | warning | stale ≠ missing |
+
+**Deliberately not written**, because generic rules already own them:
+
+| Signal | Already covered by |
+|---|---|
+| PVC filling — the `pg_wal` runaway symptom | `LonghornVolumeUsageHigh`, >85% any volume |
+| Container memory / CPU vs limits | `PodMemoryLimitPressure*`, `PodCpuLimitPressure*` |
+
+An earlier draft of this section listed the `pg_wal` sleeper as needing its own
+alert. It does not — Longhorn already watches every volume, and adding a second
+rule for the same condition is how the ~200-message incident happened. The
+insight still holds and is why `PostgresWalArchivingFailing` is critical: a
+backup failure otherwise surfaces as a *disk* alert long after the chain broke.
+
+**Grace-period note.** `PostgresBackupNeverSucceeded` uses `for: 26h`, which must
+exceed one full schedule interval rather than merely the gap to the next run. At
+daily 03:00 UTC, a cluster created at 03:01 waits 23h59m for its first backup;
+the initial 12h value would have paged roughly twelve hours *before* that
+cluster's first backup was due. 26h is one interval plus ~2h to run, record, and
+scrape. The cost is that a Prometheus restart resets `for:` state — acceptable
+because Prometheus here restarts only on chart upgrades, weekly at most.
+
+### Still open
+
+**Dashboard.** The `cloudnative-pg` chart has an optional dependency on
+`cloudnative-pg/grafana-dashboards` gated behind
+`monitoring.grafanaDashboard.create`. Decide between enabling that versus
+vendoring a dashboard JSON as `grafana-dashboard-cloudnative-pg.yaml` to match
+how every other dashboard in this repo is shipped. Lean toward the repo
+convention.
+
+Lower priority than it looks: alerts tell you when something breaks, a dashboard
+helps you understand it afterwards. The alerting was the gap worth closing first.
 
 ---
 

@@ -36,6 +36,19 @@ spec:
   # Trade-off: losing a node destroys that instance's volume outright, so CNPG
   # re-clones the replica from the primary rather than re-attaching. Normal
   # CNPG behaviour, but I/O-heavy for a large database.
+  # Scraping is wired by an explicit PodMonitor in ./podmonitor.yaml, NOT by
+  # `monitoring.enablePodMonitor`. That field is marked Deprecated in the CNPG
+  # API ("This feature will be removed in an upcoming release. If you need this
+  # functionality, you can create a PodMonitor manually") — relying on it means
+  # an operator upgrade could silently delete the generated PodMonitor and take
+  # every Postgres alert blind, which is the exact fail-open condition this work
+  # exists to remove. Owning the object outright survives that.
+  #
+  # Without some PodMonitor, nothing scrapes the instances at all: the operator's
+  # own (from the Helm chart) covers only the controller, while the ~460 `cnpg_*`
+  # and `barman_cloud_cloudnative_pg_io_*` series that describe this database are
+  # served on port 9187 of each instance pod.
+
   storage:
     storageClass: longhorn-1-no-backup
     size: 10Gi
