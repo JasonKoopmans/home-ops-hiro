@@ -5,7 +5,7 @@ kind: HTTPRoute
 metadata:
   name: longhorn-dashboard
 spec:
-  hostnames: ["longhorn.koopmans.co"]
+  hostnames: ["longhorn.${SECRET_DOMAIN}"]
   parentRefs:
     - name: envoy-internal
       namespace: network

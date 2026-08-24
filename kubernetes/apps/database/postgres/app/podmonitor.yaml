@@ -1,0 +1,25 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/monitoring.coreos.com/podmonitor_v1.json
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: postgres
+spec:
+  # Owned explicitly rather than generated from the Cluster's
+  # `monitoring.enablePodMonitor`, which the CNPG API marks Deprecated and
+  # slated for removal. A generated object would vanish on the operator upgrade
+  # that drops the field, silently taking every Postgres alert blind.
+  #
+  # Scrapes port 9187 on each instance pod, which serves BOTH metric families
+  # the alerts depend on:
+  #   * cnpg_*                          — PostgreSQL stats incl. pg_stat_archiver
+  #   * barman_cloud_cloudnative_pg_io_* — base-backup timestamps from the plugin
+  # The plugin publishes through the instance manager's exporter, not from the
+  # barman-cloud controller Service (whose port 9090 is the CNPG-I *gRPC* plugin
+  # endpoint, mTLS-guarded, and not a Prometheus target).
+  selector:
+    matchLabels:
+      cnpg.io/cluster: postgres
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics

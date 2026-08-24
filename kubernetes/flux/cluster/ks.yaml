@@ -52,6 +52,36 @@ spec:
               target:
                 group: helm.toolkit.fluxcd.io
                 kind: HelmRelease
+            - # Longhorn upgrades are one-way. longhorn-manager persists the running
+              # version in the `current-longhorn-version` Setting and refuses to start
+              # on an older binary, so the rollback that the patch above enables turns a
+              # slow-but-recoverable upgrade into a cluster-wide storage outage (2026-08-16).
+              #
+              # `remediateLastFailure: false` is the part that matters: it means Flux
+              # never rolls this release back, at any point. `retries: 2` then buys
+              # automatic recovery from transient failures without weakening that.
+              # This started life as `retries: 0`, which also blocked the rollback but
+              # left a failed upgrade permanently stuck — Flux records the failure and
+              # stops re-attempting, so a plain `flux reconcile` is a no-op and the
+              # release only moves again after
+              # `flux -n storage reconcile hr longhorn --reset --force`. That cost a
+              # manual unstick later the same day, when a post-upgrade hook pod was
+              # killed by an unstable node and the upgrade needed nothing more than a
+              # second attempt.
+              patch: |-
+                apiVersion: helm.toolkit.fluxcd.io/v2
+                kind: HelmRelease
+                metadata:
+                  name: longhorn
+                spec:
+                  upgrade:
+                    remediation:
+                      remediateLastFailure: false
+                      retries: 2
+              target:
+                group: helm.toolkit.fluxcd.io
+                kind: HelmRelease
+                name: longhorn
       target:
         group: kustomize.toolkit.fluxcd.io
         kind: Kustomization

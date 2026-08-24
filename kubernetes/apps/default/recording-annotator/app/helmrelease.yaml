@@ -56,12 +56,13 @@ spec:
               Backup__Prefix: index
               Backup__RetentionDays: 30
               Backup__QuiesceTimeoutSeconds: 30
-              # RAISE THIS ONCE REAL RECORDINGS EXIST. It is the restore drill's only assertion that a snapshot
-              # has content: RestoreDrillService fails the drill when the restored artifact count is below it.
-              # At 0 the drill passes on a snapshot that opens and Rebuild()s cleanly but is completely empty —
-              # exactly the silent backup-rot the monthly drill exists to catch. 0 is correct only for a
-              # pre-launch install, where a real floor would false-alarm on every run.
-              Backup__MinArtifacts: 0
+              # Restore drill's only assertion that a snapshot has content: RestoreDrillService fails below this.
+              # Deliberately NOT tracked to the live artifact count (2 as of 2026-08-13) — this floor's job is
+              # catching "shipped completely empty," not "count dropped." Tracking it 1:1 would fail the drill on
+              # every legitimate deletion; drift/shrinkage detection belongs to reconciliation (§7) instead, which
+              # already does it properly (index vs. live blob store, not a guessed row-count threshold). Bump
+              # manually on step-changes, don't stairstep with growth.
+              Backup__MinArtifacts: 1
               Reconciliation__OrphanGraceMinutes: 60
               Storage__AccessKey:
                 secretKeyRef:
@@ -157,7 +158,7 @@ spec:
               - --max-time
               - "240"
               - -X
-              - GET
+              - POST
               - http://recording-annotator:8080/internal/backup/index
             securityContext:
               allowPrivilegeEscalation: false
@@ -199,7 +200,7 @@ spec:
               - --max-time
               - "540"
               - -X
-              - GET
+              - POST
               - http://recording-annotator:8080/internal/reconcile
             securityContext:
               allowPrivilegeEscalation: false

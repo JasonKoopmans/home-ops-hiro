@@ -9,3 +9,4 @@ components:
 resources:
   - ./namespace.yaml
   - ./mcp-kubernetes/ks.yaml
+  - ./mcp-prometheus/ks.yaml

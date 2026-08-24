@@ -1,0 +1,28 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: postgres
+spec:
+  dependsOn:
+    - name: cloudnative-pg
+    # This app ships a PodMonitor, so it needs the Prometheus Operator CRDs to
+    # exist first. Without this, a fresh bootstrap or a monitoring reinstall can
+    # reconcile postgres before monitoring.coreos.com/PodMonitor is registered
+    # and leave the whole database Kustomization NotReady until a retry.
+    # The contract is documented on kube-prometheus-stack's own ks.yaml.
+    - name: kube-prometheus-stack
+      namespace: monitoring
+  interval: 1h
+  path: ./kubernetes/apps/database/postgres/app
+  postBuild:
+    substituteFrom:
+      - name: cluster-secrets
+        kind: Secret
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: database
+  wait: false

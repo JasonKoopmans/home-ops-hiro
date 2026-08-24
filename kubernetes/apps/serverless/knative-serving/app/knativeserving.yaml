@@ -5,8 +5,11 @@ metadata:
   name: knative-serving
   namespace: knative-serving
 spec:
-  # Keep control-plane and APIs on the latest 1.21 patch stream.
-  version: "1.21"
+  # Keep control-plane and APIs on the latest 1.23 patch stream.
+  # spec.version and the net-gateway-api tag in additionalManifests below
+  # must move together — the operator only allows one minor step at a
+  # time, so bump both to the same minor in the same change.
+  version: "1.23"
   # Right-size control-plane CPU requests. The upstream defaults reserve
   # 300m (activator) / 100m (others), but these components idle at 1-2m on
   # this cluster and were the bulk of a scheduling-headroom warning on one
@@ -53,12 +56,13 @@ spec:
     istio:
       enabled: false
   additionalManifests:
-    - URL: https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v1.21.0/release.yaml
+    # Tag's minor (knative-vX.Y.*) must match spec.version's minor above.
+    - URL: https://github.com/knative-extensions/net-gateway-api/releases/download/knative-v1.23.0/release.yaml
   config:
     domain:
-      # Register koopmans.co as the default domain for Knative Services.
-      # KServices will get URLs like <name>.<namespace>.koopmans.co via the external gateway.
-      koopmans.co: ""
+      # Register ${SECRET_DOMAIN} as the default domain for Knative Services.
+      # KServices will get URLs like <name>.<namespace>.${SECRET_DOMAIN} via the external gateway.
+      ${SECRET_DOMAIN}: ""
     network:
       ingress-class: gateway-api.ingress.networking.knative.dev
     gateway:

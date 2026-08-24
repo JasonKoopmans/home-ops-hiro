@@ -25,12 +25,11 @@ spec:
           app:
             image:
               repository: ghcr.io/n8n-io/n8n
-              tag: 2.33.3
+              tag: 2.36.5
             envFrom:
               - secretRef:
                   name: n8n-smtp-secret
             env:
-              DB_SQLITE_VACUUM_ON_STARTUP: true
               EXECUTIONS_DATA_PRUNE: true
               EXECUTIONS_DATA_MAX_AGE: 336
               EXECUTIONS_DATA_PRUNE_MAX_COUNT: 10000
@@ -97,6 +96,7 @@ spec:
           gethomepage.dev/title: n8n
           gethomepage.dev/description: "N8N Automation Platform"
           gethomepage.dev/group: "Automation"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=n8n"
         hostnames:
           - *hostName
         parentRefs:

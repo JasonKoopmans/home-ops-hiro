@@ -151,6 +151,7 @@ spec:
           gethomepage.dev/title: qBittorrent
           gethomepage.dev/description: "qBittorrent Download Manager"
           gethomepage.dev/group: "Downloads"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=qbittorrent"
         hostnames: ["qbittorrent.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal
@@ -168,6 +169,7 @@ spec:
           gethomepage.dev/title: Download Files
           gethomepage.dev/description: "Download File Browser"
           gethomepage.dev/group: "Downloads"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=qbittorrent"
         hostnames: ["downloads.${SECRET_DOMAIN}"]
         parentRefs:
           - name: envoy-internal

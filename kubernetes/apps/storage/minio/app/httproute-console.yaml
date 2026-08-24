@@ -10,6 +10,7 @@ metadata:
     gethomepage.dev/title: Minio
     gethomepage.dev/description: "Object storage console"
     gethomepage.dev/group: "Monitoring"
+    gethomepage.dev/pod-selector: "app=minio,release=minio"
 spec:
   hostnames:
     - minio.${SECRET_DOMAIN}

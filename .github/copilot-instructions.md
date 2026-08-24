@@ -205,6 +205,17 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 
 ---
 
+## Resource Requests & Limits
+
+- **Set a memory limit, omit the CPU limit.** This is the established repo convention (~74 memory limits vs. ~12 CPU limits across `kubernetes/apps/`). A memory limit contains a leak before it destabilizes the node; a CPU limit only causes CFS throttling, which is actively harmful to databases (latency spikes while locks are held) and to backup/upload sidecars. Set a CPU *request* — that's what schedules the pod.
+- **Read the chart's defaults before adding a `resources:` override.** Several charts ship a request that a values override replaces wholesale rather than merges.
+- **Sidecars and injected containers need their own bounds.** Setting `resources` on the main workload does not cover a sidecar the operator injects. Check the operator's CRD for where sidecar resources are configured (e.g. CloudNativePG's Barman plugin uses `ObjectStore.spec.instanceSidecarConfiguration.resources`).
+- **Size limits from real data, not intuition.** Query `max_over_time(container_memory_working_set_bytes{...}[14d])` via Thanos (it holds ~14d of cadvisor series), then set the limit at roughly **2x** the observed peak — a 30s scrape cannot sample the spike that actually triggers an OOM kill, so a measured peak is a floor, not a ceiling. One-shot Jobs and init containers finish faster than one scrape and never produce metrics; their limits are judgment.
+- **Label unmeasured values as guesses.** For a new workload there is no data yet. Set deliberately-generous starting values, comment them in-manifest as an informed guess, and record the revisit condition in the app's plan/runbook doc — don't let a placeholder silently harden into an assumed-tuned value.
+- Nodes are **CPU-asymmetric** (`hiro-cmp-01`/`-02` have 3 CPU, `-03`/`-04` have 2; memory is uniform ~11.8Gi). CPU is the scarce resource — memory limits are comparatively cheap to set generously, CPU requests are not.
+
+---
+
 ## Secrets Management
 
 - **SOPS with age** encrypts secrets committed to this repo. Rules are in `.sops.yaml`; secret files are named `*.sops.yaml`.
