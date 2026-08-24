@@ -31,7 +31,7 @@ Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 | 4 | Scheduled base backup + retention | **Deployed, UNVERIFIED** — see §1b |
 | 5 | **Restore drill** (the part that matters) | Blocked on §1b |
 | 6 | Teardown scratch cluster + recovery runbook | Blocked on phase 5 |
-| 7 | PDB / failure-mode writeup | **Unblocked** — evidence gathered, see §4 |
+| 7 | PDB / failure-mode writeup | **Done** — [postgres-failure-modes.md](postgres-failure-modes.md) |
 | 8 | **Backup observability** (see §5) | **Implemented** — `prometheusrule-postgres.yaml` |
 | 9 | **Cluster/runtime observability** (see §6) | **Implemented** — same rule file + instance PodMonitor |
 | ~~10~~ | HA topology (see §7) | Decided — folded into phase 2 |
@@ -209,8 +209,18 @@ sidecars do that).
 
 ## §4 Failure modes this setup does and does not cover
 
-To be expanded in phase 7, but the load-bearing facts, verified against
-CloudNativePG source (`pkg/specs/poddisruptionbudget.go`):
+> **Phase 7 shipped this as its own operational document:
+> [postgres-failure-modes.md](postgres-failure-modes.md).** Go there during an
+> incident — it covers every scenario, what self-heals, what needs a human, the
+> measured PDB behaviour, and the storage consequence of single-replica volumes.
+> It also marks each claim as *Observed* or *Reasoned*, so it is clear which
+> recovery paths have actually been exercised and which are still theory.
+>
+> What stays below is the *decision* rationale — why the topology is what it is.
+
+The load-bearing facts, verified against CloudNativePG source
+(`pkg/specs/poddisruptionbudget.go`) and since confirmed against the running
+cluster:
 
 - A PDB governs only the **Eviction API**. It does not stop hard node failure,
   `kubectl delete pod`, or kubelet node-pressure eviction.
