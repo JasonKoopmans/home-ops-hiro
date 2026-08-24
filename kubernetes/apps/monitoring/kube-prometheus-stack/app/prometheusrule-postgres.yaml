@@ -92,9 +92,22 @@ spec:
         # recording-annotator rules document. The known cost is that a Prometheus
         # restart resets `for:` state; acceptable here because Prometheus restarts
         # only on chart upgrades (weekly at most), comfortably less often than 26h.
+        #
+        # Carries the same `unless` as PostgresBackupStale, for the same reason
+        # and the sibling case: if backups have never succeeded AND attempts are
+        # actively failing, `last_available` is 0 while `last_failed` is
+        # positive, so both this and PostgresBackupFailing would fire — two
+        # criticals for one outage. Fixing that on Stale alone left this half of
+        # the pair still double-paging. PostgresBackupFailing owns the
+        # actively-erroring case; what remains here is a first backup that never
+        # even ran.
         - alert: PostgresBackupNeverSucceeded
           expr: |
             max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"}) == 0
+            unless
+            max(barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp{namespace="database"})
+              >
+            max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"})
           for: 26h
           labels:
             severity: critical
@@ -129,8 +142,18 @@ spec:
         # the two transient S3 connection errors seen during cluster bring-up on
         # 2026-08-23 retried successfully within 8 seconds and should not page.
         #
-        # Replicas do not archive, so both series sit at 0 there and 0 > 0 is
-        # false — no spurious firing from the non-primary instances.
+        # Replicas do not publish `cnpg_pg_stat_archiver_*` at all — verified
+        # against all three instances: the series exist only on the primary.
+        # (An earlier version of this comment said they "sit at 0" on replicas,
+        # which is wrong; the right conclusion — no spurious firing from
+        # non-primaries — happens to hold either way, because `on (namespace,
+        # pod)` simply finds nothing to match.)
+        #
+        # That single-producer property is also why whole-family `absent()` in
+        # the meta-alert below is sufficient for this family and a per-instance
+        # cardinality check is not needed: if the primary stops publishing, the
+        # family disappears entirely rather than being masked by replicas still
+        # reporting.
         #
         # This is the alert that matters most operationally: a failing
         # archive_command makes PostgreSQL refuse to recycle WAL, so the first

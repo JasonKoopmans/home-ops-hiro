@@ -240,9 +240,21 @@ which is why phases 3–5 do not get easier because of §7.
 
 ## §5 Phases 8 & 9 — Observability (implemented 2026-08-23)
 
-Shipped as `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-postgres.yaml`
-plus `spec.monitoring.enablePodMonitor: true` on the Cluster. The design notes
-below are kept because they explain *why* each rule is shaped the way it is.
+Shipped as two pieces:
+
+- `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-postgres.yaml` — the alerts
+- `kubernetes/apps/database/postgres/app/podmonitor.yaml` — an **explicitly owned**
+  PodMonitor for the instance pods, plus a `dependsOn` on `kube-prometheus-stack`
+  in the app's `ks.yaml` so the CRD exists first
+
+The Cluster deliberately carries **no `monitoring` stanza**. Its
+`spec.monitoring.enablePodMonitor` field would generate an equivalent
+PodMonitor, but the CNPG API marks it Deprecated and slated for removal, so a
+future operator upgrade could silently delete the generated object and take
+every alert here blind. Owning the resource avoids that.
+
+The design notes below are kept because they explain *why* each rule is shaped
+the way it is.
 
 > **The instances were not being scraped at all.** The operator's PodMonitor
 > from the Helm chart covers only the controller. Port 9187 on each instance pod
