@@ -1,0 +1,50 @@
+---
+# Seed dashboard for the Git plane. Two jobs: it documents the workflow where
+# the workflow is actually used, and it proves the ConfigMap → sidecar →
+# provisioning path works on day one, before any real dashboard depends on it.
+#
+# Copy this file's shape for real dashboards — label + folder annotation are
+# what the sidecar keys on.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-lifeos-home
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: GitOps
+data:
+  lifeos-home.json: |
+    {
+      "uid": "lifeos-home",
+      "title": "LifeOS — Start Here",
+      "tags": ["lifeos", "gitops"],
+      "editable": false,
+      "schemaVersion": 39,
+      "graphTooltip": 0,
+      "time": {"from": "now-6h", "to": "now"},
+      "annotations": {"list": []},
+      "templating": {"list": []},
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "Two planes",
+          "gridPos": {"h": 13, "w": 12, "x": 0, "y": 0},
+          "options": {
+            "mode": "markdown",
+            "content": "## Git plane — provisioned dashboards\n\nDashboards that come from ConfigMaps in `kubernetes/apps/lifeos/grafana/app/`. Like this one. Each names its folder with a `grafana_folder` annotation; **GitOps** is the convention.\n\nThey are provisioned read-only — Save is disabled on purpose, so a browser edit can never be thrown away by the next reconcile. To change one, edit its ConfigMap and let Flux apply it.\n\n## UI plane — everything authored here\n\nAnything created in the browser lives in Grafana's own database on the Longhorn volume. Draft freely: dashboards, folders, alert rules, playlists, preferences.\n\nThe volume is on the backed-up storage class, so this plane survives pod or node loss — but it is *not* reproducible from Git.\n\n## Which is which\n\nRead-only is enforced per **dashboard**, not per folder. Folder names are not reserved, so a dashboard created here inside the GitOps folder is still a UI dashboard. When it matters, check Dashboard settings → JSON Model.\n\n## Promotion\n\nWhen a UI draft has earned it:\n\n```\ntask lifeos:dashboard:export uid=<dashboard-uid>\n```\n\nThat writes the ConfigMap; commit it, let Flux apply, then delete the UI copy so there is exactly one source of truth."
+          }
+        },
+        {
+          "id": 2,
+          "type": "text",
+          "title": "Data sources",
+          "gridPos": {"h": 13, "w": 12, "x": 12, "y": 0},
+          "options": {
+            "mode": "markdown",
+            "content": "### None yet — that's expected\n\nThis instance ships with no data source. The reporting warehouse it is meant to query is still to come, and a provisioned source pointing at nothing would just show a red banner on every page load.\n\nNothing is blocked in the meantime: a source added through the UI works normally and lives in the UI plane like any other browser-authored object.\n\n### When you add one\n\n**Credentials belong in Git** → add it to `datasources:` in the HelmRelease with an explicit `uid`, and its secret to `secret.sops.yaml`. Provisioned sources are locked for editing in the browser.\n\n**Just trying something out** → configure it in the UI. It is stored encrypted in the database and backed up with the volume. Move it into Git when it becomes load-bearing.\n\nThe `uid` is the part that matters. Dashboard JSON references sources by uid, so a stable one is what lets a dashboard exported to Git keep working.\n\nFull write-up: `docs/lifeos-grafana.md`."
+          }
+        }
+      ]
+    }

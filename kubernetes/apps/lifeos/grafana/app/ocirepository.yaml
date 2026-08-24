@@ -1,0 +1,18 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/source.toolkit.fluxcd.io/ocirepository_v1.json
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: grafana
+spec:
+  interval: 15m
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    tag: 12.10.4
+  # The standalone Grafana chart moved out of grafana/helm-charts on
+  # 2026-01-30; grafana-community is where it is maintained now. This is a
+  # different chart from the one embedded in kube-prometheus-stack — the two
+  # instances version independently on purpose.
+  url: oci://ghcr.io/grafana-community/helm-charts/grafana

@@ -1,0 +1,240 @@
+---
+# yaml-language-server: $schema=https://lds-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: grafana
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: grafana
+  values:
+    # ------------------------------------------------------------------------
+    # Two planes of configuration, on purpose.
+    #
+    # This instance is deliberately NOT a clone of monitoring/grafana. That one
+    # is 100% declarative and disposable — wipe the PVC and Flux rebuilds it.
+    # This one is a personal workspace where dashboards get *drafted* in the UI,
+    # so its database holds state that exists nowhere else. The split:
+    #
+    #   Git plane  — everything below, plus dashboard ConfigMaps in this
+    #                directory. Provisioned read-only (allowUiUpdates: false),
+    #                so the UI physically cannot drift from Git.
+    #   UI plane   — dashboards, folders, playlists, alert rules, preferences
+    #                and API tokens created in the browser. Lives in the SQLite
+    #                DB on the PVC below.
+    #
+    # The PVC is therefore load-bearing, not a cache: it uses the backed-up
+    # `longhorn` class, unlike the monitoring instance. Draft in the UI, then
+    # promote what proves useful into Git (`task lifeos:dashboard:export`).
+    # See docs/lifeos-grafana.md.
+    # ------------------------------------------------------------------------
+
+    # RWO volume — a rolling update would deadlock on the old pod holding it.
+    deploymentStrategy:
+      type: Recreate
+
+    replicas: 1
+
+    # Deployment-level, which is where Reloader looks. The chart already
+    # checksums its own ConfigMaps into the pod template; this covers the Secret.
+    # Note what that does and does not buy: a changed `secret-key` takes effect
+    # on the restart, but a changed `admin-password` does not — see the
+    # bootstrap-only note on `admin:` below.
+    annotations:
+      secret.reloader.stakater.com/reload: grafana-secret
+
+    persistence:
+      enabled: true
+      type: pvc
+      accessModes: ["ReadWriteOnce"]
+      # 3 replicas + recurring backups to S3. The UI plane is not reproducible
+      # from Git, so this is the only copy of it — do not downgrade to a
+      # -no-backup class.
+      storageClassName: longhorn
+      # INFORMED GUESS — nothing has been written yet. Holds the SQLite DB, the
+      # plugin tree under /var/lib/grafana/plugins and the bleve search index.
+      # Single-user scale, so 5Gi is headroom rather than a projection. Revisit
+      # once there is real dashboard and plugin volume.
+      size: 5Gi
+
+    # The chart's default init container runs as root with CHOWN + DAC_OVERRIDE
+    # to fix ownership of /var/lib/grafana. `securityContext.fsGroup: 472` (a
+    # chart default we keep) already makes kubelet chown the volume recursively
+    # on mount, so this is a root container doing work Kubernetes has already
+    # done. Off, to keep the pod root-free — matching the posture the rest of
+    # the repo takes.
+    # If Grafana ever fails to start with a permission error on
+    # /var/lib/grafana, flip this back to true and file a follow-up: it means
+    # the fsGroup chown did not apply, which would be worth understanding.
+    initChownData:
+      enabled: false
+
+    # BOOTSTRAP ONLY. Grafana writes this password into its database when it
+    # first creates the admin user and never reads it again — on every later
+    # start the stored hash wins. So editing the Secret and letting Reloader
+    # restart the pod looks like a successful rotation while the old password
+    # goes on working. To actually rotate:
+    #   kubectl -n lifeos exec deploy/grafana -- \
+    #     grafana cli admin reset-admin-password '<new>'
+    # then update the Secret to match. That second step is not just tidiness:
+    # the dashboard sidecar authenticates to Grafana with these same two keys
+    # (REQ_USERNAME/REQ_PASSWORD) to POST the provisioning-reload endpoint, so a
+    # Secret left stale gives a permanent 401 loop in the sidecar's logs. Not
+    # fatal — the provider re-scans its path every 30s on its own — but it turns
+    # dashboard reloads into a polling delay and buries a real error in noise.
+    admin:
+      existingSecret: grafana-secret
+      userKey: admin-user
+      passwordKey: admin-password
+
+    envValueFrom:
+      # Encrypts secureJsonData rows in the Grafana DB — datasource credentials
+      # entered through the UI, among others. Grafana falls back to a published
+      # default when unset. It must never change once set: rotating it makes
+      # every already-encrypted row undecryptable.
+      GF_SECURITY_SECRET_KEY:
+        secretKeyRef:
+          name: grafana-secret
+          key: secret-key
+
+    # ---- Git plane: datasources -------------------------------------------
+    # Deliberately none yet. This instance ships with no data source at all:
+    # the reporting warehouse it is meant to query does not exist yet, and a
+    # provisioned data source pointing at nothing is worse than an empty list —
+    # it fails its health check on every page load and trains you to ignore a
+    # red banner.
+    #
+    # When the warehouse lands, add a `datasources:` block here pointing at the
+    # CNPG cluster in the `database` namespace, with a read-only role and an
+    # explicit `uid`. The uid is the part that matters: dashboard JSON
+    # references data sources by uid, so a stable one is what makes an exported
+    # dashboard portable back into Git. Without it Grafana mints a random uid
+    # per provisioning run and dashboards break on reprovision.
+    #
+    # Nothing is blocked in the meantime — a data source added through the UI
+    # works fine and lives in the UI plane like any other browser-authored
+    # object.
+
+    # ---- Git plane: dashboards --------------------------------------------
+    # The sidecar watches ConfigMaps in this namespace labelled
+    # grafana_dashboard: "1" and drops them into the provisioning tree.
+    sidecar:
+      # The sidecar is a second container in this pod, so the `resources:` block
+      # further down bounds Grafana only and leaves the ConfigMap watcher
+      # unbounded — which the repo's convention explicitly calls out as a thing
+      # to get right.
+      #
+      # INFORMED GUESS — not measured. It watches a handful of small ConfigMaps
+      # in one namespace and is idle between events. Memory limit is ~4x the
+      # request to absorb a burst of simultaneous dashboard writes. No CPU limit,
+      # per repo convention. Revisit if it ever shows up in the pod-limit
+      # pressure alerts.
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        # Unset = this namespace only. Left alone deliberately: the monitoring
+        # instance's dashboards should not leak into the personal one.
+        searchNamespace: null
+        # Both the sidecar's write root and the provider's scan path. Note
+        # `defaultFolderName` is deliberately NOT set: the chart appends it to
+        # the sidecar's FOLDER, and reasoning about how that composes with a
+        # per-ConfigMap folder annotation is exactly the kind of path arithmetic
+        # that fails silently — a dashboard written outside the provider's path
+        # is simply never loaded, with no error anywhere. One base directory,
+        # one scan path, no arithmetic.
+        folder: /tmp/dashboards
+        # Each dashboard ConfigMap names its Grafana folder with a
+        # `grafana_folder` annotation, which becomes a subdirectory under the
+        # base above and then a folder via foldersFromFilesStructure. Every
+        # Git-plane ConfigMap should carry it; without one a dashboard lands at
+        # the root of the path and shows up outside any folder.
+        folderAnnotation: grafana_folder
+        provider:
+          name: gitops
+          foldersFromFilesStructure: true
+          # What this actually guarantees: a dashboard *loaded by this provider*
+          # cannot be saved from the browser, so a UI edit can never be thrown
+          # away by the next reconcile. It does not reserve folder names — an
+          # admin can still create a database dashboard inside the GitOps
+          # folder. The folder split is the convention; per-dashboard
+          # read-only is the enforcement.
+          allowUiUpdates: false
+          # Removing the ConfigMap removes the dashboard — Git stays the truth
+          # for this folder.
+          disableDelete: false
+      datasources:
+        # Datasources come from the chart's own values above, not from labelled
+        # ConfigMaps. Nothing to watch.
+        enabled: false
+
+    # Sidecar only needs to read ConfigMaps in its own namespace; no reason for
+    # a cluster-scoped role.
+    rbac:
+      create: true
+      namespaced: true
+
+    "grafana.ini":
+      server:
+        root_url: https://lifeos.${SECRET_DOMAIN}
+      analytics:
+        check_for_updates: false
+        reporting_enabled: false
+        feedback_links_enabled: false
+      users:
+        allow_sign_up: false
+        allow_org_create: false
+        default_theme: dark
+      auth.anonymous:
+        enabled: false
+      security:
+        cookie_secure: true
+        disable_gravatar: true
+      plugins:
+        # Deliberately on: trialling a datasource plugin from the UI is part of
+        # how this instance is meant to be used. Anything that earns a permanent
+        # place should be added to a `plugins:` list in the values above, or it
+        # exists only on the PVC and a rebuild comes up without it.
+        plugin_admin_enabled: true
+      dashboards:
+        # Raised from Grafana's 5s default. Personal reporting runs on data that
+        # changes when a scheduled job writes it or a human edits something —
+        # sub-minute refresh buys nothing and just multiplies query load.
+        min_refresh_interval: 1m
+      date_formats:
+        default_timezone: ${TIMEZONE}
+      log:
+        mode: console
+
+    # Ingress is Gateway API here — see httproute.yaml.
+    ingress:
+      enabled: false
+
+    # Prometheus discovers ServiceMonitors cluster-wide
+    # (serviceMonitorSelectorNilUsesHelmValues: false), so this instance shows
+    # up in the monitoring stack without any change over there.
+    serviceMonitor:
+      enabled: true
+
+    # INFORMED GUESS — not measured; no dashboards exist yet. Requests match the
+    # repo's 50m floor and the monitoring instance's Grafana, which is a
+    # reasonable analogue. Revisit once there is ~14d of real usage.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        # No CPU limit, per repo convention — Grafana is bursty on dashboard
+        # load and CFS throttling shows up as UI lag. Memory is the resource
+        # worth bounding.
+        memory: 512Mi
+
+    testFramework:
+      enabled: false
