@@ -96,6 +96,19 @@
       automerge: false,
     },
     {
+      // Same reasoning as Longhorn, different mechanism. The LifeOS Grafana is
+      // the one app whose database holds state that is not reproducible from
+      // Git (UI-authored dashboards, alert rules, preferences — see
+      // docs/lifeos-grafana.md). A chart bump carries a Grafana app-version
+      // bump, and Grafana migrates its schema forward on start; rolling the
+      // chart back does not roll the database back. Unattended Saturday
+      // automerge would apply a one-way migration to the only copy of that
+      // state. Merge by hand, after a Longhorn snapshot.
+      description: "Never auto-merge LifeOS — its state is not reproducible from Git",
+      matchFileNames: ["kubernetes/apps/lifeos/**"],
+      automerge: false,
+    },
+    {
       matchUpdateTypes: ["digest"],
       semanticCommitType: "chore",
       commitMessageExtra: "( {{currentDigestShort}} ➔ {{newDigestShort}} )",

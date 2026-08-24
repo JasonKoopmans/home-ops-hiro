@@ -51,9 +51,23 @@ spec:
       # from Git, so this is the only copy of it — do not downgrade to a
       # -no-backup class.
       storageClassName: longhorn
-      # SQLite DB, the plugin tree under /var/lib/grafana/plugins and the bleve
-      # search index. Single-user scale; 5Gi is headroom, not a projection.
+      # INFORMED GUESS — nothing has been written yet. Holds the SQLite DB, the
+      # plugin tree under /var/lib/grafana/plugins and the bleve search index.
+      # Single-user scale, so 5Gi is headroom rather than a projection. Revisit
+      # once there is real dashboard and plugin volume.
       size: 5Gi
+
+    # The chart's default init container runs as root with CHOWN + DAC_OVERRIDE
+    # to fix ownership of /var/lib/grafana. `securityContext.fsGroup: 472` (a
+    # chart default we keep) already makes kubelet chown the volume recursively
+    # on mount, so this is a root container doing work Kubernetes has already
+    # done. Off, to keep the pod root-free — matching the posture the rest of
+    # the repo takes.
+    # If Grafana ever fails to start with a permission error on
+    # /var/lib/grafana, flip this back to true and file a follow-up: it means
+    # the fsGroup chown did not apply, which would be worth understanding.
+    initChownData:
+      enabled: false
 
     admin:
       existingSecret: grafana-secret
@@ -102,6 +116,13 @@ spec:
     # left enabled in grafana.ini so plugins can be trialled from the UI — but
     # anything that earns a permanent place belongs in this list, otherwise it
     # only exists on the PVC.
+    #
+    # Startup dependency worth knowing: the chart turns this into
+    # GF_INSTALL_PLUGINS, and grafana-cli downloads from grafana.com in the
+    # container entrypoint. A *first* start with no egress to grafana.com fails
+    # the container. Later starts skip plugins already present on the PVC, so
+    # this is a bootstrap-time dependency, not an every-restart one. It is the
+    # only app in this repo that reaches outside the cluster to become ready.
     plugins:
       - grafana-googlesheets-datasource
 
@@ -220,13 +241,17 @@ spec:
     serviceMonitor:
       enabled: true
 
+    # INFORMED GUESS — not measured; no dashboards exist yet. Requests match the
+    # repo's 50m floor and the monitoring instance's Grafana, which is a
+    # reasonable analogue. Revisit once there is ~14d of real usage.
     resources:
       requests:
         cpu: 50m
         memory: 128Mi
       limits:
-        # No CPU limit — Grafana is bursty on dashboard load and throttling
-        # shows up as UI lag. Memory is the resource worth bounding.
+        # No CPU limit, per repo convention — Grafana is bursty on dashboard
+        # load and CFS throttling shows up as UI lag. Memory is the resource
+        # worth bounding.
         memory: 512Mi
 
     testFramework:

@@ -161,6 +161,58 @@ without it and every dashboard depending on it will break.
   roll the pod without manual intervention.
 - **Chart source**: the standalone Grafana chart left `grafana/helm-charts` on
   2026-01-30 and is now maintained at `grafana-community/helm-charts`, pulled
-  here over OCI from `ghcr.io/grafana-community/helm-charts/grafana`. The
-  monitoring instance's Grafana still comes from the kube-prometheus-stack
-  bundle and is unaffected.
+  here over OCI from `ghcr.io/grafana-community/helm-charts/grafana`. Note the
+  provenance change — that is a community org, not `grafana/`. The monitoring
+  instance's Grafana still comes from the kube-prometheus-stack bundle and is
+  unaffected, so the repo now carries two Grafana chart sources.
+- **Chart bumps are never auto-merged.** `.renovaterc.json5` excludes
+  `kubernetes/apps/lifeos/**` from automerge, for the same class of reason as
+  Longhorn: a chart bump carries a Grafana app-version bump, Grafana migrates
+  its schema forward on start, and rolling the chart back does not roll the
+  database back. Take a Longhorn snapshot, then merge by hand.
+- **First start needs egress to grafana.com.** `plugins:` becomes
+  `GF_INSTALL_PLUGINS` and `grafana-cli` downloads in the entrypoint, so a
+  cold start with no internet fails the container. Restarts skip plugins
+  already on the PVC, so this is a bootstrap dependency, not a per-restart one.
+  It is the only app here that reaches outside the cluster to become ready.
+- **Plugin admin is enabled**, which means a Grafana admin can install
+  arbitrary plugins — including backend plugins, which are binaries that
+  execute in the pod. That is a deliberate trade for UI-driven work on an
+  internal-only, single-admin instance, but it is a wider door than anything
+  else in this repo opens. Turn it off in `grafana.ini` if that stops being
+  worth it.
+
+---
+
+## What actually protects this data
+
+Worth being precise, because this app's resilience story is weaker than the
+Postgres one next door and it should be a known quantity rather than a surprise.
+
+| Failure | Covered by | Gap |
+|---|---|---|
+| Pod or node loss | Longhorn 3-replica volume, pod reschedules | none |
+| Volume loss | Longhorn recurring backup to `s3://hiro-longhorn-backups` | restores to the last recurring backup, not to a point in time |
+| Accidental dashboard deletion (Git plane) | Git history | none |
+| Accidental dashboard deletion (UI plane) | Longhorn backup only | anything since the last backup is gone |
+| Bad chart upgrade migrating the schema | Manual merge + a snapshot you remember to take | not automated |
+| Logical corruption of `grafana.db` | Longhorn backup only | no logical export, no PITR |
+
+The honest caveat: a Longhorn backup of a **live SQLite file is
+crash-consistent, not transactionally consistent**. SQLite is built to survive
+exactly that (it recovers via its journal on next open), so this is normally
+fine — but it is a weaker guarantee than `database/postgres` gets, and there is
+no restore drill for it.
+
+Two things partly close the gap today: promoting dashboards into Git moves the
+highest-value content out of the database entirely, and `LonghornVolumeUsageHigh`
+already alerts on the volume filling. Neither covers alert rules or preferences.
+
+**The real fix, when the reporting warehouse lands:** point Grafana's backend at
+the existing CNPG cluster (`database/postgres`) instead of SQLite. It already
+has nightly base backups, continuous WAL archiving to AWS S3 and a 7-day
+recovery window, so this app's state would inherit PITR for a handful of lines
+of config. Two preconditions: CNPG's backups are still marked **unverified**
+pending a restore drill (`docs/plan-cloudnative-pg.md` §1b), and the migration
+itself is a one-way data move that needs its own snapshot. Not a v1 change, but
+the right destination.
