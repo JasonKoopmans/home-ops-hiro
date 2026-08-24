@@ -17,7 +17,7 @@ has actually run (see §7).
 
 ## §1 The shape of the thing
 
-| | |
+| Item | Value |
 |---|---|
 | Topology | 3 instances, `podAntiAffinityType: required` |
 | Placement | one instance per node, 3 distinct nodes |
