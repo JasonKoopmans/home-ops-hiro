@@ -228,9 +228,15 @@ discover:
 - **Loss of the S3 bucket or its credentials.** No second copy of the backups
   exists. The bucket has versioning and Object Lock *capability* enabled, but no
   retention rule is set — see [plan-cloudnative-pg.md](plan-cloudnative-pg.md) §5.
-- **A restore that has never been tested.** As of writing, no base backup has
-  completed and no restore has been attempted. Until phase 5 runs, "we have
-  backups" is a configuration claim, not a demonstrated capability.
+- **A restore that has not been tested.** Backup configuration and backup
+  capability are different claims, and only one of them is verifiable from a
+  manifest. Until a restore has actually been performed, treat recovery as
+  unproven no matter how green the alerts are.
+
+  This document deliberately does **not** record whether that has happened yet —
+  live status belongs in one place, and duplicating it here is how the two drift
+  apart. Check [plan-cloudnative-pg.md](plan-cloudnative-pg.md) §1b, and §7 below:
+  if §7 is still empty, no drill has run.
 
 ---
 
