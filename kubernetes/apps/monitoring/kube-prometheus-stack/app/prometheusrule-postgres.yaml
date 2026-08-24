@@ -48,17 +48,33 @@ spec:
         # would fire on a cluster behaving perfectly that simply has not reached
         # its first scheduled run. The paired NeverSucceeded rule closes the hole
         # the guard opens.
+        # The trailing `unless` is what keeps this from double-paging. Staleness
+        # and failure are not naturally exclusive: a backup that last succeeded
+        # 40h ago AND failed an hour ago satisfies both predicates, so one outage
+        # would raise two criticals. `unless` cedes that case to
+        # PostgresBackupFailing, which is the more specific and more actionable
+        # of the two.
+        #
+        # What survives here is the genuinely distinct condition: backups are
+        # stale and nothing is even failing — the schedule is not running at all
+        # (ScheduledBackup suspended, deleted, or never firing). That points at a
+        # different cause than a backup that runs and errors, which is why it
+        # stays a separate alert rather than being folded in.
         - alert: PostgresBackupStale
           expr: |
             max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"}) > 0
             and
             time() - max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"}) > 129600
+            unless
+            max(barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp{namespace="database"})
+              >
+            max(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"})
           for: 15m
           labels:
             severity: critical
           annotations:
-            summary: Postgres has no recent successful base backup
-            description: The most recent base backup is over 36 hours old against a nightly schedule (docs/plan-cloudnative-pg.md §1b). WAL archiving may still be working, but WAL is a diff against a base backup — without a recent one the recovery window is shrinking. 36h allows one missed run plus margin before paging.
+            summary: Postgres base backups have stopped running
+            description: The most recent base backup is over 36 hours old against a nightly schedule, and no backup has failed since — so the schedule itself is not running rather than erroring (docs/plan-cloudnative-pg.md §1b). Check the ScheduledBackup is present and not suspended. WAL archiving may still be fine, but WAL is a diff against a base backup, so the recovery window is shrinking.
 
         # A gauge pinned at 0 means no backup has EVER completed.
         #
@@ -167,17 +183,36 @@ spec:
         # kept reporting healthy. The three backup expressions would then
         # evaluate to an empty vector and never fire, so backup monitoring would
         # fail open with every indicator green.
+        # Checks every series the rules above actually consume, one absent()
+        # per family, rather than treating any single metric as a proxy for the
+        # rest. `cnpg_collector_up` existing proves only that the collector
+        # health gauge is present — it says nothing about whether the
+        # pg_stat_archiver or replication query groups are still being produced.
+        # Those come from queries in the cnpg-default-monitoring ConfigMap and
+        # can stop independently (a bad edit, a query error, a version change)
+        # while the collector keeps reporting 1. The dependent alerts would then
+        # evaluate to an empty vector and stay silent forever.
+        #
+        # The rule is deliberately verbose for that reason: each line maps to the
+        # metric one of the alerts above depends on, so adding an alert that
+        # consumes a new family means adding a line here too.
         - alert: PostgresMetricsMissing
           expr: |
             absent(cnpg_collector_up{namespace="database"})
             or
             absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"})
+            or
+            absent(barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp{namespace="database"})
+            or
+            absent(cnpg_pg_stat_archiver_last_archived_time{namespace="database"})
+            or
+            absent(cnpg_pg_replication_streaming_replicas{namespace="database"})
           for: 15m
           labels:
             severity: warning
           annotations:
             summary: Postgres metrics are not being scraped
-            description: One or both required metric families are absent for the database namespace — cnpg_* (archiver, replication) or barman_cloud_cloudnative_pg_io_* (base backups). Alerts depending on the missing family are currently blind, including backup staleness. Check the PodMonitor in the postgres app and the plugin-barman-cloud sidecar.
+            description: At least one required metric family is absent for the database namespace — cnpg_collector (exporter health), cnpg_pg_stat_archiver (WAL), cnpg_pg_replication (replicas), or barman_cloud_cloudnative_pg_io (base backups). Alerts depending on the missing family are blind and will stay silent rather than firing. Check the PodMonitor in the postgres app, the cnpg-default-monitoring ConfigMap, and the plugin-barman-cloud sidecar.
 
         # Distinct from the above: the series exist, but either the exporter
         # cannot query PostgreSQL, or an instance stopped reporting entirely.

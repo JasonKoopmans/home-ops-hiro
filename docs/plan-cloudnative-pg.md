@@ -245,14 +245,23 @@ plus `spec.monitoring.enablePodMonitor: true` on the Cluster. The design notes
 below are kept because they explain *why* each rule is shaped the way it is.
 
 > **The instances were not being scraped at all.** The operator's PodMonitor
-> from the Helm chart covers only the controller. The ~460 `cnpg_*` series that
-> describe the database — backup age, WAL archiver counters, replication lag —
-> are served on port 9187 of each instance pod, and `enablePodMonitor` defaults
-> to **false**, so they were generated and discarded. Confirmed by
-> port-forwarding an instance directly: 462 series there, zero in Prometheus.
-> The `cnpg-default-monitoring` ConfigMap defines the queries but nothing
-> collected their results — having the queries is not the same as having the
-> metrics.
+> from the Helm chart covers only the controller. Port 9187 on each instance pod
+> serves **two** families, and nothing collected either:
+>
+> | Family | Covers |
+> |---|---|
+> | `cnpg_*` (~460 series) | WAL archiver counters, replication, connections, exporter health |
+> | `barman_cloud_cloudnative_pg_io_*` | **base-backup timestamps** — age, last failure, first recoverability point |
+>
+> Backup age is **not** in the `cnpg_*` family. It is published by the Barman
+> Cloud plugin under its own prefix, and the in-core `cnpg_collector_*` backup
+> gauges it supersedes stay pinned at 0 under `method: plugin` — see the metric
+> note further down, which is the bug that mattered most in this work.
+>
+> Confirmed by port-forwarding an instance directly: both families present
+> there, zero in Prometheus. The `cnpg-default-monitoring` ConfigMap defines
+> queries but nothing collected their results — having the queries is not the
+> same as having the metrics.
 
 **Two alerts deliberately not written**, because generic rules already own them
 and duplicate alerts are a failure mode this repo has actually hit:
@@ -354,9 +363,23 @@ which is true and does mean all PodMonitors in all namespaces get selected), the
 database metrics would be scraped "with no extra wiring". They were not.
 
 Two different PodMonitors are involved. The chart's covers the **operator**; the
-instances need their own, created only when `spec.monitoring.enablePodMonitor`
-is set on the **Cluster**, and it defaults to false. Selecting every PodMonitor
-does not help when the PodMonitor does not exist.
+instances need their own, and none existed. Selecting every PodMonitor does not
+help when the PodMonitor does not exist.
+
+**How the instance PodMonitor is created matters too.** The Cluster field
+`spec.monitoring.enablePodMonitor` will generate one, but the CNPG API marks it
+*Deprecated: This feature will be removed in an upcoming release. If you need
+this functionality, you can create a PodMonitor manually.* Depending on it would
+mean a future operator upgrade silently deletes the generated object and takes
+every alert here blind — the same fail-open condition this section exists to
+close, just deferred. So the app owns an explicit
+`kubernetes/apps/database/postgres/app/podmonitor.yaml` instead, and the
+Cluster carries no `monitoring` stanza at all.
+
+Because the app now ships a Prometheus CR, its `ks.yaml` also gained
+`dependsOn: [{name: kube-prometheus-stack, namespace: monitoring}]` — the
+contract that file documents for exactly this case. Without it a fresh bootstrap
+can reconcile postgres before the PodMonitor CRD is registered.
 
 The lesson worth keeping: "the queries are configured" and "the exporter is
 running" are both true statements that still leave you with no metrics. Only
