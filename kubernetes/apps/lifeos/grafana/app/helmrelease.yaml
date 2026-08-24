@@ -83,82 +83,24 @@ spec:
         secretKeyRef:
           name: grafana-secret
           key: secret-key
-      # Interpolated into the Google Sheets datasource below. These are
-      # identifiers rather than credentials, but they name a private GCP
-      # project, so they stay out of the manifests.
-      GF_GOOGLE_SA_CLIENT_EMAIL:
-        secretKeyRef:
-          name: grafana-secret
-          key: googlesheets-client-email
-      GF_GOOGLE_SA_PROJECT:
-        secretKeyRef:
-          name: grafana-secret
-          key: googlesheets-project-id
-
-    # The service-account private key is a multi-line PEM. Mounted as a file and
-    # referenced by path rather than pushed through env interpolation, which is
-    # where PEM newlines usually get mangled.
-    extraSecretMounts:
-      - name: googlesheets-sa
-        secretName: grafana-secret
-        mountPath: /etc/secrets/googlesheets
-        readOnly: true
-        # 0440 in decimal, spelled out because YAML octal parsing differs
-        # between the tools this file passes through. Group-readable, not
-        # owner-only: secret volumes are owned by root with the group set to
-        # fsGroup (472), and Grafana runs as 472 — 0400 would lock it out.
-        defaultMode: 288
-        items:
-          - key: googlesheets-private-key
-            path: privateKey
-
-    # Declared here so the plugin set is reproducible from Git. Plugin admin is
-    # left enabled in grafana.ini so plugins can be trialled from the UI — but
-    # anything that earns a permanent place belongs in this list, otherwise it
-    # only exists on the PVC.
-    #
-    # Startup dependency worth knowing: the chart turns this into
-    # GF_INSTALL_PLUGINS, and grafana-cli downloads from grafana.com in the
-    # container entrypoint. A *first* start with no egress to grafana.com fails
-    # the container. Later starts skip plugins already present on the PVC, so
-    # this is a bootstrap-time dependency, not an every-restart one. It is the
-    # only app in this repo that reaches outside the cluster to become ready.
-    plugins:
-      - grafana-googlesheets-datasource
 
     # ---- Git plane: datasources -------------------------------------------
-    # Rendered into a ConfigMap and mounted at
-    # /etc/grafana/provisioning/datasources. editable: false keeps the UI from
-    # offering edits that the next reconcile would silently revert.
+    # Deliberately none yet. This instance ships with no data source at all:
+    # the reporting warehouse it is meant to query does not exist yet, and a
+    # provisioned data source pointing at nothing is worse than an empty list —
+    # it fails its health check on every page load and trains you to ignore a
+    # red banner.
     #
-    # Every datasource carries an explicit uid: dashboard JSON references
-    # datasources by uid, so a stable one is what makes an exported dashboard
-    # portable back into Git. Without it Grafana mints a random uid per
-    # provisioning run and dashboards break on reprovision.
-    datasources:
-      datasources.yaml:
-        apiVersion: 1
-        datasources:
-          - name: Google Sheets
-            uid: googlesheets
-            type: grafana-googlesheets-datasource
-            access: proxy
-            isDefault: true
-            editable: false
-            jsonData:
-              # jwt = service account. The alternative, `key` (an API key), only
-              # reads sheets published to "anyone with the link" — no good for
-              # personal data. Each sheet must be shared with the client email
-              # below, exactly as if it were a person.
-              authenticationType: jwt
-              # $VAR is Grafana's provisioning interpolation; $$ is the escape
-              # that stops Flux's postBuild substitution from eating it first.
-              # If a value ever arrives at Grafana un-interpolated, the fallback
-              # is to inline it here — neither field is a secret.
-              clientEmail: $$GF_GOOGLE_SA_CLIENT_EMAIL
-              defaultProject: $$GF_GOOGLE_SA_PROJECT
-              tokenUri: https://oauth2.googleapis.com/token
-              privateKeyPath: /etc/secrets/googlesheets/privateKey
+    # When the warehouse lands, add a `datasources:` block here pointing at the
+    # CNPG cluster in the `database` namespace, with a read-only role and an
+    # explicit `uid`. The uid is the part that matters: dashboard JSON
+    # references data sources by uid, so a stable one is what makes an exported
+    # dashboard portable back into Git. Without it Grafana mints a random uid
+    # per provisioning run and dashboards break on reprovision.
+    #
+    # Nothing is blocked in the meantime — a data source added through the UI
+    # works fine and lives in the UI plane like any other browser-authored
+    # object.
 
     # ---- Git plane: dashboards --------------------------------------------
     # The sidecar watches ConfigMaps in this namespace labelled
@@ -215,17 +157,15 @@ spec:
         disable_gravatar: true
       plugins:
         # Deliberately on: trialling a datasource plugin from the UI is part of
-        # how this instance is meant to be used. Promote keepers to `plugins:`.
+        # how this instance is meant to be used. Anything that earns a permanent
+        # place should be added to a `plugins:` list in the values above, or it
+        # exists only on the PVC and a rebuild comes up without it.
         plugin_admin_enabled: true
       dashboards:
-        # Sheets reads go through the Google API on every refresh; a 5s panel
-        # interval would burn the per-minute quota for no benefit on data that
-        # changes when a human edits a spreadsheet.
+        # Raised from Grafana's 5s default. Personal reporting runs on data that
+        # changes when a scheduled job writes it or a human edits something —
+        # sub-minute refresh buys nothing and just multiplies query load.
         min_refresh_interval: 1m
-      dataproxy:
-        # Sheets responses are slower than a Prometheus query. The 30s default
-        # times out on wide ranges.
-        timeout: 60
       date_formats:
         default_timezone: ${TIMEZONE}
       log:

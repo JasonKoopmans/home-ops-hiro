@@ -8,7 +8,7 @@ stays focused on the cluster.
 |---|---|---|
 | Hostname | `grafana.${SECRET_DOMAIN}` | `lifeos.${SECRET_DOMAIN}` |
 | Chart | bundled in kube-prometheus-stack | `grafana-community/grafana` (standalone, versions independently) |
-| Data sources | Thanos, Loki, Prometheus | Google Sheets (first of several) |
+| Data sources | Thanos, Loki, Prometheus | none yet — a Postgres warehouse is next |
 | Database | disposable — rebuild from Git | **load-bearing** — holds UI-authored work |
 | Storage class | `longhorn` | `longhorn` (3 replicas + S3 backups) |
 
@@ -44,7 +44,9 @@ The monitoring instance's PVC is a cache — delete it and Flux rebuilds the
 instance exactly. This one's is not: the UI plane exists nowhere else. It
 therefore uses the default `longhorn` class (3 replicas, recurring backups to
 `s3://hiro-longhorn-backups`), and **must not** be moved to a `-no-backup`
-class. See `docs/backup-recovery.md` for the restore path.
+class. Restores go through the Longhorn UI — restore the backup to a new volume,
+then point the PVC at it. (`docs/backup-recovery.md` is specific to
+recording-annotator and does not cover this app.)
 
 `GF_SECURITY_SECRET_KEY` (from the SOPS secret) encrypts credential rows inside
 that database. Set it once. Rotating it makes every already-encrypted row —
@@ -75,8 +77,8 @@ Two things to check on the way through:
   `postBuild` substitution will happily replace with nothing. Escape each `$` as
   `$$` in the committed ConfigMap. The export script reminds you.
 - **Data source references.** Panels must reference a data source by `uid`, not
-  by name. Provisioned sources here have explicit uids (`googlesheets`) for
-  exactly this reason.
+  by name. Provisioned sources here carry explicit uids for exactly this
+  reason.
 
 ### Editing a promoted dashboard
 
@@ -86,48 +88,39 @@ Save As), rework it there, re-export, delete the copy.
 
 ---
 
-## Google Sheets
+## Data sources
 
-The first integration. It authenticates as a **Google Cloud service account**,
-not as you, which has one consequence worth internalising: *Grafana cannot see a
-spreadsheet until that spreadsheet is shared with the service account's email
-address*, exactly as if it were a colleague.
+**There are none yet, and that is deliberate.** The reporting warehouse this
+instance is meant to query does not exist yet, and a provisioned data source
+pointing at nothing is worse than an empty list — it fails its health check on
+every page load and teaches you to ignore a red banner.
 
-### One-time setup
+Nothing is blocked in the meantime: a data source added through the UI works
+normally and lives in the UI plane like any other browser-authored object.
 
-Full walkthrough — project, service account, folder sharing, key rotation, and
-why this gets its own identity rather than n8n's — is in
-**`docs/lifeos-google-credentials.md`**. In outline:
-
-1. Enable the Sheets API and Drive API in a GCP project.
-2. Create a `grafana-lifeos` service account and a JSON key. No IAM roles.
-3. Put the reportable sheets in a **LifeOS** Drive folder, shared once with the
-   service account as Viewer.
-4. Extract `client_email` / `project_id` / `private_key` into
-   `kubernetes/apps/lifeos/grafana/app/secret.sops.yaml`, encrypt, push.
-
-The private key is mounted as a file (`privateKeyPath`) rather than passed
-through an environment variable, because PEM newlines survive a file mount and
-frequently do not survive env-var interpolation.
-
-Panel refresh is floored at 1 minute (`min_refresh_interval`): every refresh is
-a live Google API call, and the underlying data only changes when a human edits
-a sheet.
-
-### Adding more data sources
+### Adding one
 
 - **Credentials belong in Git** → add the source to `datasources:` in
   `helmrelease.yaml` with an explicit `uid`, and its secret to
   `secret.sops.yaml`. Provisioned sources are locked for editing in the UI.
 - **Just trying something out** → configure it in the UI. It is stored encrypted
-  in the database and backed up with the volume. Move it into Git when it
-  becomes load-bearing.
+  in the database (under `GF_SECURITY_SECRET_KEY`) and backed up with the
+  volume. Move it into Git when it becomes load-bearing.
 
-`yesoreyeram-infinity-datasource` (CSV/JSON/REST/GraphQL) is the usual next step
-for this kind of instance — add it to `plugins:` when needed.
+The `uid` is the part that matters. Dashboard JSON references data sources by
+uid, so a stable one is what lets a dashboard exported into Git keep working
+after a reprovision.
 
-Note that cluster metrics are deliberately *not* wired in here. If a personal
-dashboard ever wants them, add Thanos as a second data source
+### The one that's coming
+
+The reporting warehouse: a database on the existing CNPG cluster in the
+`database` namespace, written by scheduled n8n jobs and read here through a
+**read-only** Postgres role — the same principle as everything else in this app,
+where the reporting consumer cannot mutate what it reports on. Grafana's
+Postgres data source is built in, so no plugin is needed.
+
+Cluster metrics are deliberately *not* wired in. If a personal dashboard ever
+wants them, add Thanos as a second data source
 (`http://thanos-query.monitoring.svc.cluster.local:10902`) rather than moving
 the dashboard to the monitoring instance.
 
@@ -135,14 +128,16 @@ the dashboard to the monitoring instance.
 
 ## Plugins
 
-Declared in `plugins:` in the HelmRelease, installed at pod start, and stored on
-the PVC.
+None are declared. Grafana's built-in data sources — Postgres included — cover
+what this instance needs, and every declared plugin is downloaded from
+grafana.com in the container entrypoint, which would make a cold start depend on
+external egress. Worth keeping that property as long as it's free.
 
 Plugin admin is left **enabled** in `grafana.ini` on purpose — trialling a data
 source plugin from the UI is part of how this instance is meant to be used. But
-a UI-installed plugin only exists on that volume: anything that earns a
-permanent place has to be added to `plugins:` in Git, or a rebuild will come up
-without it and every dashboard depending on it will break.
+a UI-installed plugin only exists on the PVC: anything that earns a permanent
+place has to be added to a `plugins:` list in the HelmRelease, or a rebuild
+comes up without it and every dashboard depending on it breaks.
 
 ---
 
@@ -170,11 +165,11 @@ without it and every dashboard depending on it will break.
   Longhorn: a chart bump carries a Grafana app-version bump, Grafana migrates
   its schema forward on start, and rolling the chart back does not roll the
   database back. Take a Longhorn snapshot, then merge by hand.
-- **First start needs egress to grafana.com.** `plugins:` becomes
-  `GF_INSTALL_PLUGINS` and `grafana-cli` downloads in the entrypoint, so a
-  cold start with no internet fails the container. Restarts skip plugins
-  already on the PVC, so this is a bootstrap dependency, not a per-restart one.
-  It is the only app here that reaches outside the cluster to become ready.
+- **No external dependency to become ready.** With no plugins declared, nothing
+  is downloaded at startup — the pod needs only its image and its PVC. Adding a
+  `plugins:` entry would change that: `GF_INSTALL_PLUGINS` downloads from
+  grafana.com in the entrypoint, so a cold start with no egress would fail the
+  container. Worth weighing before adding one.
 - **Plugin admin is enabled**, which means a Grafana admin can install
   arbitrary plugins — including backend plugins, which are binaries that
   execute in the pod. That is a deliberate trade for UI-driven work on an
