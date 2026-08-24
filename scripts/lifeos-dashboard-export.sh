@@ -66,8 +66,18 @@ response="$(curl -sS --fail --max-time 30 \
 }
 
 title="$(jq -r '.dashboard.title' <<<"${response}")"
-slug="$(tr '[:upper:]' '[:lower:]' <<<"${title}" | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//')"
-[[ -n "${slug}" ]] || slug="$(tr '[:upper:]' '[:lower:]' <<<"${UID_ARG}" | sed -e 's/[^a-z0-9]\+/-/g')"
+
+# Slug comes from the uid, not the title. Titles are neither unique nor stable:
+# two dashboards sharing one would overwrite each other's ConfigMap, and
+# renaming a dashboard would leave the old file registered in kustomization.yaml
+# while writing a second provisioned copy of the same uid. The uid is the
+# identity Grafana itself keys on, so deriving from it keeps the filename,
+# ConfigMap name, data key and kustomization entry stable across renames.
+slug="$(tr '[:upper:]' '[:lower:]' <<<"${UID_ARG}" | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//')"
+if [[ -z "${slug}" ]]; then
+  echo "uid '${UID_ARG}' has no characters usable in a Kubernetes name." >&2
+  exit 1
+fi
 
 # `id` is the instance-local primary key and is meaningless in another database;
 # `version` is the DB's optimistic-locking counter. Both have to go or the
@@ -75,12 +85,22 @@ slug="$(tr '[:upper:]' '[:lower:]' <<<"${title}" | sed -e 's/[^a-z0-9]\+/-/g' -e
 # dashboard links and this script's own round-trip key on.
 dashboard="$(jq --sort-keys 'del(.dashboard.id, .dashboard.version) | .dashboard' <<<"${response}")"
 
+# A Grafana folder name is free text — it can contain ':', '#', a leading YAML
+# indicator or a newline, any of which would corrupt the generated ConfigMap as
+# a bare scalar. jq emits a JSON string, which is also a valid YAML
+# double-quoted scalar, so the annotation survives whatever the folder is called.
+folder_scalar="$(jq -Rn --arg v "${FOLDER}" '$v')"
+
 out_file="${APP_DIR}/dashboard-${slug}.yaml"
 {
   echo "---"
+  echo "# ${title}"
+  echo "#"
   echo "# Exported from the LifeOS Grafana UI plane by"
   echo "# \`task lifeos:dashboard:export uid=${UID_ARG}\`."
   echo "# Provisioned read-only — edit here and reconcile, not in the browser."
+  echo "# Named for the dashboard uid, which survives a rename; the title above"
+  echo "# is a comment precisely because it does not."
   echo "apiVersion: v1"
   echo "kind: ConfigMap"
   echo "metadata:"
@@ -88,7 +108,7 @@ out_file="${APP_DIR}/dashboard-${slug}.yaml"
   echo "  labels:"
   echo "    grafana_dashboard: \"1\""
   echo "  annotations:"
-  echo "    grafana_folder: ${FOLDER}"
+  echo "    grafana_folder: ${folder_scalar}"
   echo "data:"
   echo "  ${slug}.json: |"
   sed 's/^/    /' <<<"${dashboard}"

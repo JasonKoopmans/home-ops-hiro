@@ -26,17 +26,35 @@ other.
 So they are separated by *folder*, and the boundary is enforced by Grafana
 rather than by discipline:
 
-**Git plane — the `GitOps` folder (and any other folder named by a
-`grafana_folder` annotation).** Dashboards come from ConfigMaps in
-`kubernetes/apps/lifeos/grafana/app/`. The provider sets
-`allowUiUpdates: false`, so Grafana disables Save for these dashboards. Drift is
-not "discouraged", it is impossible. Data sources and plugins live here too.
+**Git plane — dashboards provisioned from ConfigMaps** in
+`kubernetes/apps/lifeos/grafana/app/`. Each one names its folder with a
+`grafana_folder` annotation; `GitOps` is the convention, but any folder name
+works. The provider sets `allowUiUpdates: false`, so Grafana disables Save on
+these dashboards. Data sources and plugins declared in the HelmRelease live here
+too.
 
-**UI plane — every other folder.** Dashboards, folders, playlists, alert rules,
-API tokens, preferences, plugins installed from the catalogue. All of it in
-Grafana's SQLite database on the PVC.
+**UI plane — everything authored in the browser.** Dashboards, folders,
+playlists, alert rules, API tokens, preferences, plugins installed from the
+catalogue. All of it in Grafana's SQLite database on the PVC.
 
 Draft in the UI plane. Promote what proves useful into the Git plane.
+
+### What is enforced, and what is convention
+
+Worth being exact, because the difference matters when something looks wrong:
+
+- **Enforced, per dashboard.** A dashboard loaded by the provider cannot be
+  saved from the browser. A UI edit to a Git-managed dashboard is impossible, so
+  a reconcile can never throw your work away.
+- **Convention, per folder.** Folder names are *not* reserved. Nothing stops an
+  admin creating a database dashboard inside the `GitOps` folder, and it would
+  behave like any other UI dashboard — editable, invisible to Git.
+
+So folder membership is a strong hint about provenance, not proof of it. When
+you actually need to know, check Dashboard settings → JSON Model (provisioned
+dashboards are marked read-only there) or look for a matching ConfigMap in the
+app directory. `task lifeos:dashboard:list` reports where a dashboard *sits*,
+not where it came from.
 
 ### What this means for the volume
 
@@ -64,8 +82,13 @@ git add -A && git commit -m "feat(lifeos): add <name> dashboard"
 
 The export strips the dashboard's `id` and `version` (database-local
 bookkeeping), keeps its `uid`, writes
-`kubernetes/apps/lifeos/grafana/app/dashboard-<slug>.yaml`, and registers the
+`kubernetes/apps/lifeos/grafana/app/dashboard-<uid>.yaml`, and registers the
 file in that directory's `kustomization.yaml`.
+
+Filenames come from the **uid, not the title** — titles are neither unique nor
+stable, so a title-derived name would collide between two similarly-named
+dashboards and would strand the old file whenever one was renamed. The title
+goes in a comment at the top of the generated file.
 
 Once Flux has reconciled, **delete the UI copy**. Otherwise the dashboard exists
 twice under the same uid and Grafana's provisioner and the database fight over
@@ -152,8 +175,23 @@ comes up without it and every dashboard depending on it breaks.
 - **Ordering**: the app's `ks.yaml` depends on `kube-prometheus-stack` purely
   for the `monitoring.coreos.com` CRDs that the ServiceMonitor needs.
 - **Restarts**: the HelmRelease carries
-  `secret.reloader.stakater.com/reload: grafana-secret`, so credential changes
-  roll the pod without manual intervention.
+  `secret.reloader.stakater.com/reload: grafana-secret`, so a Secret change
+  rolls the pod without manual intervention.
+- **The admin password in the Secret is bootstrap-only**, and this is the one
+  piece of the setup that behaves counter-intuitively. Grafana writes that
+  password into its database when it first creates the admin user and never
+  reads it again — the stored hash wins on every later start. Edit the Secret
+  and the pod restarts, everything looks successful, and **the old password
+  still works**. To actually rotate:
+
+  ```sh
+  kubectl -n lifeos exec deploy/grafana -- \
+    grafana cli admin reset-admin-password '<new-password>'
+  ```
+
+  Then update the Secret to match, so a future rebuild from Git agrees with
+  what is in the database. (`secret-key` is different — it *is* read from the
+  environment on every start, which is why it must never change.)
 - **Chart source**: the standalone Grafana chart left `grafana/helm-charts` on
   2026-01-30 and is now maintained at `grafana-community/helm-charts`, pulled
   here over OCI from `ghcr.io/grafana-community/helm-charts/grafana`. Note the

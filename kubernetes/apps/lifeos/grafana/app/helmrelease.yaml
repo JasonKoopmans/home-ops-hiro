@@ -38,8 +38,10 @@ spec:
     replicas: 1
 
     # Deployment-level, which is where Reloader looks. The chart already
-    # checksums its own ConfigMaps into the pod template; this covers the
-    # Secret, so admin credentials and the Google key roll the pod on change.
+    # checksums its own ConfigMaps into the pod template; this covers the Secret.
+    # Note what that does and does not buy: a changed `secret-key` takes effect
+    # on the restart, but a changed `admin-password` does not — see the
+    # bootstrap-only note on `admin:` below.
     annotations:
       secret.reloader.stakater.com/reload: grafana-secret
 
@@ -69,6 +71,14 @@ spec:
     initChownData:
       enabled: false
 
+    # BOOTSTRAP ONLY. Grafana writes this password into its database when it
+    # first creates the admin user and never reads it again — on every later
+    # start the stored hash wins. So editing the Secret and letting Reloader
+    # restart the pod looks like a successful rotation while the old password
+    # goes on working. To actually rotate:
+    #   kubectl -n lifeos exec deploy/grafana -- \
+    #     grafana cli admin reset-admin-password '<new>'
+    # then update the Secret to match, so a future rebuild agrees with reality.
     admin:
       existingSecret: grafana-secret
       userKey: admin-user
@@ -106,24 +116,51 @@ spec:
     # The sidecar watches ConfigMaps in this namespace labelled
     # grafana_dashboard: "1" and drops them into the provisioning tree.
     sidecar:
+      # The sidecar is a second container in this pod, so the `resources:` block
+      # further down bounds Grafana only and leaves the ConfigMap watcher
+      # unbounded — which the repo's convention explicitly calls out as a thing
+      # to get right.
+      #
+      # INFORMED GUESS — not measured. It watches a handful of small ConfigMaps
+      # in one namespace and is idle between events. Memory limit is ~4x the
+      # request to absorb a burst of simultaneous dashboard writes. No CPU limit,
+      # per repo convention. Revisit if it ever shows up in the pod-limit
+      # pressure alerts.
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi
       dashboards:
         enabled: true
         label: grafana_dashboard
         # Unset = this namespace only. Left alone deliberately: the monitoring
         # instance's dashboards should not leak into the personal one.
         searchNamespace: null
+        # Both the sidecar's write root and the provider's scan path. Note
+        # `defaultFolderName` is deliberately NOT set: the chart appends it to
+        # the sidecar's FOLDER, and reasoning about how that composes with a
+        # per-ConfigMap folder annotation is exactly the kind of path arithmetic
+        # that fails silently — a dashboard written outside the provider's path
+        # is simply never loaded, with no error anywhere. One base directory,
+        # one scan path, no arithmetic.
         folder: /tmp/dashboards
-        # Each dashboard ConfigMap picks its Grafana folder with a
-        # `grafana_folder` annotation; unannotated ones land in "GitOps".
+        # Each dashboard ConfigMap names its Grafana folder with a
+        # `grafana_folder` annotation, which becomes a subdirectory under the
+        # base above and then a folder via foldersFromFilesStructure. Every
+        # Git-plane ConfigMap should carry it; without one a dashboard lands at
+        # the root of the path and shows up outside any folder.
         folderAnnotation: grafana_folder
-        defaultFolderName: GitOps
         provider:
           name: gitops
           foldersFromFilesStructure: true
-          # The load-bearing half of the two-plane split: dashboards that came
-          # from Git are read-only in the browser, so there is no way to make a
-          # UI edit that a reconcile would throw away. Draft in the UI plane
-          # instead, then promote.
+          # What this actually guarantees: a dashboard *loaded by this provider*
+          # cannot be saved from the browser, so a UI edit can never be thrown
+          # away by the next reconcile. It does not reserve folder names — an
+          # admin can still create a database dashboard inside the GitOps
+          # folder. The folder split is the convention; per-dashboard
+          # read-only is the enforcement.
           allowUiUpdates: false
           # Removing the ConfigMap removes the dashboard — Git stays the truth
           # for this folder.

@@ -13,9 +13,15 @@ tasks:
   dashboard:list:
     desc: List dashboards in the LifeOS Grafana, with their uid and folder
     summary: |
-      Shows both planes at once, so it doubles as the drift check: anything in
-      the GitOps folder came from a ConfigMap in this repo, everything else
-      lives only in Grafana's database and is a promotion candidate.
+      Lists every dashboard with its uid and folder, which is what you need to
+      pick one to promote.
+
+      Note this does not report provenance: the folder column is where a
+      dashboard sits, not where it came from. Git-provisioned dashboards can
+      live in any folder named by a `grafana_folder` annotation, and nothing
+      stops someone creating a database dashboard inside one of those folders.
+      To see what is actually provisioned, check Dashboard settings → JSON
+      Model, or list the ConfigMaps in this repo's app directory.
     cmd: |
       user="$(kubectl -n lifeos get secret grafana-secret -o jsonpath='{.data.admin-user}' | base64 -d)"
       password="$(kubectl -n lifeos get secret grafana-secret -o jsonpath='{.data.admin-password}' | base64 -d)"
@@ -48,7 +54,7 @@ tasks:
         folder: Grafana folder for the provisioned copy (default: GitOps)
 
       Fetches the dashboard over Grafana's API, strips the database-local id and
-      version fields, writes kubernetes/apps/lifeos/grafana/app/dashboard-<slug>.yaml
+      version fields, writes kubernetes/apps/lifeos/grafana/app/dashboard-<uid>.yaml
       and registers it in that directory's kustomization.yaml.
 
       The result is provisioned read-only, so delete the UI copy once Flux has
@@ -59,7 +65,15 @@ tasks:
         task lifeos:dashboard:export uid=lifeos-spend folder=Finance
     requires:
       vars: [uid]
-    cmd: bash "{{.DASHBOARD_EXPORT_SCRIPT}}" "{{.uid}}" "{{.folder | default `GitOps`}}" "{{.ROOT_DIR}}"
+    # uid and folder are passed as environment variables rather than
+    # interpolated into `cmd`. Task renders cmd into a string that a shell then
+    # parses, and double quotes do not stop command substitution — so an
+    # interpolated `uid=$(...)` or a backtick in `folder` would execute on the
+    # operator's machine. As env vars the values never enter the command line.
+    env:
+      DASHBOARD_UID: "{{.uid}}"
+      DASHBOARD_FOLDER: "{{.folder | default `GitOps`}}"
+    cmd: bash "{{.DASHBOARD_EXPORT_SCRIPT}}" "$DASHBOARD_UID" "$DASHBOARD_FOLDER" "{{.ROOT_DIR}}"
     preconditions:
       - { msg: "Missing kubeconfig", sh: 'test -f "{{.KUBECONFIG}}"' }
       - { msg: "Missing export script", sh: 'test -f "{{.DASHBOARD_EXPORT_SCRIPT}}"' }
