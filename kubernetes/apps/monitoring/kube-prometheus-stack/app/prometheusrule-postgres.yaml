@@ -157,25 +157,49 @@ spec:
         # "not looking". `absent()` is the only thing that catches that, and it
         # is why this rule exists rather than being redundant with the pod-level
         # alerts. This is the same reasoning as N8nWorkflowMetricsMissing.
+        # Covers BOTH metric families, not just one. The backup alerts consume
+        # `barman_cloud_cloudnative_pg_io_*` while the archiver and replication
+        # alerts consume `cnpg_*`, and the two come from different producers
+        # sharing one endpoint — the plugin sidecar and the instance manager.
+        # A dead-man switch that watched only `cnpg_collector_up` would stay
+        # silent if the plugin stopped registering its metrics (a plugin
+        # regression, a config error, a version skew) while the exporter itself
+        # kept reporting healthy. The three backup expressions would then
+        # evaluate to an empty vector and never fire, so backup monitoring would
+        # fail open with every indicator green.
         - alert: PostgresMetricsMissing
           expr: |
             absent(cnpg_collector_up{namespace="database"})
+            or
+            absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="database"})
           for: 15m
           labels:
             severity: warning
           annotations:
-            summary: Postgres cluster metrics are not being scraped
-            description: No cnpg_* metrics are present for the database namespace. Every other Postgres alert — including backup staleness and WAL archiving — depends on these series and is currently blind. Check the PodMonitor and `spec.monitoring.enablePodMonitor` on the Cluster.
+            summary: Postgres metrics are not being scraped
+            description: One or both required metric families are absent for the database namespace — cnpg_* (archiver, replication) or barman_cloud_cloudnative_pg_io_* (base backups). Alerts depending on the missing family are currently blind, including backup staleness. Check the PodMonitor in the postgres app and the plugin-barman-cloud sidecar.
 
-        # Distinct from the above: the series exist, but the in-instance exporter
-        # cannot query PostgreSQL. Metrics are then stale rather than missing,
-        # which absent() will not catch.
+        # Distinct from the above: the series exist, but either the exporter
+        # cannot query PostgreSQL, or an instance stopped reporting entirely.
+        #
+        # The second half is not redundant. `min()` only aggregates series that
+        # still exist, so if one instance's target disappears — pod gone, scrape
+        # failing, relabelling broken — the remaining two report 1 and `min()`
+        # is 1. A partial outage would go completely unnoticed while the alert
+        # named "failing on at least one instance" stayed quiet. Counting the
+        # targets catches the vanished case that min() structurally cannot.
+        #
+        # The expected count is tied to `instances: 3` on the Cluster; changing
+        # the topology means changing this number. `for: 15m` rides out the
+        # transient dip during a rolling restart.
         - alert: PostgresMetricsCollectorFailing
           expr: |
             min(cnpg_collector_up{namespace="database"}) == 0
+            or
+            count(cnpg_collector_up{namespace="database"}) < 3
           for: 15m
           labels:
             severity: warning
           annotations:
-            summary: Postgres metrics collector is failing on at least one instance
-            description: The CloudNativePG metrics exporter reports it cannot collect from at least one instance. Values for the backup and archiver alerts may be stale rather than missing, so treat those as unreliable until this clears.
+            summary: Postgres metrics collector is failing or an instance stopped reporting
+            description: Either the CloudNativePG exporter cannot collect from an instance, or fewer than the expected 3 instances are reporting metrics at all. Values behind the backup and archiver alerts may be stale or partial, so treat those as unreliable until this clears.
