@@ -202,6 +202,9 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 - Declare PVCs in a standalone `pvc.yaml` with an explicit `storageClassName` (don't rely on the default class silently).
 - Reclaim policy is `Delete` — removing an app deletes its data. Snapshot first if it matters.
 - Do **not** reference storage classes other than the Longhorn ones above (`local-path`, `nfs`, etc. do not exist).
+- Cluster-wide backup/recovery design (what's actually covered, what
+  isn't, and the recovery runbook) is tracked separately — see
+  Resilience & Backup Planning below.
 
 ---
 
@@ -264,6 +267,38 @@ flux-local build all --enable-helm --output-file rendered.yaml kubernetes/flux/c
 
 ---
 
+## Resilience & Backup Planning
+
+Cluster-wide backup/recovery design lives in three docs, audited tier by
+tier (bootstrap → core infra → data services → leaf apps — see
+`docs/cluster-resilience-design.md` for the full tier definitions):
+
+- `docs/cluster-resilience-design.md` — architecture and audit findings.
+- `docs/cluster-resilience-plan.md` — the backlog those findings produced.
+- `docs/runbook-cluster-disaster-recovery.md` — the executable recovery
+  procedure, filled in as each tier is audited.
+
+(`docs/backup-recovery.md` is a different, older doc scoped to the
+recording-annotator app specifically — not the cluster-wide one, despite
+the similar name.)
+
+Two rules follow from this for day-to-day app work:
+
+- **Adding an app that holds state is a resilience decision, not just a
+  storage-class pick.** Don't stop at "which Longhorn class" — decide
+  whether the class's recurring backup is sufficient or whether the app
+  needs its own backup path (see `docs/backup-recovery.md` for what a
+  full one looks like), and record anything non-default in
+  `docs/cluster-resilience-plan.md`.
+- **Removing an app must tear down its resiliency layer, not just the
+  app.** Flux's prune only reaches what it tracks in-cluster — external
+  backup infrastructure (S3 buckets, IAM principals, off-cluster
+  credentials) and doc references survive an app's deletion unless
+  removed deliberately. See the Watchouts in "Removing an Application"
+  below.
+
+---
+
 ## Adding a New Application
 
 1. **Determine the namespace group.** Check `kubernetes/apps/` for an existing group that fits. Create a new group only if nothing fits.
@@ -284,7 +319,13 @@ flux-local build all --enable-helm --output-file rendered.yaml kubernetes/flux/c
 
 4. **Create the chart source + HelmRelease** (OCIRepository named after the app + `chartRef`, or HelmRepository + `spec.chart`). Include Renovate hints where applicable (see Renovate section).
 
-5. **Create `app/kustomization.yaml`** — list every file with a `./` prefix (tooling depends on the exact `./helmrelease.yaml` string):
+5. **If the app will hold state, make its resilience posture explicit**
+   (see Resilience & Backup Planning above). Pick the storage class
+   deliberately rather than defaulting, and record anything beyond the
+   class's built-in recurring backup — an app-level backup job, an
+   external S3 mirror, etc. — in `docs/cluster-resilience-plan.md`.
+
+6. **Create `app/kustomization.yaml`** — list every file with a `./` prefix (tooling depends on the exact `./helmrelease.yaml` string):
    ```yaml
    ---
    apiVersion: kustomize.config.k8s.io/v1beta1
@@ -296,7 +337,7 @@ flux-local build all --enable-helm --output-file rendered.yaml kubernetes/flux/c
      # - ./secret.sops.yaml
    ```
 
-6. **Register the app** in the parent group's `kustomization.yaml`:
+7. **Register the app** in the parent group's `kustomization.yaml`:
    ```yaml
    resources:
      - ./namespace.yaml
@@ -304,7 +345,7 @@ flux-local build all --enable-helm --output-file rendered.yaml kubernetes/flux/c
      - ./<app-name>/ks.yaml        # ← add this line
    ```
 
-7. **If creating a new namespace group**, create `namespace.yaml` (with `kustomize.toolkit.fluxcd.io/prune: disabled` annotation) and a group `kustomization.yaml` that sets `namespace:`, includes `components: [../../components/sops]`, and lists `./namespace.yaml` plus the app `ks.yaml` files. **No registration in `kubernetes/flux/` is needed** — discovery is automatic.
+8. **If creating a new namespace group**, create `namespace.yaml` (with `kustomize.toolkit.fluxcd.io/prune: disabled` annotation) and a group `kustomization.yaml` that sets `namespace:`, includes `components: [../../components/sops]`, and lists `./namespace.yaml` plus the app `ks.yaml` files. **No registration in `kubernetes/flux/` is needed** — discovery is automatic.
 
 ---
 
@@ -349,6 +390,8 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 ```
 
 **PVC data:** Phase 2 deletes PVCs and, with Longhorn's `Delete` reclaim policy, the underlying volumes. Take a Longhorn snapshot/backup before Phase 2 if the data needs to be preserved.
+
+**Resiliency-layer teardown:** Flux's prune only removes what it tracks *in-cluster* — it has no idea about backup infrastructure that lives outside the app's own Kustomization inventory. Before or during Phase 2, also tear down: any dedicated S3 bucket/IAM principal provisioned out-of-band for the app's backups (see `docs/backup-recovery.md` for what that looks like for recording-annotator), Longhorn `RecurringJob` resources if the app defined its own instead of relying on a shared storage-class default, and the app's entry in `docs/cluster-resilience-plan.md` / `docs/cluster-resilience-design.md` if it has one. An app that's gone from the cluster but still has a live S3 bucket quietly accumulating cost, or a stale line in the resilience docs, is a half-finished decommission.
 
 **Apps without a HelmRelease:** If the app uses only raw manifests, skip Phase 1 — the Kustomization prune handles full cleanup.
 
