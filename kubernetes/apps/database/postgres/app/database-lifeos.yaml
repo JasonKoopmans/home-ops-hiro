@@ -1,0 +1,29 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/postgresql.cnpg.io/database_v1.json
+# The LifeOS reporting warehouse's database.
+#
+# A separate database rather than schemas inside CNPG's default `app` database:
+# it keeps LifeOS's lifecycle independent of anything else that later wants
+# Postgres here, and `DROP DATABASE lifeos` stays a clean, complete removal.
+#
+# Declared as a CNPG Database CR because this cluster runs with
+# enableSuperuserAccess at its default of false — there is no superuser secret,
+# so nothing in the cluster can issue CREATE DATABASE over psql. The operator
+# does it instead, which is the better answer anyway: the database is
+# reconciled from Git like everything else.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: lifeos
+spec:
+  cluster:
+    name: postgres
+  name: lifeos
+  # The writer role owns the database, so the schema CronJob can create and
+  # replace objects without any elevated privilege. The reader is granted
+  # SELECT on the view layers by that same DDL — see the warehouse app.
+  owner: lifeos_writer
+  # Keep the database if this CR is ever deleted. Losing personal history to a
+  # stray manifest removal is not a trade worth making; dropping it stays a
+  # deliberate manual act.
+  databaseReclaimPolicy: retain

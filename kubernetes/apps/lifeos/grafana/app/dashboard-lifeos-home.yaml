@@ -43,7 +43,42 @@ data:
           "gridPos": {"h": 13, "w": 12, "x": 12, "y": 0},
           "options": {
             "mode": "markdown",
-            "content": "### None yet — that's expected\n\nThis instance ships with no data source. The reporting warehouse it is meant to query is still to come, and a provisioned source pointing at nothing would just show a red banner on every page load.\n\nNothing is blocked in the meantime: a source added through the UI works normally and lives in the UI plane like any other browser-authored object.\n\n### When you add one\n\n**Credentials belong in Git** → add it to `datasources:` in the HelmRelease with an explicit `uid`, and its secret to `secret.sops.yaml`. Provisioned sources are locked for editing in the browser.\n\n**Just trying something out** → configure it in the UI. It is stored encrypted in the database and backed up with the volume. Move it into Git when it becomes load-bearing.\n\nThe `uid` is the part that matters. Dashboard JSON references sources by uid, so a stable one is what lets a dashboard exported to Git keep working.\n\nFull write-up: `docs/lifeos-grafana.md`."
+            "content": "### LifeOS Warehouse — uid `lifeos-warehouse`\n\nThe reporting warehouse (`docs/lifeos-warehouse.md`), on the shared CNPG Postgres cluster. Connects as `lifeos_reader`, a role with SELECT on the `core` and `mart` schemas only — nothing on `raw`, the append-only landing tables ingestion writes to. Provisioned from Git and locked for editing in the browser.\n\n### Adding another source\n\n**Credentials belong in Git** → add it to `datasources:` in the HelmRelease with an explicit `uid`, and its secret to `secret.sops.yaml`. Provisioned sources are locked for editing in the browser.\n\n**Just trying something out** → configure it in the UI. It is stored encrypted in the database and backed up with the volume. Move it into Git when it becomes load-bearing.\n\nThe `uid` is the part that matters. Dashboard JSON references sources by uid, so a stable one is what lets a dashboard exported to Git keep working."
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Warehouse typing failures",
+          "description": "Non-zero means a source payload stopped matching what a core view expects. Diagnose with: SELECT * FROM core.typing_failures. See docs/lifeos-warehouse.md.",
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 13},
+          "datasource": {"type": "postgres", "uid": "lifeos-warehouse"},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {"type": "postgres", "uid": "lifeos-warehouse"},
+              "format": "table",
+              "rawSql": "SELECT count(*) AS value FROM core.typing_failures"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 1}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "auto"
           }
         }
       ]

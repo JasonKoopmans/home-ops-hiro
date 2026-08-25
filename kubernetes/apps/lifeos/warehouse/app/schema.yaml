@@ -1,0 +1,438 @@
+---
+# The LifeOS warehouse schema, applied by the CronJob in this directory.
+#
+# Every statement is idempotent — CREATE ... IF NOT EXISTS, CREATE OR REPLACE
+# VIEW, and grants that are safe to re-issue. That is what lets the schema be
+# reconciled continuously rather than migrated once, so Git and the database
+# converge on their own instead of depending on someone remembering to re-run
+# something.
+#
+# Deliberately no dollar-quoted strings anywhere in this SQL. Flux's postBuild
+# substitution rewrites `$$` to `$`, so a PL/pgSQL function body would be
+# silently mangled on its way into the cluster. If this schema ever needs a
+# function or trigger, escape accordingly and test the rendered output first.
+#
+# `${TIMEZONE}` below IS substituted by Flux, deliberately — it resolves from
+# cluster-secrets to the cluster timezone, which is what turns an instant into
+# the local day a human would call it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warehouse-schema
+data:
+  schema.sql: |
+    -- ---------------------------------------------------------------------
+    -- Layering: thin medallion.
+    --
+    --   raw   physical, append-only. One row per *observation* of a record,
+    --         never an update in place. Physical because it is the only layer
+    --         that cannot be rebuilt from something else.
+    --   core  views, plus dim_date. Typed, deduplicated, conformed. snake_case.
+    --   mart  views. Shaped for dashboards, and the only layer with
+    --         PascalCase column names — see the note above the mart section.
+    --
+    -- Derived layers are views rather than materialized tables on purpose. In a
+    -- lakehouse each layer is materialized because recompute is expensive and
+    -- storage is cheap; in one small Postgres those economics invert, and every
+    -- materialized layer becomes a copy to keep in sync and backfill. Promote a
+    -- view to MATERIALIZED the day it is measurably slow, not before.
+    --
+    -- core.dim_date is the deliberate exception, and the test is worth stating:
+    -- materialize when there is a benefit *and* no sync burden. Dates never
+    -- change and the table is not derived from raw, so it costs nothing to keep
+    -- current — while being a real table gives the planner statistics that a
+    -- generate_series function scan cannot. See its own comment below.
+    -- ---------------------------------------------------------------------
+    CREATE SCHEMA IF NOT EXISTS raw;
+    CREATE SCHEMA IF NOT EXISTS core;
+    CREATE SCHEMA IF NOT EXISTS mart;
+
+    -- ---------------------------------------------------------------------
+    -- raw: landing tables
+    --
+    -- Common shape for every source:
+    --   source       which integration produced this
+    --   natural_key  the source's own stable id for the record
+    --   ingested_at  when we saw it — the axis corrections travel along
+    --   payload      the record exactly as the source gave it
+    --
+    -- The "when did it happen" column deliberately varies by source, because
+    -- grain does. A daily activity ring is a date with no meaningful instant;
+    -- a completed task is an instant. Forcing both into timestamptz would mean
+    -- inventing a time of day for the former and then guessing a timezone to
+    -- get the date back out — an error that hides until a chart is off by one
+    -- day near midnight.
+    --
+    -- payload stays jsonb rather than typed columns because these APIs change
+    -- shape without warning. A new field, a renamed one, a type change: none
+    -- can break ingestion, only the view above it — and no data is at risk
+    -- while the view is fixed.
+    --
+    -- How core actually absorbs such a change, since "edit the view" is not an
+    -- answer on its own:
+    --
+    --   Renamed field  COALESCE(payload ->> 'newName', payload ->> 'oldName').
+    --                  Keyed off the payload, not off a cutover date, because
+    --                  the payload is self-describing and a date is a proxy
+    --                  that a re-ingest or backfill can make wrong.
+    --   Changed type   jsonb_typeof() guards the cast, so the odd row degrades
+    --                  to NULL instead of raising and taking the whole view —
+    --                  and every degraded row shows up in core.typing_failures.
+    --   New field      add it to the view. Old rows return NULL, which is the
+    --                  truth: we did not observe it then.
+    --
+    -- The case none of that catches is a *semantic* change — same key, same
+    -- type, different meaning, e.g. a value switching from minutes to seconds.
+    -- Nothing in the payload distinguishes it, so the only fix is a version
+    -- stamp set at ingest. There is no payload_version column today because
+    -- adding one later is lossless: ALTER TABLE ... ADD COLUMN payload_version
+    -- smallint NOT NULL DEFAULT 1 correctly labels every existing row, since by
+    -- definition they are all version 1. Adding it now would cost noise on
+    -- every insert in exchange for nothing until that first semantic change.
+    -- ---------------------------------------------------------------------
+
+    -- Apple activity rings (Move / Exercise / Stand), long-format: one row per
+    -- (day, metric). Reaches us via a Google Sheet that n8n reads, but `source`
+    -- names where the data comes from rather than how it travels — swap the
+    -- sheet for the Apple Health API later and history stays continuous.
+    --
+    -- natural_key is 'YYYY-MM-DD:Metric', which is exactly the grain the sheet
+    -- is unique on.
+    CREATE TABLE IF NOT EXISTS raw.health_metrics (
+        ingest_id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        source      text        NOT NULL,
+        natural_key text        NOT NULL,
+        observed_on date        NOT NULL,
+        ingested_at timestamptz NOT NULL DEFAULT now(),
+        payload     jsonb       NOT NULL
+    );
+
+    -- Todoist completed tasks. Event grain — completed_at is a real instant.
+    CREATE TABLE IF NOT EXISTS raw.todoist_completed_tasks (
+        ingest_id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        source       text        NOT NULL,
+        natural_key  text        NOT NULL,
+        completed_at timestamptz NOT NULL,
+        ingested_at  timestamptz NOT NULL DEFAULT now(),
+        payload      jsonb       NOT NULL
+    );
+
+    -- Todoist's keyed reference data: projects, labels, sections, and whatever
+    -- else turns out to have an id worth resolving to a name.
+    --
+    -- One table with a `kind` discriminator rather than one table per kind.
+    -- These all share a shape (id, name, some attributes) and differ only in
+    -- what they name, so a table each would be the same DDL copied N times —
+    -- and adding the next lookup would need a schema change plus a deploy.
+    -- Here it needs neither: n8n starts writing a new `kind` and a one-line
+    -- core view exposes it.
+    --
+    -- Snapshot grain: the source reports current state rather than emitting
+    -- events, so a rename arrives as a changed payload and lands as a new
+    -- observation. observed_on is the day we saw that state.
+    CREATE TABLE IF NOT EXISTS raw.todoist_lookups (
+        ingest_id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        source      text        NOT NULL,
+        kind        text        NOT NULL,
+        natural_key text        NOT NULL,
+        observed_on date        NOT NULL DEFAULT current_date,
+        ingested_at timestamptz NOT NULL DEFAULT now(),
+        payload     jsonb       NOT NULL
+    );
+
+    -- Serves both the "has this changed since we last saw it" check on write
+    -- and the DISTINCT ON in the core views on read.
+    CREATE INDEX IF NOT EXISTS health_metrics_key_seen
+        ON raw.health_metrics (source, natural_key, ingested_at DESC);
+    CREATE INDEX IF NOT EXISTS todoist_completed_key_seen
+        ON raw.todoist_completed_tasks (source, natural_key, ingested_at DESC);
+    CREATE INDEX IF NOT EXISTS todoist_lookups_key_seen
+        ON raw.todoist_lookups (source, kind, natural_key, ingested_at DESC);
+
+    -- Dashboards filter by when things happened, not when we noticed them.
+    CREATE INDEX IF NOT EXISTS health_metrics_observed
+        ON raw.health_metrics (observed_on DESC);
+    CREATE INDEX IF NOT EXISTS todoist_completed_at
+        ON raw.todoist_completed_tasks (completed_at DESC);
+
+    -- ---------------------------------------------------------------------
+    -- core: current state, typed
+    --
+    -- DISTINCT ON takes the newest observation per record. Because raw keeps
+    -- every version, a correction at the source shows up as a new row and this
+    -- view starts returning it, while the history stays queryable underneath —
+    -- which is the entire reason raw is append-only.
+    -- ---------------------------------------------------------------------
+    -- The value cast is guarded rather than bare, and that guard is the whole
+    -- answer to "how does core absorb a shape change".
+    --
+    -- A bare (payload ->> 'value')::numeric raises on the first row where the
+    -- source starts sending a non-numeric string, and the *view* fails — so one
+    -- bad row takes down every dashboard reading it. Guarding degrades that to
+    -- NULL for the offending row, and core.typing_failures below makes those
+    -- rows visible instead of letting them vanish quietly.
+    --
+    -- Both JSON shapes are accepted on purpose: a Google Sheets cell usually
+    -- arrives as a string, an API usually sends a number, and the warehouse
+    -- should not care which. This is also the pattern for a renamed field —
+    -- COALESCE(payload ->> 'newName', payload ->> 'oldName') keys off the
+    -- payload itself rather than off a cutover date, because the payload is
+    -- self-describing and a date is a proxy that can be wrong.
+    CREATE OR REPLACE VIEW core.health_metrics AS
+    SELECT DISTINCT ON (source, natural_key)
+           source,
+           natural_key,
+           observed_on,
+           payload ->> 'metric' AS metric,
+           CASE
+               WHEN jsonb_typeof(payload -> 'value') = 'number'
+                   THEN (payload ->> 'value')::numeric
+               WHEN jsonb_typeof(payload -> 'value') = 'string'
+                    AND payload ->> 'value' ~ '[0-9]'
+                    AND length(translate(payload ->> 'value', '0123456789.-', '')) = 0
+                   THEN (payload ->> 'value')::numeric
+           END AS value,
+           payload ->> 'units' AS units,
+           ingested_at
+    FROM raw.health_metrics
+    ORDER BY source, natural_key, ingested_at DESC;
+
+    CREATE OR REPLACE VIEW core.todoist_completed_tasks AS
+    SELECT DISTINCT ON (source, natural_key)
+           source,
+           natural_key                                          AS task_key,
+           completed_at,
+           -- The local day, which is the one a human means by "what did I get
+           -- done Tuesday". Todoist returns UTC; without this conversion a task
+           -- finished at 7pm Central lands on the following day.
+           (completed_at AT TIME ZONE '${TIMEZONE}')::date       AS completed_on,
+           payload ->> 'content'                                AS content,
+           payload ->> 'project_id'                             AS project_id,
+           payload ->> 'section_id'                             AS section_id,
+           -- Present only when the ingest includes it; Todoist's completed-task
+           -- payloads do not always carry labels. NULL rather than missing, so
+           -- a join degrades to "unlabelled" instead of dropping the row.
+           payload -> 'labels'                                  AS labels,
+           ingested_at
+    FROM raw.todoist_completed_tasks
+    ORDER BY source, natural_key, ingested_at DESC;
+
+    CREATE OR REPLACE VIEW core.todoist_lookups AS
+    SELECT DISTINCT ON (source, kind, natural_key)
+           source,
+           kind,
+           natural_key            AS lookup_id,
+           payload ->> 'name'     AS name,
+           payload,
+           observed_on,
+           ingested_at
+    FROM raw.todoist_lookups
+    ORDER BY source, kind, natural_key, ingested_at DESC;
+
+    -- Thin conveniences over the discriminator, so joins read as what they are.
+    -- Adding the next lookup kind is a copy of one of these.
+    CREATE OR REPLACE VIEW core.todoist_projects AS
+    SELECT lookup_id AS project_id, name, observed_on, ingested_at
+    FROM core.todoist_lookups
+    WHERE kind = 'project';
+
+    CREATE OR REPLACE VIEW core.todoist_labels AS
+    SELECT lookup_id AS label_id, name, observed_on, ingested_at
+    FROM core.todoist_lookups
+    WHERE kind = 'label';
+
+    CREATE OR REPLACE VIEW core.todoist_sections AS
+    SELECT lookup_id AS section_id, name, observed_on, ingested_at
+    FROM core.todoist_lookups
+    WHERE kind = 'section';
+
+    -- The join backbone. Health metrics and task completions are both
+    -- daily-grain and the interesting questions cross them ("do I close more
+    -- tasks on days I hit the Exercise ring?"), which only works against a
+    -- spine that has every day — including the days a source recorded nothing.
+    -- Left-join to this rather than to each other, or missing days silently
+    -- vanish from a chart instead of showing up as the gaps they are.
+    --
+    -- A table, and the one place this schema materializes something that is not
+    -- raw. The reason is the planner, not CPU: generating ~2,400 rows costs
+    -- well under a millisecond, but a function scan carries no statistics, so
+    -- Postgres falls back to a fixed default row estimate for generate_series
+    -- regardless of the real range. Join that against a growing raw table and
+    -- the estimate is wrong in a direction that can pick a nested loop where a
+    -- hash join belongs. A real table with a primary key and ANALYZEd stats
+    -- removes the guess.
+    --
+    -- It is also the one thing here that costs nothing to keep in sync — the
+    -- objection to materializing core and mart is the backfill burden, and past
+    -- dates do not change. This is generated reference data, not a
+    -- transformation of raw.
+    CREATE TABLE IF NOT EXISTS core.dim_date (
+        date        date    PRIMARY KEY,
+        iso_dow     int     NOT NULL,
+        dow_name    text    NOT NULL,
+        is_weekend  boolean NOT NULL,
+        week_start  date    NOT NULL,
+        month_start date    NOT NULL,
+        year        int     NOT NULL
+    );
+
+    -- Extends the spine on every run. ON CONFLICT DO NOTHING makes it
+    -- idempotent, and the +30 days of headroom mean "today" always exists even
+    -- between hourly runs — a dashboard opened at 00:05 would otherwise find
+    -- the current day missing from the spine.
+    INSERT INTO core.dim_date (date, iso_dow, dow_name, is_weekend, week_start, month_start, year)
+    SELECT d::date,
+           EXTRACT(isodow FROM d)::int,
+           to_char(d, 'Dy'),
+           EXTRACT(isodow FROM d)::int >= 6,
+           date_trunc('week',  d)::date,
+           date_trunc('month', d)::date,
+           EXTRACT(year FROM d)::int
+    FROM generate_series(date '2020-01-01', current_date + 30, interval '1 day') AS d
+    ON CONFLICT (date) DO NOTHING;
+
+    -- The point of making it a table. Safe inside the CronJob's single
+    -- transaction — ANALYZE may run in a transaction block, unlike VACUUM.
+    ANALYZE core.dim_date;
+
+    -- ---------------------------------------------------------------------
+    -- Drift detection
+    --
+    -- The failure mode this schema is otherwise blind to: a source renames a
+    -- field, the extraction above yields NULL, and a panel quietly goes flat.
+    -- Nothing errors, so nothing tells you. This view turns that silence into
+    -- rows you can put on a panel or alert on — a non-zero count means the
+    -- payload stopped matching what core expects.
+    --
+    -- Point a stat panel at `SELECT count(*) FROM core.typing_failures` and it
+    -- becomes the smoke alarm for every source at once.
+    -- ---------------------------------------------------------------------
+    CREATE OR REPLACE VIEW core.typing_failures AS
+    SELECT 'raw.health_metrics'      AS relation,
+           r.source,
+           r.natural_key,
+           r.ingested_at,
+           r.payload
+    FROM raw.health_metrics r
+    WHERE r.payload ->> 'metric' IS NULL
+       OR NOT (
+           jsonb_typeof(r.payload -> 'value') = 'number'
+           OR (jsonb_typeof(r.payload -> 'value') = 'string'
+               AND r.payload ->> 'value' ~ '[0-9]'
+               AND length(translate(r.payload ->> 'value', '0123456789.-', '')) = 0)
+       )
+    UNION ALL
+    SELECT 'raw.todoist_completed_tasks',
+           r.source, r.natural_key, r.ingested_at, r.payload
+    FROM raw.todoist_completed_tasks r
+    WHERE r.payload ->> 'content' IS NULL
+    UNION ALL
+    SELECT 'raw.todoist_lookups',
+           r.source, r.natural_key, r.ingested_at, r.payload
+    FROM raw.todoist_lookups r
+    WHERE r.payload ->> 'name' IS NULL;
+
+    -- ---------------------------------------------------------------------
+    -- mart: dashboard-shaped views
+    --
+    -- The only layer using PascalCase, and only for output column names, via
+    -- quoted aliases. Postgres folds unquoted identifiers to lowercase, so real
+    -- PascalCase requires double quotes at every reference forever — a tax
+    -- worth paying exactly where a human reads the result (Grafana column
+    -- headers, legends) and not worth paying on every join and index beneath.
+    -- Object names stay snake_case so `FROM mart.daily_activity` needs no
+    -- quoting and pasted SQL keeps working.
+    -- ---------------------------------------------------------------------
+
+    -- Activity rings pivoted from long to wide: one row per day, one column per
+    -- ring. FILTER rather than CASE because it says what it means, and max()
+    -- over a single matching row is just "take it" while tolerating a duplicate
+    -- if one ever appears.
+    -- Window is 3 years of integer day arithmetic, not `current_date - interval
+    -- '3 years'` — subtracting an interval from a date yields a timestamp in
+    -- Postgres, which would need a cast back before comparing to d.date (itself
+    -- a date). Staying in integers avoids the cast and the DST/leap-year
+    -- questions interval math raises, at the cost of drifting a day or so off a
+    -- true calendar 3-year mark near a leap year — irrelevant at daily grain.
+    CREATE OR REPLACE VIEW mart.daily_activity AS
+    SELECT d.date                                                   AS "Date",
+           max(h.value) FILTER (WHERE h.metric = 'Move')            AS "MoveCalories",
+           max(h.value) FILTER (WHERE h.metric = 'Exercise')        AS "ExerciseMinutes",
+           max(h.value) FILTER (WHERE h.metric = 'Stand')           AS "StandMinutes"
+    FROM core.dim_date d
+    LEFT JOIN core.health_metrics h ON h.observed_on = d.date
+    WHERE d.date BETWEEN current_date - (365 * 3) AND current_date
+    GROUP BY d.date;
+
+    -- Task throughput per day, on the same spine so days with nothing completed
+    -- read as zero rather than disappearing.
+    CREATE OR REPLACE VIEW mart.daily_task_completions AS
+    SELECT d.date                          AS "Date",
+           count(t.task_key)               AS "TasksCompleted"
+    FROM core.dim_date d
+    LEFT JOIN core.todoist_completed_tasks t ON t.completed_on = d.date
+    WHERE d.date BETWEEN current_date - (365 * 3) AND current_date
+    GROUP BY d.date;
+
+    -- Completions resolved to project names. LEFT JOIN on the lookup so a task
+    -- in a project we have not ingested yet still counts, labelled rather than
+    -- dropped — silently losing rows to a missing dimension row is the classic
+    -- way a warehouse under-reports.
+    CREATE OR REPLACE VIEW mart.task_completions AS
+    SELECT t.completed_on                          AS "Date",
+           t.completed_at                          AS "CompletedAt",
+           t.content                               AS "Task",
+           coalesce(p.name, '(unknown project)')   AS "Project",
+           coalesce(s.name, '(no section)')        AS "Section"
+    FROM core.todoist_completed_tasks t
+    LEFT JOIN core.todoist_projects p ON p.project_id = t.project_id
+    LEFT JOIN core.todoist_sections s ON s.section_id = t.section_id;
+
+    -- The cross-source view the spine exists for.
+    CREATE OR REPLACE VIEW mart.daily_overview AS
+    SELECT a."Date"              AS "Date",
+           a."MoveCalories"      AS "MoveCalories",
+           a."ExerciseMinutes"   AS "ExerciseMinutes",
+           a."StandMinutes"      AS "StandMinutes",
+           c."TasksCompleted"    AS "TasksCompleted"
+    FROM mart.daily_activity a
+    LEFT JOIN mart.daily_task_completions c ON c."Date" = a."Date";
+
+    -- ---------------------------------------------------------------------
+    -- Grants
+    --
+    -- Three roles, three different reaches. lifeos_writer runs this whole file
+    -- and therefore needs full DDL rights on everything below — but it is used
+    -- for nothing else. Ingestion connects as lifeos_ingest, which can write
+    -- and read raw and nothing more: no CREATE, no ALTER, no DROP, no reach
+    -- into core or mart. SELECT is granted alongside INSERT because the
+    -- documented ingest contract's idempotent-insert check is a subquery
+    -- against the very table it is about to write to — write-only would break
+    -- that check, not make it safer.
+    --
+    -- lifeos_reader gets the view layers and nothing else. It is never granted
+    -- on raw — and does not need to be: a view executes with its owner's
+    -- privileges, not the caller's, so selecting core.health_metrics reads the
+    -- underlying table through lifeos_writer's rights. The reader sees curated
+    -- data and cannot reach the landing tables at all.
+    --
+    -- (The core/mart half holds as long as those views are not created WITH
+    -- security_invoker, which is off by default. Do not turn it on there
+    -- without re-thinking these grants.)
+    -- ---------------------------------------------------------------------
+    GRANT USAGE ON SCHEMA raw TO lifeos_ingest;
+    GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA raw TO lifeos_ingest;
+
+    GRANT USAGE ON SCHEMA core, mart TO lifeos_reader;
+    GRANT SELECT ON ALL TABLES IN SCHEMA core, mart TO lifeos_reader;
+
+    -- Covers tables and views added by a later run of this same DDL, so
+    -- anything new is readable/writable the moment it exists rather than after
+    -- someone remembers to re-grant. Reaches only future objects created by
+    -- lifeos_writer specifically — the role that runs this file — which is
+    -- exactly the role that will create them, so the two line up without
+    -- needing an explicit FOR ROLE.
+    ALTER DEFAULT PRIVILEGES IN SCHEMA raw
+        GRANT SELECT, INSERT ON TABLES TO lifeos_ingest;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA core, mart
+        GRANT SELECT ON TABLES TO lifeos_reader;

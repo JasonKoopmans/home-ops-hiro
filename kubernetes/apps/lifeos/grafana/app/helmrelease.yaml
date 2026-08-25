@@ -37,13 +37,22 @@ spec:
 
     replicas: 1
 
-    # Deployment-level, which is where Reloader looks. The chart already
-    # checksums its own ConfigMaps into the pod template; this covers the Secret.
-    # Note what that does and does not buy: a changed `secret-key` takes effect
-    # on the restart, but a changed `admin-password` does not — see the
-    # bootstrap-only note on `admin:` below.
+    # Deployment-level, which is where Reloader looks. `auto` rather than
+    # naming grafana-secret explicitly: the pod now pulls from two Secrets
+    # (grafana-secret directly, warehouse-credentials via
+    # GF_WAREHOUSE_READER_PASSWORD below), and a single explicit-name
+    # annotation only watches the one Secret it names — a rotation of the other
+    # would silently need a manual restart. `auto` watches every
+    # ConfigMap/Secret the pod spec actually references, so a third one added
+    # later is covered without remembering to update this line. The chart
+    # already checksums its own ConfigMaps into the pod template regardless.
+    #
+    # Note what a Secret-triggered restart does and does not buy: a changed
+    # `secret-key` or `reader-password` takes effect on the restart, but a
+    # changed `admin-password` does not — see the bootstrap-only note on
+    # `admin:` below.
     annotations:
-      secret.reloader.stakater.com/reload: grafana-secret
+      reloader.stakater.com/auto: "true"
 
     persistence:
       enabled: true
@@ -98,24 +107,169 @@ spec:
         secretKeyRef:
           name: grafana-secret
           key: secret-key
+      # Interpolated into the warehouse data source below. The Secret is owned
+      # by the warehouse app, not this one — optional: true so that a cold
+      # bootstrap where warehouse has not reconciled yet leaves Grafana
+      # starting normally with a data source that fails its health check,
+      # rather than wedging the pod in CreateContainerConfigError.
+      GF_WAREHOUSE_READER_PASSWORD:
+        secretKeyRef:
+          name: warehouse-credentials
+          key: reader-password
+          optional: true
 
     # ---- Git plane: datasources -------------------------------------------
-    # Deliberately none yet. This instance ships with no data source at all:
-    # the reporting warehouse it is meant to query does not exist yet, and a
-    # provisioned data source pointing at nothing is worse than an empty list —
-    # it fails its health check on every page load and trains you to ignore a
-    # red banner.
+    # The reporting warehouse, on the shared CNPG cluster in the `database`
+    # namespace. See docs/lifeos-warehouse.md.
     #
-    # When the warehouse lands, add a `datasources:` block here pointing at the
-    # CNPG cluster in the `database` namespace, with a read-only role and an
-    # explicit `uid`. The uid is the part that matters: dashboard JSON
-    # references data sources by uid, so a stable one is what makes an exported
-    # dashboard portable back into Git. Without it Grafana mints a random uid
-    # per provisioning run and dashboards break on reprovision.
+    # The explicit uid is load-bearing: dashboard JSON references data sources
+    # by uid, so a stable one is what lets a dashboard exported into Git keep
+    # working. Without it Grafana mints a random uid per provisioning run and
+    # every promoted dashboard breaks on the next reprovision.
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: LifeOS Warehouse
+            uid: lifeos-warehouse
+            type: postgres
+            access: proxy
+            isDefault: true
+            editable: false
+            url: postgres-rw.database.svc.cluster.local:5432
+            # -rw resolves to the current primary. Reads could go to -ro and
+            # spare the primary, but that service only exists while replicas
+            # are healthy, so a single-instance degradation would take the
+            # dashboards down with it. Personal-scale reads are not worth that.
+            user: lifeos_reader
+            jsonData:
+              # Modern location for this field — Grafana moved it out of the
+              # top level, where it is now ignored for postgres.
+              database: lifeos
+              sslmode: require
+              # postgresVersion deliberately unset. It only gates which query
+              # builder features Grafana offers, and guessing it wrong is worse
+              # than letting Grafana decide.
+              maxOpenConns: 5
+              maxIdleConns: 2
+              connMaxLifetime: 14400
+            secureJsonData:
+              # $VAR is Grafana's provisioning interpolation; $$ escapes it past
+              # Flux's postBuild substitution.
+              password: $$GF_WAREHOUSE_READER_PASSWORD
+
+    # ---- Git plane: alerting ------------------------------------------------
+    # The rule logic — what counts as broken — is shared and versionable, so it
+    # lives in Git. Where the notification goes is not: this namespace has no
+    # SMTP or Telegram token configured, and "which channel should my personal
+    # alerts ring on" is a preference rather than a fact about the warehouse.
+    # That fits this instance's existing UI-plane philosophy, so it is left
+    # unset here on purpose — the rule evaluates and its state is visible under
+    # Alerting in the UI, and stays a no-op delivery (Grafana's built-in
+    # `grafana-default-email` receiver, unconfigured) until a contact point is
+    # wired, in the UI or by name in a follow-up here.
     #
-    # Nothing is blocked in the meantime — a data source added through the UI
-    # works fine and lives in the UI plane like any other browser-authored
-    # object.
+    # Schema confidence, worth recording since this cannot be checked against a
+    # live Grafana from here: the top-level shape (groups/rules/data/condition/
+    # noDataState/execErrState/for) is copied from Grafana's own docs source
+    # (grafana/grafana, docs/sources/alerting/.../file-provisioning/index.md),
+    # fetched directly since grafana.com itself is unreachable from this
+    # environment. The query -> reduce -> threshold expression chain is the
+    # standard idiom for alerting on a non-Prometheus datasource and is
+    # corroborated by multiple independent sources, but unlike the schema SQL
+    # (parsed with pglast) there was no way to validate this against a real
+    # Grafana instance. If it fails to provision, Grafana's dashboard and
+    # datasource provisioning are both known to fail closed per-resource rather
+    # than aborting startup; alerting is documented as following the same
+    # model, but that specific behavior is not verified from here either.
+    # Confirm after deploy:
+    #   kubectl -n lifeos logs deploy/grafana -c grafana | grep -i provisioning
+    alerting:
+      warehouse-rules.yaml:
+        apiVersion: 1
+        groups:
+          - orgId: 1
+            name: warehouse
+            # Same folder the Git-plane dashboards use, so provisioned
+            # resources are grouped together in the UI regardless of type.
+            folder: GitOps
+            # Tied to the schema CronJob's own cadence — no point checking
+            # faster than the data the check depends on can change.
+            interval: 1h
+            rules:
+              - uid: warehouse-typing-failures
+                title: Warehouse ingest has typing failures
+                condition: C
+                data:
+                  # A: the check itself. count(*) always returns exactly one
+                  # row, so noDataState below is unreachable in practice and set
+                  # defensively rather than load-bearing.
+                  - refId: A
+                    # Unused by this query — SELECT count(*) has no time filter
+                    # — but every data node requires the field regardless.
+                    relativeTimeRange:
+                      from: 21600
+                      to: 0
+                    datasourceUid: lifeos-warehouse
+                    model:
+                      datasource:
+                        type: postgres
+                        uid: lifeos-warehouse
+                      rawSql: "SELECT count(*) AS value FROM core.typing_failures"
+                      format: table
+                      intervalMs: 1000
+                      maxDataPoints: 43200
+                      refId: A
+                  # B: collapse A's one-row result to a scalar. Required —
+                  # threshold evaluates a Number, not a query result frame.
+                  - refId: B
+                    datasourceUid: "__expr__"
+                    model:
+                      datasource:
+                        type: __expr__
+                        uid: "__expr__"
+                      type: reduce
+                      expression: A
+                      reducer: last
+                      intervalMs: 1000
+                      maxDataPoints: 43200
+                      refId: B
+                  # C: the condition. Any typing failure at all is worth
+                  # surfacing at this data volume — no reason to tolerate a
+                  # nonzero count.
+                  - refId: C
+                    datasourceUid: "__expr__"
+                    model:
+                      datasource:
+                        type: __expr__
+                        uid: "__expr__"
+                      type: threshold
+                      expression: B
+                      conditions:
+                        - evaluator:
+                            type: gt
+                            params: [0]
+                      intervalMs: 1000
+                      maxDataPoints: 43200
+                      refId: C
+                noDataState: OK
+                # A failed query (warehouse unreachable, view missing) is
+                # itself worth surfacing, distinctly from a real typing
+                # failure.
+                execErrState: Error
+                # No debounce beyond the group's own hourly cadence — with
+                # evaluations already an hour apart there is nothing left for a
+                # `for` window to filter out, and setting one shorter than the
+                # interval would be misleading: Grafana still waits for the
+                # next full evaluation before it can confirm the condition held
+                # for that long, so the effective delay would be one interval
+                # regardless of what this says.
+                for: 0m
+                annotations:
+                  summary: "core.typing_failures is non-empty — a source payload stopped matching what a core view expects."
+                  description: "Run `SELECT * FROM core.typing_failures` against the warehouse to see which relation and source. See docs/lifeos-warehouse.md."
+                labels:
+                  app: warehouse
 
     # ---- Git plane: dashboards --------------------------------------------
     # The sidecar watches ConfigMaps in this namespace labelled

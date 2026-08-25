@@ -1,0 +1,149 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/batch/v1/cronjob_v1.json
+# Applies the warehouse schema from Git to the database.
+#
+# A CronJob rather than a one-shot Job, which is the unusual choice here and is
+# deliberate. The repo's existing bootstrap Jobs (see storage/minio) carry
+# `ssa: IfNotPresent` so a completed Job is never re-applied — correct for
+# creating a user once, wrong for a schema that keeps evolving. With a one-shot
+# Job, editing the SQL would update the ConfigMap, leave the Job untouched, and
+# the database would silently stop matching Git with nothing to notice it. Job
+# specs are immutable, so the alternative is version-suffixed Job names that
+# someone has to remember to bump — the same silent failure, one step removed.
+#
+# Running idempotent DDL on a schedule sidesteps both: the schema converges the
+# way everything else in this repo does, and a statement that cannot apply fails
+# loudly and repeatedly instead of once. Failures surface through
+# kube-prometheus-stack's default KubeJobFailed alert.
+#
+# Hourly is a deliberate ceiling on how long Git and the database can disagree,
+# not a claim that schemas change hourly. To apply a change immediately:
+#
+#   kubectl -n lifeos create job --from=cronjob/warehouse-schema warehouse-schema-manual
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: warehouse-schema
+spec:
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  # Two runs kept for diagnosis, and failures kept longer than successes — a
+  # failed run is the one whose logs anyone ever wants.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # If the controller is down past a scheduled tick, run once on recovery
+  # rather than skipping silently.
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            # psql needs no image-owned files beyond world-readable binaries, so
+            # this uid is free to pin. 26 matches the CNPG postgres image's own
+            # user; pinned numerically because runAsNonRoot cannot be verified
+            # against an image whose USER is a name.
+            runAsUser: 26
+            runAsGroup: 26
+          containers:
+            - name: psql
+              # Same image the cluster runs, so it is already pulled on these
+              # nodes and its psql matches the server version exactly.
+              image: ghcr.io/cloudnative-pg/postgresql:18.6
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  # The Database CR and the managed roles are reconciled
+                  # somewhat independently by the operator, so on a first
+                  # deploy `lifeos` (and lifeos_writer, this connection's own
+                  # role) can be ready before lifeos_ingest and lifeos_reader
+                  # exist. schema.sql GRANTs to both of those, and
+                  # ON_ERROR_STOP + --single-transaction below mean a GRANT to
+                  # a role that doesn't exist yet fails the *entire* run, not
+                  # just that statement — a self-inflicted KubeJobFailed on
+                  # first deploy, not a race worth waiting out separately.
+                  # So the readiness check waits for connectivity AND all
+                  # three roles in one query, not just for the database to
+                  # answer.
+                  RETRIES=0
+                  until [ "$(psql -tAc "SELECT count(*) FROM pg_roles WHERE rolname IN ('lifeos_writer', 'lifeos_ingest', 'lifeos_reader')" 2>/dev/null)" = "3" ]; do
+                    RETRIES=$((RETRIES + 1))
+                    if [ "$RETRIES" -ge 30 ]; then
+                      # Deliberately plain, unbraced shell variable references
+                      # below (no curly braces around the names) rather than
+                      # the more usual brace-wrapped form: this whole manifest
+                      # passes through Flux's postBuild substitution, which
+                      # pattern-matches brace-wrapped variable references
+                      # across the *entire* rendered YAML text — not just
+                      # ConfigMap/Secret data — and empties anything it
+                      # doesn't recognize from cluster-secrets. The
+                      # brace-wrapped forms here rendered as blank, confirmed
+                      # via a flux-local diff render, not guessed; the plain
+                      # form is what the loop's own retry count already used
+                      # a few lines up and rendered through untouched.
+                      echo "ERROR: database/roles not ready after 150s (as $PGUSER on $PGDATABASE)" >&2
+                      exit 1
+                    fi
+                    echo "waiting for database and managed roles... (attempt $RETRIES/30)"
+                    sleep 5
+                  done
+
+                  # ON_ERROR_STOP makes any failed statement fail the Job.
+                  # Without it psql exits 0 having skipped the broken statement,
+                  # which is the difference between a loud schema error and a
+                  # database that quietly drifts from Git.
+                  # A single transaction so a partial schema is never left behind.
+                  psql --set ON_ERROR_STOP=1 --single-transaction --file /schema/schema.sql
+                  echo "schema applied"
+              env:
+                - name: PGHOST
+                  value: postgres-rw.database.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: lifeos
+                - name: PGUSER
+                  value: lifeos_writer
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: warehouse-credentials
+                      key: writer-password
+                - name: PGSSLMODE
+                  value: require
+                # psql wants a writable HOME for its history file; pointing it
+                # at the emptyDir is what lets the root filesystem stay read-only.
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: schema
+                  mountPath: /schema
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  # A psql client running a few dozen DDL statements. No CPU
+                  # limit, per repo convention.
+                  memory: 128Mi
+          volumes:
+            - name: schema
+              configMap:
+                name: warehouse-schema
+            - name: tmp
+              emptyDir: {}
