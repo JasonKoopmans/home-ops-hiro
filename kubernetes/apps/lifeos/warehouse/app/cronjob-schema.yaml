@@ -60,17 +60,26 @@ spec:
                 - -c
                 - |
                   set -eu
-                  # The Database CR is reconciled by the operator, which may not
-                  # have created `lifeos` yet on a first deploy. Wait rather than
-                  # fail an alerting Job over a startup race.
+                  # The Database CR and the managed roles are reconciled
+                  # somewhat independently by the operator, so on a first
+                  # deploy `lifeos` (and lifeos_writer, this connection's own
+                  # role) can be ready before lifeos_ingest and lifeos_reader
+                  # exist. schema.sql GRANTs to both of those, and
+                  # ON_ERROR_STOP + --single-transaction below mean a GRANT to
+                  # a role that doesn't exist yet fails the *entire* run, not
+                  # just that statement — a self-inflicted KubeJobFailed on
+                  # first deploy, not a race worth waiting out separately.
+                  # So the readiness check waits for connectivity AND all
+                  # three roles in one query, not just for the database to
+                  # answer.
                   RETRIES=0
-                  until psql -c 'SELECT 1' >/dev/null 2>&1; do
+                  until [ "$(psql -tAc "SELECT count(*) FROM pg_roles WHERE rolname IN ('lifeos_writer', 'lifeos_ingest', 'lifeos_reader')" 2>/dev/null)" = "3" ]; do
                     RETRIES=$((RETRIES + 1))
                     if [ "$RETRIES" -ge 30 ]; then
-                      echo "ERROR: could not connect to ${PGDATABASE} as ${PGUSER} after 150s" >&2
+                      echo "ERROR: database/roles not ready after 150s (as ${PGUSER} on ${PGDATABASE})" >&2
                       exit 1
                     fi
-                    echo "waiting for database ${PGDATABASE}... (attempt ${RETRIES}/30)"
+                    echo "waiting for database and managed roles... (attempt ${RETRIES}/30)"
                     sleep 5
                   done
 
