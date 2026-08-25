@@ -98,24 +98,56 @@ spec:
         secretKeyRef:
           name: grafana-secret
           key: secret-key
+      # Interpolated into the warehouse data source below. The Secret is owned
+      # by the warehouse app, not this one — optional: true so that a cold
+      # bootstrap where warehouse has not reconciled yet leaves Grafana
+      # starting normally with a data source that fails its health check,
+      # rather than wedging the pod in CreateContainerConfigError.
+      GF_WAREHOUSE_READER_PASSWORD:
+        secretKeyRef:
+          name: warehouse-credentials
+          key: reader-password
+          optional: true
 
     # ---- Git plane: datasources -------------------------------------------
-    # Deliberately none yet. This instance ships with no data source at all:
-    # the reporting warehouse it is meant to query does not exist yet, and a
-    # provisioned data source pointing at nothing is worse than an empty list —
-    # it fails its health check on every page load and trains you to ignore a
-    # red banner.
+    # The reporting warehouse, on the shared CNPG cluster in the `database`
+    # namespace. See docs/lifeos-warehouse.md.
     #
-    # When the warehouse lands, add a `datasources:` block here pointing at the
-    # CNPG cluster in the `database` namespace, with a read-only role and an
-    # explicit `uid`. The uid is the part that matters: dashboard JSON
-    # references data sources by uid, so a stable one is what makes an exported
-    # dashboard portable back into Git. Without it Grafana mints a random uid
-    # per provisioning run and dashboards break on reprovision.
-    #
-    # Nothing is blocked in the meantime — a data source added through the UI
-    # works fine and lives in the UI plane like any other browser-authored
-    # object.
+    # The explicit uid is load-bearing: dashboard JSON references data sources
+    # by uid, so a stable one is what lets a dashboard exported into Git keep
+    # working. Without it Grafana mints a random uid per provisioning run and
+    # every promoted dashboard breaks on the next reprovision.
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: LifeOS Warehouse
+            uid: lifeos-warehouse
+            type: postgres
+            access: proxy
+            isDefault: true
+            editable: false
+            url: postgres-rw.database.svc.cluster.local:5432
+            # -rw resolves to the current primary. Reads could go to -ro and
+            # spare the primary, but that service only exists while replicas
+            # are healthy, so a single-instance degradation would take the
+            # dashboards down with it. Personal-scale reads are not worth that.
+            user: lifeos_reader
+            jsonData:
+              # Modern location for this field — Grafana moved it out of the
+              # top level, where it is now ignored for postgres.
+              database: lifeos
+              sslmode: require
+              # postgresVersion deliberately unset. It only gates which query
+              # builder features Grafana offers, and guessing it wrong is worse
+              # than letting Grafana decide.
+              maxOpenConns: 5
+              maxIdleConns: 2
+              connMaxLifetime: 14400
+            secureJsonData:
+              # $VAR is Grafana's provisioning interpolation; $$ escapes it past
+              # Flux's postBuild substitution.
+              password: $$GF_WAREHOUSE_READER_PASSWORD
 
     # ---- Git plane: dashboards --------------------------------------------
     # The sidecar watches ConfigMaps in this namespace labelled

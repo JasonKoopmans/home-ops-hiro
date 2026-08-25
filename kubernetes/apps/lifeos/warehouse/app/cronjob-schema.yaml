@@ -1,0 +1,128 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/batch/v1/cronjob_v1.json
+# Applies the warehouse schema from Git to the database.
+#
+# A CronJob rather than a one-shot Job, which is the unusual choice here and is
+# deliberate. The repo's existing bootstrap Jobs (see storage/minio) carry
+# `ssa: IfNotPresent` so a completed Job is never re-applied — correct for
+# creating a user once, wrong for a schema that keeps evolving. With a one-shot
+# Job, editing the SQL would update the ConfigMap, leave the Job untouched, and
+# the database would silently stop matching Git with nothing to notice it. Job
+# specs are immutable, so the alternative is version-suffixed Job names that
+# someone has to remember to bump — the same silent failure, one step removed.
+#
+# Running idempotent DDL on a schedule sidesteps both: the schema converges the
+# way everything else in this repo does, and a statement that cannot apply fails
+# loudly and repeatedly instead of once. Failures surface through
+# kube-prometheus-stack's default KubeJobFailed alert.
+#
+# Hourly is a deliberate ceiling on how long Git and the database can disagree,
+# not a claim that schemas change hourly. To apply a change immediately:
+#
+#   kubectl -n lifeos create job --from=cronjob/warehouse-schema warehouse-schema-manual
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: warehouse-schema
+spec:
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  # Two runs kept for diagnosis, and failures kept longer than successes — a
+  # failed run is the one whose logs anyone ever wants.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # If the controller is down past a scheduled tick, run once on recovery
+  # rather than skipping silently.
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            # psql needs no image-owned files beyond world-readable binaries, so
+            # this uid is free to pin. 26 matches the CNPG postgres image's own
+            # user; pinned numerically because runAsNonRoot cannot be verified
+            # against an image whose USER is a name.
+            runAsUser: 26
+            runAsGroup: 26
+          containers:
+            - name: psql
+              # Same image the cluster runs, so it is already pulled on these
+              # nodes and its psql matches the server version exactly.
+              image: ghcr.io/cloudnative-pg/postgresql:18.6
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  # The Database CR is reconciled by the operator, which may not
+                  # have created `lifeos` yet on a first deploy. Wait rather than
+                  # fail an alerting Job over a startup race.
+                  RETRIES=0
+                  until psql -c 'SELECT 1' >/dev/null 2>&1; do
+                    RETRIES=$((RETRIES + 1))
+                    if [ "$RETRIES" -ge 30 ]; then
+                      echo "ERROR: could not connect to ${PGDATABASE} as ${PGUSER} after 150s" >&2
+                      exit 1
+                    fi
+                    echo "waiting for database ${PGDATABASE}... (attempt ${RETRIES}/30)"
+                    sleep 5
+                  done
+
+                  # ON_ERROR_STOP makes any failed statement fail the Job.
+                  # Without it psql exits 0 having skipped the broken statement,
+                  # which is the difference between a loud schema error and a
+                  # database that quietly drifts from Git.
+                  # A single transaction so a partial schema is never left behind.
+                  psql --set ON_ERROR_STOP=1 --single-transaction --file /schema/schema.sql
+                  echo "schema applied"
+              env:
+                - name: PGHOST
+                  value: postgres-rw.database.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: lifeos
+                - name: PGUSER
+                  value: lifeos_writer
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: warehouse-credentials
+                      key: writer-password
+                - name: PGSSLMODE
+                  value: require
+                # psql wants a writable HOME for its history file; pointing it
+                # at the emptyDir is what lets the root filesystem stay read-only.
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: schema
+                  mountPath: /schema
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  # A psql client running a few dozen DDL statements. No CPU
+                  # limit, per repo convention.
+                  memory: 128Mi
+          volumes:
+            - name: schema
+              configMap:
+                name: warehouse-schema
+            - name: tmp
+              emptyDir: {}

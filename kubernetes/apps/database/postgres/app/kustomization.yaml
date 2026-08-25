@@ -7,3 +7,8 @@ resources:
   - ./objectstore.yaml
   - ./scheduledbackup.yaml
   - ./s3-credentials.sops.yaml
+  # LifeOS reporting warehouse: its database and the passwords for the two
+  # cluster roles that own and read it. The schema itself lives with the
+  # consumer, in kubernetes/apps/lifeos/warehouse.
+  - ./database-lifeos.yaml
+  - ./lifeos-role-credentials.sops.yaml

@@ -9,3 +9,4 @@ components:
 resources:
   - ./namespace.yaml
   - ./grafana/ks.yaml
+  - ./warehouse/ks.yaml

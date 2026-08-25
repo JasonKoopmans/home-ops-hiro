@@ -29,6 +29,34 @@ spec:
       parameters:
         barmanObjectName: postgres-backup
 
+  # Login roles, reconciled by the operator from Git. Declared here rather than
+  # created by SQL because this cluster has no superuser secret
+  # (enableSuperuserAccess defaults to false), so nothing else could issue
+  # CREATE ROLE — and because a role that exists only as a side effect of a
+  # migration script is invisible to anyone reading the cluster definition.
+  #
+  # The split is the point: the consumer cannot write to what it reports on.
+  # Grafana connects as the reader and holds SELECT on the view layers only;
+  # ingestion connects as the writer, which owns the lifeos database. See
+  # docs/lifeos-warehouse.md.
+  managed:
+    roles:
+      - name: lifeos_writer
+        login: true
+        # Owns database `lifeos` (see database-lifeos.yaml) and every object the
+        # schema CronJob creates in it. Deliberately not SUPERUSER, CREATEDB or
+        # CREATEROLE — owning one database is the whole job.
+        passwordSecret:
+          name: lifeos-writer-credentials
+      - name: lifeos_reader
+        login: true
+        # Holds no privileges at creation. The schema DDL grants it SELECT on
+        # core and mart, and never on raw — the view layers read raw through
+        # their owner's rights, so the reader gets curated data without being
+        # able to touch the landing tables.
+        passwordSecret:
+          name: lifeos-reader-credentials
+
   # Single Longhorn replica on purpose: PostgreSQL is already replicating across
   # the three instances, so 3-replica Longhorn underneath would store 9 physical
   # copies of the same data. 3 instances x 1 replica == the same 3 copies a
