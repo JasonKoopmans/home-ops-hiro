@@ -76,10 +76,22 @@ spec:
                   until [ "$(psql -tAc "SELECT count(*) FROM pg_roles WHERE rolname IN ('lifeos_writer', 'lifeos_ingest', 'lifeos_reader')" 2>/dev/null)" = "3" ]; do
                     RETRIES=$((RETRIES + 1))
                     if [ "$RETRIES" -ge 30 ]; then
-                      echo "ERROR: database/roles not ready after 150s (as ${PGUSER} on ${PGDATABASE})" >&2
+                      # Deliberately plain, unbraced shell variable references
+                      # below (no curly braces around the names) rather than
+                      # the more usual brace-wrapped form: this whole manifest
+                      # passes through Flux's postBuild substitution, which
+                      # pattern-matches brace-wrapped variable references
+                      # across the *entire* rendered YAML text — not just
+                      # ConfigMap/Secret data — and empties anything it
+                      # doesn't recognize from cluster-secrets. The
+                      # brace-wrapped forms here rendered as blank, confirmed
+                      # via a flux-local diff render, not guessed; the plain
+                      # form is what the loop's own retry count already used
+                      # a few lines up and rendered through untouched.
+                      echo "ERROR: database/roles not ready after 150s (as $PGUSER on $PGDATABASE)" >&2
                       exit 1
                     fi
-                    echo "waiting for database and managed roles... (attempt ${RETRIES}/30)"
+                    echo "waiting for database and managed roles... (attempt $RETRIES/30)"
                     sleep 5
                   done
 
