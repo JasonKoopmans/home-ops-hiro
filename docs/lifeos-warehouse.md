@@ -28,8 +28,23 @@ The layering follows medallion's *principles* and drops its physics.
 | Layer | Schema | Physical? | Holds | Casing |
 |---|---|---|---|---|
 | Bronze | `raw` | **tables** | every observation, append-only, source-shaped | snake_case |
-| Silver | `core` | views | current state, typed and conformed | snake_case |
+| Silver | `core` | views, plus `dim_date` | current state, typed and conformed | snake_case |
 | Gold | `mart` | views | dashboard-shaped aggregates | PascalCase columns |
+
+`core.dim_date` is the one deliberate exception, and the test it passes is worth
+stating: **materialize when there is a benefit *and* no sync burden.** Dates
+never change and the table isn't derived from `raw`, so keeping it current costs
+nothing — while being a real table gives the planner statistics that a
+`generate_series` function scan cannot.
+
+That last part is the actual reason, and it isn't CPU. Generating ~2,400 rows
+takes well under a millisecond, dwarfed by the `DISTINCT ON` over `raw` in the
+same query. But a function scan carries **no statistics**: Postgres falls back
+to a fixed default row estimate for `generate_series` regardless of the real
+range, and joined against a growing `raw` table that misestimate can push the
+planner into a nested loop where a hash join belongs. A primary key and an
+`ANALYZE` remove the guess. The schema CronJob extends the spine and re-analyzes
+on every run.
 
 In a lakehouse every layer is materialized because recompute is expensive and
 storage is cheap. In one small Postgres those economics invert: recompute is
@@ -206,6 +221,84 @@ quote every identifier in `schema.yaml` and re-run the CronJob.
 Keep `payload` as raw jsonb and do extraction in `core`/`mart`. A source that
 renames a field then breaks one view definition instead of breaking ingestion,
 and no data is at risk while you fix it.
+
+---
+
+## When a source changes shape
+
+"Just edit the view" is not an answer on its own, so here is what each kind of
+change actually looks like.
+
+| Change | How `core` absorbs it |
+|---|---|
+| Field renamed | `COALESCE(payload ->> 'newName', payload ->> 'oldName')` |
+| Type changed | `jsonb_typeof()` guards the cast — the odd row degrades to NULL instead of raising |
+| Field added | Add it to the view. Old rows return NULL, which is the truth: we didn't observe it then |
+| Field removed | Nothing. It becomes NULL going forward and history stays intact |
+| **Meaning changed** | **Nothing in the payload can tell you. See below.** |
+
+Note what the first four have in common: they key off **the payload itself**,
+not off a cutover date. The payload is self-describing, and a date is a proxy
+that a re-ingest or a backfill can make wrong. Reach for `ingested_at` only when
+the payload genuinely cannot distinguish the two eras.
+
+### Guard the casts
+
+A bare `(payload ->> 'value')::numeric` raises the moment a source sends
+something non-numeric — and it's the *view* that fails, so one bad row takes
+down every dashboard reading it. The guarded form degrades that row to NULL and
+keeps the rest working:
+
+```sql
+CASE
+    WHEN jsonb_typeof(payload -> 'value') = 'number'
+        THEN (payload ->> 'value')::numeric
+    WHEN jsonb_typeof(payload -> 'value') = 'string'
+         AND payload ->> 'value' ~ '[0-9]'
+         AND length(translate(payload ->> 'value', '0123456789.-', '')) = 0
+        THEN (payload ->> 'value')::numeric
+END
+```
+
+Both JSON shapes are accepted on purpose — a Google Sheets cell usually arrives
+as a string and an API usually sends a number, and the warehouse shouldn't care
+which.
+
+### How you find out at all
+
+This is the part that matters most, because the characteristic failure here is
+**silent**: a renamed key yields NULL, nothing errors, and a panel quietly goes
+flat for weeks.
+
+`core.typing_failures` surfaces every row whose payload didn't type cleanly,
+across all sources. Point a stat panel at it and it becomes the smoke alarm for
+the whole warehouse:
+
+```sql
+SELECT count(*) FROM core.typing_failures;
+```
+
+Non-zero means a payload stopped matching what `core` expects. The view returns
+the offending `payload` alongside, so diagnosis is the same query.
+
+### Semantic changes
+
+Same key, same type, different meaning — a value switching from minutes to
+seconds. No amount of SQL detects this, because nothing in the data is different.
+The only fix is a version stamp set at ingest time, which means a human has to
+have *noticed*.
+
+There is deliberately **no `payload_version` column today**, because adding one
+later is lossless:
+
+```sql
+ALTER TABLE raw.health_metrics
+    ADD COLUMN payload_version smallint NOT NULL DEFAULT 1;
+```
+
+That correctly labels every existing row, since by definition they are all
+version 1. Adding it now would cost noise on every insert in exchange for
+nothing until the first semantic change actually happens.
 
 **Lookups get one table, not one each.** `raw.todoist_lookups` carries a `kind`
 discriminator covering projects, labels and sections. They share a shape and

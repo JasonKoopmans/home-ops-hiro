@@ -25,17 +25,23 @@ data:
     -- Layering: thin medallion.
     --
     --   raw   physical, append-only. One row per *observation* of a record,
-    --         never an update in place. This is the only layer that cannot be
-    --         rebuilt, so it is the only one that is a table.
-    --   core  views. Typed, deduplicated, conformed. snake_case.
+    --         never an update in place. Physical because it is the only layer
+    --         that cannot be rebuilt from something else.
+    --   core  views, plus dim_date. Typed, deduplicated, conformed. snake_case.
     --   mart  views. Shaped for dashboards, and the only layer with
     --         PascalCase column names — see the note above the mart section.
     --
-    -- core and mart are views rather than materialized tables on purpose. In a
+    -- Derived layers are views rather than materialized tables on purpose. In a
     -- lakehouse each layer is materialized because recompute is expensive and
     -- storage is cheap; in one small Postgres those economics invert, and every
     -- materialized layer becomes a copy to keep in sync and backfill. Promote a
     -- view to MATERIALIZED the day it is measurably slow, not before.
+    --
+    -- core.dim_date is the deliberate exception, and the test is worth stating:
+    -- materialize when there is a benefit *and* no sync burden. Dates never
+    -- change and the table is not derived from raw, so it costs nothing to keep
+    -- current — while being a real table gives the planner statistics that a
+    -- generate_series function scan cannot. See its own comment below.
     -- ---------------------------------------------------------------------
     CREATE SCHEMA IF NOT EXISTS raw;
     CREATE SCHEMA IF NOT EXISTS core;
@@ -59,8 +65,30 @@ data:
     --
     -- payload stays jsonb rather than typed columns because these APIs change
     -- shape without warning. A new field, a renamed one, a type change: none
-    -- can break ingestion, only the view above it. Typing happens in core,
-    -- where it is a one-line edit and no data is at risk.
+    -- can break ingestion, only the view above it — and no data is at risk
+    -- while the view is fixed.
+    --
+    -- How core actually absorbs such a change, since "edit the view" is not an
+    -- answer on its own:
+    --
+    --   Renamed field  COALESCE(payload ->> 'newName', payload ->> 'oldName').
+    --                  Keyed off the payload, not off a cutover date, because
+    --                  the payload is self-describing and a date is a proxy
+    --                  that a re-ingest or backfill can make wrong.
+    --   Changed type   jsonb_typeof() guards the cast, so the odd row degrades
+    --                  to NULL instead of raising and taking the whole view —
+    --                  and every degraded row shows up in core.typing_failures.
+    --   New field      add it to the view. Old rows return NULL, which is the
+    --                  truth: we did not observe it then.
+    --
+    -- The case none of that catches is a *semantic* change — same key, same
+    -- type, different meaning, e.g. a value switching from minutes to seconds.
+    -- Nothing in the payload distinguishes it, so the only fix is a version
+    -- stamp set at ingest. There is no payload_version column today because
+    -- adding one later is lossless: ALTER TABLE ... ADD COLUMN payload_version
+    -- smallint NOT NULL DEFAULT 1 correctly labels every existing row, since by
+    -- definition they are all version 1. Adding it now would cost noise on
+    -- every insert in exchange for nothing until that first semantic change.
     -- ---------------------------------------------------------------------
 
     -- Apple activity rings (Move / Exercise / Stand), long-format: one row per
@@ -135,14 +163,36 @@ data:
     -- view starts returning it, while the history stays queryable underneath —
     -- which is the entire reason raw is append-only.
     -- ---------------------------------------------------------------------
+    -- The value cast is guarded rather than bare, and that guard is the whole
+    -- answer to "how does core absorb a shape change".
+    --
+    -- A bare (payload ->> 'value')::numeric raises on the first row where the
+    -- source starts sending a non-numeric string, and the *view* fails — so one
+    -- bad row takes down every dashboard reading it. Guarding degrades that to
+    -- NULL for the offending row, and core.typing_failures below makes those
+    -- rows visible instead of letting them vanish quietly.
+    --
+    -- Both JSON shapes are accepted on purpose: a Google Sheets cell usually
+    -- arrives as a string, an API usually sends a number, and the warehouse
+    -- should not care which. This is also the pattern for a renamed field —
+    -- COALESCE(payload ->> 'newName', payload ->> 'oldName') keys off the
+    -- payload itself rather than off a cutover date, because the payload is
+    -- self-describing and a date is a proxy that can be wrong.
     CREATE OR REPLACE VIEW core.health_metrics AS
     SELECT DISTINCT ON (source, natural_key)
            source,
            natural_key,
            observed_on,
-           payload ->> 'metric'            AS metric,
-           (payload ->> 'value')::numeric  AS value,
-           payload ->> 'units'             AS units,
+           payload ->> 'metric' AS metric,
+           CASE
+               WHEN jsonb_typeof(payload -> 'value') = 'number'
+                   THEN (payload ->> 'value')::numeric
+               WHEN jsonb_typeof(payload -> 'value') = 'string'
+                    AND payload ->> 'value' ~ '[0-9]'
+                    AND length(translate(payload ->> 'value', '0123456789.-', '')) = 0
+                   THEN (payload ->> 'value')::numeric
+           END AS value,
+           payload ->> 'units' AS units,
            ingested_at
     FROM raw.health_metrics
     ORDER BY source, natural_key, ingested_at DESC;
@@ -203,17 +253,84 @@ data:
     -- Left-join to this rather than to each other, or missing days silently
     -- vanish from a chart instead of showing up as the gaps they are.
     --
-    -- A view, not a table: generate_series is cheap at this range and a view
-    -- can never go stale.
-    CREATE OR REPLACE VIEW core.dim_date AS
-    SELECT d::date                                  AS date,
-           EXTRACT(isodow FROM d)::int              AS iso_dow,
-           to_char(d, 'Dy')                         AS dow_name,
-           EXTRACT(isodow FROM d)::int >= 6         AS is_weekend,
-           date_trunc('week',  d)::date             AS week_start,
-           date_trunc('month', d)::date             AS month_start,
-           EXTRACT(year FROM d)::int                AS year
-    FROM generate_series(date '2020-01-01', current_date, interval '1 day') AS d;
+    -- A table, and the one place this schema materializes something that is not
+    -- raw. The reason is the planner, not CPU: generating ~2,400 rows costs
+    -- well under a millisecond, but a function scan carries no statistics, so
+    -- Postgres falls back to a fixed default row estimate for generate_series
+    -- regardless of the real range. Join that against a growing raw table and
+    -- the estimate is wrong in a direction that can pick a nested loop where a
+    -- hash join belongs. A real table with a primary key and ANALYZEd stats
+    -- removes the guess.
+    --
+    -- It is also the one thing here that costs nothing to keep in sync — the
+    -- objection to materializing core and mart is the backfill burden, and past
+    -- dates do not change. This is generated reference data, not a
+    -- transformation of raw.
+    CREATE TABLE IF NOT EXISTS core.dim_date (
+        date        date    PRIMARY KEY,
+        iso_dow     int     NOT NULL,
+        dow_name    text    NOT NULL,
+        is_weekend  boolean NOT NULL,
+        week_start  date    NOT NULL,
+        month_start date    NOT NULL,
+        year        int     NOT NULL
+    );
+
+    -- Extends the spine on every run. ON CONFLICT DO NOTHING makes it
+    -- idempotent, and the +30 days of headroom mean "today" always exists even
+    -- between hourly runs — a dashboard opened at 00:05 would otherwise find
+    -- the current day missing from the spine.
+    INSERT INTO core.dim_date (date, iso_dow, dow_name, is_weekend, week_start, month_start, year)
+    SELECT d::date,
+           EXTRACT(isodow FROM d)::int,
+           to_char(d, 'Dy'),
+           EXTRACT(isodow FROM d)::int >= 6,
+           date_trunc('week',  d)::date,
+           date_trunc('month', d)::date,
+           EXTRACT(year FROM d)::int
+    FROM generate_series(date '2020-01-01', current_date + 30, interval '1 day') AS d
+    ON CONFLICT (date) DO NOTHING;
+
+    -- The point of making it a table. Safe inside the CronJob's single
+    -- transaction — ANALYZE may run in a transaction block, unlike VACUUM.
+    ANALYZE core.dim_date;
+
+    -- ---------------------------------------------------------------------
+    -- Drift detection
+    --
+    -- The failure mode this schema is otherwise blind to: a source renames a
+    -- field, the extraction above yields NULL, and a panel quietly goes flat.
+    -- Nothing errors, so nothing tells you. This view turns that silence into
+    -- rows you can put on a panel or alert on — a non-zero count means the
+    -- payload stopped matching what core expects.
+    --
+    -- Point a stat panel at `SELECT count(*) FROM core.typing_failures` and it
+    -- becomes the smoke alarm for every source at once.
+    -- ---------------------------------------------------------------------
+    CREATE OR REPLACE VIEW core.typing_failures AS
+    SELECT 'raw.health_metrics'      AS relation,
+           r.source,
+           r.natural_key,
+           r.ingested_at,
+           r.payload
+    FROM raw.health_metrics r
+    WHERE r.payload ->> 'metric' IS NULL
+       OR NOT (
+           jsonb_typeof(r.payload -> 'value') = 'number'
+           OR (jsonb_typeof(r.payload -> 'value') = 'string'
+               AND r.payload ->> 'value' ~ '[0-9]'
+               AND length(translate(r.payload ->> 'value', '0123456789.-', '')) = 0)
+       )
+    UNION ALL
+    SELECT 'raw.todoist_completed_tasks',
+           r.source, r.natural_key, r.ingested_at, r.payload
+    FROM raw.todoist_completed_tasks r
+    WHERE r.payload ->> 'content' IS NULL
+    UNION ALL
+    SELECT 'raw.todoist_lookups',
+           r.source, r.natural_key, r.ingested_at, r.payload
+    FROM raw.todoist_lookups r
+    WHERE r.payload ->> 'name' IS NULL;
 
     -- ---------------------------------------------------------------------
     -- mart: dashboard-shaped views
@@ -238,7 +355,7 @@ data:
            max(h.value) FILTER (WHERE h.metric = 'Stand')           AS "StandMinutes"
     FROM core.dim_date d
     LEFT JOIN core.health_metrics h ON h.observed_on = d.date
-    WHERE d.date >= current_date - 365
+    WHERE d.date BETWEEN current_date - 365 AND current_date
     GROUP BY d.date;
 
     -- Task throughput per day, on the same spine so days with nothing completed
@@ -248,7 +365,7 @@ data:
            count(t.task_key)               AS "TasksCompleted"
     FROM core.dim_date d
     LEFT JOIN core.todoist_completed_tasks t ON t.completed_on = d.date
-    WHERE d.date >= current_date - 365
+    WHERE d.date BETWEEN current_date - 365 AND current_date
     GROUP BY d.date;
 
     -- Completions resolved to project names. LEFT JOIN on the lookup so a task
