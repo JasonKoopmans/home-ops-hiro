@@ -281,6 +281,23 @@ SELECT count(*) FROM core.typing_failures;
 Non-zero means a payload stopped matching what `core` expects. The view returns
 the offending `payload` alongside, so diagnosis is the same query.
 
+**This is also wired as a Grafana alert rule**, provisioned in
+`kubernetes/apps/lifeos/grafana/app/helmrelease.yaml` under `alerting:`, so you
+do not have to remember to look. It queries the same count, checked hourly —
+tied to the schema CronJob's own cadence, since there's no reason to check
+faster than the data can change — and shows Firing under **Alerting** in the
+Grafana UI the moment any source produces a row that fails to type.
+
+**It notifies nowhere by default**, on purpose. `lifeos` has no SMTP or Telegram
+token configured, and which channel personal alerts should ring on is a
+preference this app hasn't had reason to make yet — not something worth
+defaulting silently, especially onto the cluster's own infra Telegram channel,
+which would mix "your habit tracker broke" in with "your Postgres backup
+failed" without you deciding that's what you wanted. Wiring a real destination
+is a separate step: either through the UI plane (Alerting → Contact points),
+which fits this app's existing split for personal-preference config, or in Git
+if you'd rather it be reproducible — tell me the channel and I'll add it.
+
 ### Semantic changes
 
 Same key, same type, different meaning — a value switching from minutes to
@@ -332,8 +349,21 @@ and every daily count is quietly wrong at the edges.
   `docs/plan-cloudnative-pg.md` §1b treats the restore drill as the thing that
   actually matters, and it hasn't happened. Personal history landing here makes
   that more pressing, not less.
-- **No PrometheusRule for ingest freshness.** Nothing currently alerts when a
-  source silently stops arriving, which is the characteristic failure of
-  personal pipelines — you don't notice until a chart has been flat for weeks.
-  A `max(ingested_at)` staleness check per source is the obvious follow-up.
+- **The `typing_failures` alert rule is unverified.** Its top-level shape is
+  copied from Grafana's own docs source; the query→reduce→threshold expression
+  chain is corroborated by multiple independent sources but, unlike this
+  schema's SQL, could not be checked against a real Grafana instance from where
+  it was written. Confirm it actually loaded after the next deploy:
+  `kubectl -n lifeos logs deploy/grafana -c grafana | grep -i provisioning`,
+  then check **Alerting** in the UI.
+- **That alert notifies nowhere yet.** See above — needs a contact point,
+  deliberately not chosen for you.
+- **No freshness check**, which is a different failure than `typing_failures`
+  catches. Typing failures mean a source sent something that arrived but didn't
+  parse; freshness means a source **stopped sending anything at all**, which is
+  invisible to every check in this schema — the characteristic failure of
+  personal pipelines, where you don't notice until a chart has been flat for
+  weeks. A `max(ingested_at)` staleness check per source, the same
+  query→reduce→threshold shape pointed at a different query, is the obvious
+  next alert once the pattern above is confirmed working.
 - **The ingest contract isn't enforced**, only documented. See above.

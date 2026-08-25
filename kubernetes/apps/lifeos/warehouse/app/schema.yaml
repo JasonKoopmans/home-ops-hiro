@@ -348,6 +348,12 @@ data:
     -- ring. FILTER rather than CASE because it says what it means, and max()
     -- over a single matching row is just "take it" while tolerating a duplicate
     -- if one ever appears.
+    -- Window is 3 years of integer day arithmetic, not `current_date - interval
+    -- '3 years'` — subtracting an interval from a date yields a timestamp in
+    -- Postgres, which would need a cast back before comparing to d.date (itself
+    -- a date). Staying in integers avoids the cast and the DST/leap-year
+    -- questions interval math raises, at the cost of drifting a day or so off a
+    -- true calendar 3-year mark near a leap year — irrelevant at daily grain.
     CREATE OR REPLACE VIEW mart.daily_activity AS
     SELECT d.date                                                   AS "Date",
            max(h.value) FILTER (WHERE h.metric = 'Move')            AS "MoveCalories",
@@ -355,7 +361,7 @@ data:
            max(h.value) FILTER (WHERE h.metric = 'Stand')           AS "StandMinutes"
     FROM core.dim_date d
     LEFT JOIN core.health_metrics h ON h.observed_on = d.date
-    WHERE d.date BETWEEN current_date - 365 AND current_date
+    WHERE d.date BETWEEN current_date - (365 * 3) AND current_date
     GROUP BY d.date;
 
     -- Task throughput per day, on the same spine so days with nothing completed
@@ -365,7 +371,7 @@ data:
            count(t.task_key)               AS "TasksCompleted"
     FROM core.dim_date d
     LEFT JOIN core.todoist_completed_tasks t ON t.completed_on = d.date
-    WHERE d.date BETWEEN current_date - 365 AND current_date
+    WHERE d.date BETWEEN current_date - (365 * 3) AND current_date
     GROUP BY d.date;
 
     -- Completions resolved to project names. LEFT JOIN on the lookup so a task

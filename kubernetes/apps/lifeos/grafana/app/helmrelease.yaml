@@ -149,6 +149,119 @@ spec:
               # Flux's postBuild substitution.
               password: $$GF_WAREHOUSE_READER_PASSWORD
 
+    # ---- Git plane: alerting ------------------------------------------------
+    # The rule logic — what counts as broken — is shared and versionable, so it
+    # lives in Git. Where the notification goes is not: this namespace has no
+    # SMTP or Telegram token configured, and "which channel should my personal
+    # alerts ring on" is a preference rather than a fact about the warehouse.
+    # That fits this instance's existing UI-plane philosophy, so it is left
+    # unset here on purpose — the rule evaluates and its state is visible under
+    # Alerting in the UI, and stays a no-op delivery (Grafana's built-in
+    # `grafana-default-email` receiver, unconfigured) until a contact point is
+    # wired, in the UI or by name in a follow-up here.
+    #
+    # Schema confidence, worth recording since this cannot be checked against a
+    # live Grafana from here: the top-level shape (groups/rules/data/condition/
+    # noDataState/execErrState/for) is copied from Grafana's own docs source
+    # (grafana/grafana, docs/sources/alerting/.../file-provisioning/index.md),
+    # fetched directly since grafana.com itself is unreachable from this
+    # environment. The query -> reduce -> threshold expression chain is the
+    # standard idiom for alerting on a non-Prometheus datasource and is
+    # corroborated by multiple independent sources, but unlike the schema SQL
+    # (parsed with pglast) there was no way to validate this against a real
+    # Grafana instance. If it fails to provision, Grafana's dashboard and
+    # datasource provisioning are both known to fail closed per-resource rather
+    # than aborting startup; alerting is documented as following the same
+    # model, but that specific behavior is not verified from here either.
+    # Confirm after deploy:
+    #   kubectl -n lifeos logs deploy/grafana -c grafana | grep -i provisioning
+    alerting:
+      warehouse-rules.yaml:
+        apiVersion: 1
+        groups:
+          - orgId: 1
+            name: warehouse
+            # Same folder the Git-plane dashboards use, so provisioned
+            # resources are grouped together in the UI regardless of type.
+            folder: GitOps
+            # Tied to the schema CronJob's own cadence — no point checking
+            # faster than the data the check depends on can change.
+            interval: 1h
+            rules:
+              - uid: warehouse-typing-failures
+                title: Warehouse ingest has typing failures
+                condition: C
+                data:
+                  # A: the check itself. count(*) always returns exactly one
+                  # row, so noDataState below is unreachable in practice and set
+                  # defensively rather than load-bearing.
+                  - refId: A
+                    # Unused by this query — SELECT count(*) has no time filter
+                    # — but every data node requires the field regardless.
+                    relativeTimeRange:
+                      from: 21600
+                      to: 0
+                    datasourceUid: lifeos-warehouse
+                    model:
+                      datasource:
+                        type: postgres
+                        uid: lifeos-warehouse
+                      rawSql: "SELECT count(*) AS value FROM core.typing_failures"
+                      format: table
+                      intervalMs: 1000
+                      maxDataPoints: 43200
+                      refId: A
+                  # B: collapse A's one-row result to a scalar. Required —
+                  # threshold evaluates a Number, not a query result frame.
+                  - refId: B
+                    datasourceUid: "__expr__"
+                    model:
+                      datasource:
+                        type: __expr__
+                        uid: "__expr__"
+                      type: reduce
+                      expression: A
+                      reducer: last
+                      intervalMs: 1000
+                      maxDataPoints: 43200
+                      refId: B
+                  # C: the condition. Any typing failure at all is worth
+                  # surfacing at this data volume — no reason to tolerate a
+                  # nonzero count.
+                  - refId: C
+                    datasourceUid: "__expr__"
+                    model:
+                      datasource:
+                        type: __expr__
+                        uid: "__expr__"
+                      type: threshold
+                      expression: B
+                      conditions:
+                        - evaluator:
+                            type: gt
+                            params: [0]
+                      intervalMs: 1000
+                      maxDataPoints: 43200
+                      refId: C
+                noDataState: OK
+                # A failed query (warehouse unreachable, view missing) is
+                # itself worth surfacing, distinctly from a real typing
+                # failure.
+                execErrState: Error
+                # No debounce beyond the group's own hourly cadence — with
+                # evaluations already an hour apart there is nothing left for a
+                # `for` window to filter out, and setting one shorter than the
+                # interval would be misleading: Grafana still waits for the
+                # next full evaluation before it can confirm the condition held
+                # for that long, so the effective delay would be one interval
+                # regardless of what this says.
+                for: 0m
+                annotations:
+                  summary: "core.typing_failures is non-empty — a source payload stopped matching what a core view expects."
+                  description: "Run `SELECT * FROM core.typing_failures` against the warehouse to see which relation and source. See docs/lifeos-warehouse.md."
+                labels:
+                  app: warehouse
+
     # ---- Git plane: dashboards --------------------------------------------
     # The sidecar watches ConfigMaps in this namespace labelled
     # grafana_dashboard: "1" and drops them into the provisioning tree.
