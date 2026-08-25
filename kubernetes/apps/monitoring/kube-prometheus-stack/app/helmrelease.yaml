@@ -337,7 +337,11 @@ spec:
           cpu: 50m
           memory: 128Mi
         limits:
-          memory: 512Mi
+          # Was 512Mi: pod ran at ~420Mi (82% of limit) with GOMEMLIMIT pinned to the
+          # limit, forcing aggressive GC that stalled the SQLite/unified-storage backend
+          # long enough to blow readiness/liveness probe timeouts (context deadline
+          # exceeded, seen continuously in logs). 1Gi gives headroom over the observed peak.
+          memory: 1Gi
       # Rename the chart's auto-provisioned Prometheus datasource and demote it from
       # default now that Thanos Query (below) provides the unified short+long-term view.
       # Kept as a secondary datasource for debugging sidecar/upload issues directly
