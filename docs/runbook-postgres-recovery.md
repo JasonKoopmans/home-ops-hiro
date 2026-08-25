@@ -181,7 +181,7 @@ from a previous run, so this must be cleared before the next drill can pass.
 
 **Tenant databases should revoke the default PUBLIC CONNECT grant.** PostgreSQL grants `CONNECT` on every
 database to `PUBLIC`, so any role in the cluster — including the drill's `app` role — can open a connection to
-any database unless told otherwise. When creating a real tenant (LifeOs and anything after it), pair the
+any database unless told otherwise. When creating a real tenant (LifeOS and anything after it), pair the
 `Database` CR with:
 
 ```sql

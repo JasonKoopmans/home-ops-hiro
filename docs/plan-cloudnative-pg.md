@@ -206,7 +206,7 @@ exclusion proven, not assumed. Zero scratch resources leaked across any of the t
 failures.
 
 **Still an informed guess:** all three runs were against an effectively empty database, so recovered-in-N-s is a
-correctness proxy, not a real RTO number. Re-run once LifeOs holds real data.
+correctness proxy, not a real RTO number. Re-run once LifeOS holds real data.
 
 ---
 

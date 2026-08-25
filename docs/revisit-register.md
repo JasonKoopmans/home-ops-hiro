@@ -30,7 +30,7 @@ checkable, not aspirational — "once 14d of data exists" rather than "later".
 | # | What | Trigger — look again when | Lives in |
 |---|---|---|---|
 | 1 | CNPG postgres + barman sidecar resource values are unmeasured guesses | ~14d of real workload data exists | `kubernetes/apps/database/postgres/app/cluster.yaml`, `objectstore.yaml`; [plan-cloudnative-pg.md](plan-cloudnative-pg.md) §3 |
-| 2 | `postgres` `storage.size: 10Gi` is a pure placeholder — no schema existed when set | Real data volume is known (LifeOs lands) | `kubernetes/apps/database/postgres/app/cluster.yaml` |
+| 2 | `postgres` `storage.size: 10Gi` is a pure placeholder — no schema existed when set | Real data volume is known (LifeOS lands) | `kubernetes/apps/database/postgres/app/cluster.yaml` |
 | 3 | `shared_buffers` deliberately left at the 128MB default | Alongside #1 — tuning without a workload is guessing | [plan-cloudnative-pg.md](plan-cloudnative-pg.md) §3 |
 | 4 | Restore drill proves correctness but **not real RTO** — 3 live runs so far are all against a near-empty database (151-377s recovered-in-N-s, correctness proxy only) | A real tenant has data; then read the `recovered in N s` line the drill prints | [runbook-postgres-recovery.md](runbook-postgres-recovery.md) §3 |
 | 5 | Restore-drill script is ~230 lines of shell embedded in YAML — no shellcheck, no tests | It grows another meaningful step or needs branching logic → move to `containers/` + GHCR | `kubernetes/apps/database/postgres-restore-drill/app/cronjob.yaml` (header) |

@@ -16,7 +16,7 @@
 # captured between them, and asserts A present AND B absent.
 #
 # The canaries land in the default `app` database, which is otherwise unused (CNPG created it because bootstrap
-# was unspecified). Real tenants such as LifeOs get their own Database CRs and are never written to here. The
+# was unspecified). Real tenants such as LifeOS get their own Database CRs and are never written to here. The
 # table self-prunes to the 20 most recent rows.
 #
 # ⚠ WATCH — SCRIPT SIZE (docs/revisit-register.md)
@@ -74,7 +74,7 @@ spec:
             # assumed). It cannot read tables it holds no grant on, and `app` is CNPG's throwaway default
             # database holding nothing but these canaries — so the exposure is proportionate to a weekly
             # verification job. Two things keep it that way, and both are worth preserving:
-            #   1. Real tenants (LifeOs et al) get their OWN Database + role, never this one.
+            #   1. Real tenants (LifeOS et al) get their OWN Database + role, never this one.
             #   2. Those tenant databases should REVOKE CONNECT ON DATABASE <db> FROM PUBLIC at creation.
             # If this job ever needs more than writing canary rows, give it a dedicated least-privilege
             # DatabaseRole instead of widening `app`.
