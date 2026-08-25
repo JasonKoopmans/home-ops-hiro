@@ -4,17 +4,32 @@ A `lifeos` database on the shared CNPG cluster, written by n8n and read by the
 LifeOS Grafana. This is what that Grafana was built to query — see
 `docs/lifeos-grafana.md` for the instance itself.
 
+**Sources today**
+
+| Source | Grain | Arrives via | Raw table |
+|---|---|---|---|
+| Apple activity rings (Move / Exercise / Stand) | one row per day per ring | a Google Sheet that n8n reads | `raw.health_metrics` |
+| Todoist completed tasks | event, one per completion | Todoist API | `raw.todoist_completed_tasks` |
+| Todoist projects / labels / sections | snapshot of current state | Todoist API | `raw.todoist_lookups` |
+
+Note where the Google integration ended up. The LifeOS Grafana deliberately has
+no Sheets plugin: n8n owns the Google credential and the fetching, Postgres
+holds the history, Grafana reads Postgres. That means the sheet stops being the
+system of record the moment it has been ingested once — swap it for the Apple
+Health API later and the history stays continuous, because `source` names where
+the data came from rather than how it travelled.
+
 ---
 
 ## The architecture, and why it isn't full medallion
 
 The layering follows medallion's *principles* and drops its physics.
 
-| Layer | Schema | Physical? | Holds |
-|---|---|---|---|
-| Bronze | `raw` | **tables** | every observation, append-only, source-shaped |
-| Silver | `core` | views | current state, typed and conformed |
-| Gold | `mart` | views | dashboard-shaped aggregates |
+| Layer | Schema | Physical? | Holds | Casing |
+|---|---|---|---|---|
+| Bronze | `raw` | **tables** | every observation, append-only, source-shaped | snake_case |
+| Silver | `core` | views | current state, typed and conformed | snake_case |
+| Gold | `mart` | views | dashboard-shaped aggregates | PascalCase columns |
 
 In a lakehouse every layer is materialized because recompute is expensive and
 storage is cheap. In one small Postgres those economics invert: recompute is
@@ -41,9 +56,10 @@ Every fetch that sees a **changed** record writes another row. Nothing is ever
 updated in place, so a correction at the source becomes visible history rather
 than a silent overwrite, and `core` simply starts returning the newer row.
 
-That matters most for habits and tasks, which are snapshot-shaped — the source
-reports current state rather than emitting events, so without this the moment a
-task's state changed would be unrecoverable.
+That matters most for the Todoist lookups, which are snapshot-shaped — the API
+reports current state rather than emitting events, so without this a project
+rename would overwrite the old name and every historical chart would silently
+relabel itself as though the project had always been called that.
 
 ### The ingest contract
 
@@ -51,13 +67,13 @@ task's state changed would be unrecoverable.
 worth getting right.** Every ingest node should write like this:
 
 ```sql
-INSERT INTO raw.habit_records (source, natural_key, observed_at, payload)
-SELECT :source, :natural_key, :observed_at, :payload::jsonb
+INSERT INTO raw.health_metrics (source, natural_key, observed_on, payload)
+SELECT :source, :natural_key, :observed_on::date, :payload::jsonb
 WHERE NOT EXISTS (
     SELECT 1
     FROM (
         SELECT payload
-        FROM raw.habit_records
+        FROM raw.health_metrics
         WHERE source = :source AND natural_key = :natural_key
         ORDER BY ingested_at DESC
         LIMIT 1
@@ -71,10 +87,10 @@ properties follow, and both matter:
 
 - **Idempotent.** Re-running a workflow, or overlapping schedules, inserts
   nothing new. Ingest jobs *will* re-run; assume it.
-- **Correct on flip-back.** A habit going done → undone → done records all
-  three states. A naive "skip if we've ever seen this payload" dedupe would
-  swallow the third, which is exactly the kind of bug you find six months later
-  in a chart that looks subtly wrong.
+- **Correct on flip-back.** A value going A → B → A records all three states. A
+  naive "skip if we've ever seen this payload" dedupe would swallow the third,
+  which is exactly the kind of bug you find six months later in a chart that
+  looks subtly wrong.
 
 The `(source, natural_key, ingested_at DESC)` index makes that lookup cheap.
 
@@ -146,25 +162,70 @@ taken a backup, then reconcile the file to match.
 
 ---
 
+## Naming and casing
+
+`raw` and `core` are snake_case and unquoted. `mart` uses **PascalCase for
+output column names only**, via quoted aliases.
+
+Postgres folds unquoted identifiers to lowercase, so `CREATE TABLE HealthMetrics`
+silently creates `healthmetrics`. Real PascalCase means double-quoting at the
+definition *and at every reference, forever* — every view, index, join, `\d`,
+Grafana query and pasted snippet. Miss one and the error reads
+`relation "healthmetrics" does not exist`, which looks like a missing table
+rather than a casing mistake.
+
+There is no clash with anything system-owned: `pg_catalog` and
+`information_schema` are entirely lowercase and live in their own schemas.
+Quoting even *protects* against reserved words — `"Order"` is legal where bare
+`order` is not. The cost is purely ergonomic, but it is paid by every person and
+tool that touches the schema.
+
+So the casing sits at the boundary where it is actually read. Grafana shows
+`MoveCalories`; joins and indexes underneath stay unquoted and paste-safe. If
+that trade ever stops being worth it, moving to full PascalCase is mechanical —
+quote every identifier in `schema.yaml` and re-run the CronJob.
+
+---
+
 ## Adding a source
 
-1. Add a `raw.<domain>` table to `schema.yaml` if none fits — same five columns
-   every time (`source`, `natural_key`, `observed_at`, `ingested_at`,
-   `payload`), plus the two indexes.
-2. Add a `core.<domain>` view taking the latest observation per key.
-3. Build the n8n workflow using the ingest contract above.
-4. Add `mart` views as dashboards need them — shaped by the question a panel
+1. Add a `raw.<domain>` table to `schema.yaml` if none fits. Common columns
+   every time: `source`, `natural_key`, `ingested_at`, `payload`, plus the two
+   indexes.
+2. Give it a "when did this happen" column that matches the source's **grain** —
+   `observed_on date` for daily data, `<event>_at timestamptz` for events. Do
+   not force a date into a timestamptz: you would be inventing a time of day and
+   then guessing a timezone to get the date back, which surfaces as a chart
+   that is off by one day near midnight.
+3. Add a `core.<domain>` view taking the latest observation per key, typing the
+   fields you need out of `payload`.
+4. Build the n8n workflow using the ingest contract above.
+5. Add `mart` views as dashboards need them — shaped by the question a panel
    asks, not speculatively.
 
 Keep `payload` as raw jsonb and do extraction in `core`/`mart`. A source that
 renames a field then breaks one view definition instead of breaking ingestion,
 and no data is at risk while you fix it.
 
-`core.dim_date` is the join backbone. Health metrics and habits are both
-daily-grain and the interesting questions cross them, which only works against
-a spine containing every day — including days a source recorded nothing. Left
-join to it, or missing days vanish from a chart instead of showing as the gaps
-they are.
+**Lookups get one table, not one each.** `raw.todoist_lookups` carries a `kind`
+discriminator covering projects, labels and sections. They share a shape and
+differ only in what they name, so a table each would be the same DDL copied N
+times — and the next lookup would need a schema change and a deploy. As it is,
+n8n starts writing a new `kind` and a one-line `core` view exposes it.
+
+`core.dim_date` is the join backbone. Activity rings and task completions are
+both daily-grain and the interesting questions cross them ("do I close more
+tasks on days I hit the Exercise ring?"), which only works against a spine
+containing every day — including days a source recorded nothing. Left join to
+it, or missing days vanish from a chart instead of showing as the gaps they are.
+
+### Timezones
+
+`completed_at` from Todoist is UTC. `core.todoist_completed_tasks` converts it
+with `AT TIME ZONE '${TIMEZONE}'` — substituted by Flux from cluster-secrets —
+to get `completed_on`, the local day a human means by "what did I finish
+Tuesday". Without that a task closed at 7pm Central lands on the following day
+and every daily count is quietly wrong at the edges.
 
 ---
 

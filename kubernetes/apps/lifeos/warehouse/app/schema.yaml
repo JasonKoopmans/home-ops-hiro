@@ -11,6 +11,10 @@
 # substitution rewrites `$$` to `$`, so a PL/pgSQL function body would be
 # silently mangled on its way into the cluster. If this schema ever needs a
 # function or trigger, escape accordingly and test the rendered output first.
+#
+# `${TIMEZONE}` below IS substituted by Flux, deliberately — it resolves from
+# cluster-secrets to the cluster timezone, which is what turns an instant into
+# the local day a human would call it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -23,8 +27,9 @@ data:
     --   raw   physical, append-only. One row per *observation* of a record,
     --         never an update in place. This is the only layer that cannot be
     --         rebuilt, so it is the only one that is a table.
-    --   core  views. Typed, deduplicated, conformed.
-    --   mart  views. Shaped for specific dashboards.
+    --   core  views. Typed, deduplicated, conformed. snake_case.
+    --   mart  views. Shaped for dashboards, and the only layer with
+    --         PascalCase column names — see the note above the mart section.
     --
     -- core and mart are views rather than materialized tables on purpose. In a
     -- lakehouse each layer is materialized because recompute is expensive and
@@ -39,32 +44,70 @@ data:
     -- ---------------------------------------------------------------------
     -- raw: landing tables
     --
-    -- Shape is identical for every source, on purpose:
-    --   source       which integration produced this ('withings', 'todoist')
+    -- Common shape for every source:
+    --   source       which integration produced this
     --   natural_key  the source's own stable id for the record
-    --   observed_at  when the thing happened, per the source
     --   ingested_at  when we saw it — the axis corrections travel along
     --   payload      the record exactly as the source gave it
     --
-    -- payload is jsonb rather than typed columns because personal APIs change
-    -- shape without warning. A new field, a renamed one, a type change: none of
-    -- them can break ingestion, only the view above it. Typing happens in core,
+    -- The "when did it happen" column deliberately varies by source, because
+    -- grain does. A daily activity ring is a date with no meaningful instant;
+    -- a completed task is an instant. Forcing both into timestamptz would mean
+    -- inventing a time of day for the former and then guessing a timezone to
+    -- get the date back out — an error that hides until a chart is off by one
+    -- day near midnight.
+    --
+    -- payload stays jsonb rather than typed columns because these APIs change
+    -- shape without warning. A new field, a renamed one, a type change: none
+    -- can break ingestion, only the view above it. Typing happens in core,
     -- where it is a one-line edit and no data is at risk.
     -- ---------------------------------------------------------------------
+
+    -- Apple activity rings (Move / Exercise / Stand), long-format: one row per
+    -- (day, metric). Reaches us via a Google Sheet that n8n reads, but `source`
+    -- names where the data comes from rather than how it travels — swap the
+    -- sheet for the Apple Health API later and history stays continuous.
+    --
+    -- natural_key is 'YYYY-MM-DD:Metric', which is exactly the grain the sheet
+    -- is unique on.
     CREATE TABLE IF NOT EXISTS raw.health_metrics (
         ingest_id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         source      text        NOT NULL,
         natural_key text        NOT NULL,
-        observed_at timestamptz NOT NULL,
+        observed_on date        NOT NULL,
         ingested_at timestamptz NOT NULL DEFAULT now(),
         payload     jsonb       NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS raw.habit_records (
+    -- Todoist completed tasks. Event grain — completed_at is a real instant.
+    CREATE TABLE IF NOT EXISTS raw.todoist_completed_tasks (
+        ingest_id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        source       text        NOT NULL,
+        natural_key  text        NOT NULL,
+        completed_at timestamptz NOT NULL,
+        ingested_at  timestamptz NOT NULL DEFAULT now(),
+        payload      jsonb       NOT NULL
+    );
+
+    -- Todoist's keyed reference data: projects, labels, sections, and whatever
+    -- else turns out to have an id worth resolving to a name.
+    --
+    -- One table with a `kind` discriminator rather than one table per kind.
+    -- These all share a shape (id, name, some attributes) and differ only in
+    -- what they name, so a table each would be the same DDL copied N times —
+    -- and adding the next lookup would need a schema change plus a deploy.
+    -- Here it needs neither: n8n starts writing a new `kind` and a one-line
+    -- core view exposes it.
+    --
+    -- Snapshot grain: the source reports current state rather than emitting
+    -- events, so a rename arrives as a changed payload and lands as a new
+    -- observation. observed_on is the day we saw that state.
+    CREATE TABLE IF NOT EXISTS raw.todoist_lookups (
         ingest_id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         source      text        NOT NULL,
+        kind        text        NOT NULL,
         natural_key text        NOT NULL,
-        observed_at timestamptz NOT NULL,
+        observed_on date        NOT NULL DEFAULT current_date,
         ingested_at timestamptz NOT NULL DEFAULT now(),
         payload     jsonb       NOT NULL
     );
@@ -73,17 +116,19 @@ data:
     -- and the DISTINCT ON in the core views on read.
     CREATE INDEX IF NOT EXISTS health_metrics_key_seen
         ON raw.health_metrics (source, natural_key, ingested_at DESC);
-    CREATE INDEX IF NOT EXISTS habit_records_key_seen
-        ON raw.habit_records (source, natural_key, ingested_at DESC);
+    CREATE INDEX IF NOT EXISTS todoist_completed_key_seen
+        ON raw.todoist_completed_tasks (source, natural_key, ingested_at DESC);
+    CREATE INDEX IF NOT EXISTS todoist_lookups_key_seen
+        ON raw.todoist_lookups (source, kind, natural_key, ingested_at DESC);
 
     -- Dashboards filter by when things happened, not when we noticed them.
     CREATE INDEX IF NOT EXISTS health_metrics_observed
-        ON raw.health_metrics (observed_at DESC);
-    CREATE INDEX IF NOT EXISTS habit_records_observed
-        ON raw.habit_records (observed_at DESC);
+        ON raw.health_metrics (observed_on DESC);
+    CREATE INDEX IF NOT EXISTS todoist_completed_at
+        ON raw.todoist_completed_tasks (completed_at DESC);
 
     -- ---------------------------------------------------------------------
-    -- core: current state
+    -- core: current state, typed
     --
     -- DISTINCT ON takes the newest observation per record. Because raw keeps
     -- every version, a correction at the source shows up as a new row and this
@@ -94,30 +139,69 @@ data:
     SELECT DISTINCT ON (source, natural_key)
            source,
            natural_key,
-           observed_at,
-           ingested_at,
-           observed_at::date AS observed_date,
-           payload
+           observed_on,
+           payload ->> 'metric'            AS metric,
+           (payload ->> 'value')::numeric  AS value,
+           payload ->> 'units'             AS units,
+           ingested_at
     FROM raw.health_metrics
     ORDER BY source, natural_key, ingested_at DESC;
 
-    CREATE OR REPLACE VIEW core.habit_records AS
+    CREATE OR REPLACE VIEW core.todoist_completed_tasks AS
     SELECT DISTINCT ON (source, natural_key)
            source,
-           natural_key,
-           observed_at,
-           ingested_at,
-           observed_at::date AS observed_date,
-           payload
-    FROM raw.habit_records
+           natural_key                                          AS task_key,
+           completed_at,
+           -- The local day, which is the one a human means by "what did I get
+           -- done Tuesday". Todoist returns UTC; without this conversion a task
+           -- finished at 7pm Central lands on the following day.
+           (completed_at AT TIME ZONE '${TIMEZONE}')::date       AS completed_on,
+           payload ->> 'content'                                AS content,
+           payload ->> 'project_id'                             AS project_id,
+           payload ->> 'section_id'                             AS section_id,
+           -- Present only when the ingest includes it; Todoist's completed-task
+           -- payloads do not always carry labels. NULL rather than missing, so
+           -- a join degrades to "unlabelled" instead of dropping the row.
+           payload -> 'labels'                                  AS labels,
+           ingested_at
+    FROM raw.todoist_completed_tasks
     ORDER BY source, natural_key, ingested_at DESC;
 
-    -- The join backbone. Health metrics and habit records are both daily-grain
-    -- and the interesting questions cross them ("do I sleep worse on days I
-    -- skip the habit?"), which only works against a spine that has every day —
-    -- including the days a source recorded nothing. Left-join to this rather
-    -- than to each other, or missing days silently vanish from a chart instead
-    -- of showing up as the gaps they are.
+    CREATE OR REPLACE VIEW core.todoist_lookups AS
+    SELECT DISTINCT ON (source, kind, natural_key)
+           source,
+           kind,
+           natural_key            AS lookup_id,
+           payload ->> 'name'     AS name,
+           payload,
+           observed_on,
+           ingested_at
+    FROM raw.todoist_lookups
+    ORDER BY source, kind, natural_key, ingested_at DESC;
+
+    -- Thin conveniences over the discriminator, so joins read as what they are.
+    -- Adding the next lookup kind is a copy of one of these.
+    CREATE OR REPLACE VIEW core.todoist_projects AS
+    SELECT lookup_id AS project_id, name, observed_on, ingested_at
+    FROM core.todoist_lookups
+    WHERE kind = 'project';
+
+    CREATE OR REPLACE VIEW core.todoist_labels AS
+    SELECT lookup_id AS label_id, name, observed_on, ingested_at
+    FROM core.todoist_lookups
+    WHERE kind = 'label';
+
+    CREATE OR REPLACE VIEW core.todoist_sections AS
+    SELECT lookup_id AS section_id, name, observed_on, ingested_at
+    FROM core.todoist_lookups
+    WHERE kind = 'section';
+
+    -- The join backbone. Health metrics and task completions are both
+    -- daily-grain and the interesting questions cross them ("do I close more
+    -- tasks on days I hit the Exercise ring?"), which only works against a
+    -- spine that has every day — including the days a source recorded nothing.
+    -- Left-join to this rather than to each other, or missing days silently
+    -- vanish from a chart instead of showing up as the gaps they are.
     --
     -- A view, not a table: generate_series is cheap at this range and a view
     -- can never go stale.
@@ -134,24 +218,62 @@ data:
     -- ---------------------------------------------------------------------
     -- mart: dashboard-shaped views
     --
-    -- Empty on purpose. A mart view is defined by the question a panel asks,
-    -- and no panels exist yet — shipping speculative aggregates here would mean
-    -- maintaining SQL nothing reads. Add them as dashboards are built.
-    --
-    -- The pattern, for when that happens:
-    --
-    --   CREATE OR REPLACE VIEW mart.daily_sleep AS
-    --   SELECT d.date,
-    --          (h.payload ->> 'total_sleep_minutes')::numeric AS sleep_minutes
-    --   FROM core.dim_date d
-    --   LEFT JOIN core.health_metrics h
-    --          ON h.observed_date = d.date
-    --         AND h.source = 'oura'
-    --   WHERE d.date >= current_date - 90;
-    --
-    -- Note the shape: spine on the left, source on the right, extraction from
-    -- jsonb at this layer. Grafana queries mart and never touches raw.
+    -- The only layer using PascalCase, and only for output column names, via
+    -- quoted aliases. Postgres folds unquoted identifiers to lowercase, so real
+    -- PascalCase requires double quotes at every reference forever — a tax
+    -- worth paying exactly where a human reads the result (Grafana column
+    -- headers, legends) and not worth paying on every join and index beneath.
+    -- Object names stay snake_case so `FROM mart.daily_activity` needs no
+    -- quoting and pasted SQL keeps working.
     -- ---------------------------------------------------------------------
+
+    -- Activity rings pivoted from long to wide: one row per day, one column per
+    -- ring. FILTER rather than CASE because it says what it means, and max()
+    -- over a single matching row is just "take it" while tolerating a duplicate
+    -- if one ever appears.
+    CREATE OR REPLACE VIEW mart.daily_activity AS
+    SELECT d.date                                                   AS "Date",
+           max(h.value) FILTER (WHERE h.metric = 'Move')            AS "MoveCalories",
+           max(h.value) FILTER (WHERE h.metric = 'Exercise')        AS "ExerciseMinutes",
+           max(h.value) FILTER (WHERE h.metric = 'Stand')           AS "StandMinutes"
+    FROM core.dim_date d
+    LEFT JOIN core.health_metrics h ON h.observed_on = d.date
+    WHERE d.date >= current_date - 365
+    GROUP BY d.date;
+
+    -- Task throughput per day, on the same spine so days with nothing completed
+    -- read as zero rather than disappearing.
+    CREATE OR REPLACE VIEW mart.daily_task_completions AS
+    SELECT d.date                          AS "Date",
+           count(t.task_key)               AS "TasksCompleted"
+    FROM core.dim_date d
+    LEFT JOIN core.todoist_completed_tasks t ON t.completed_on = d.date
+    WHERE d.date >= current_date - 365
+    GROUP BY d.date;
+
+    -- Completions resolved to project names. LEFT JOIN on the lookup so a task
+    -- in a project we have not ingested yet still counts, labelled rather than
+    -- dropped — silently losing rows to a missing dimension row is the classic
+    -- way a warehouse under-reports.
+    CREATE OR REPLACE VIEW mart.task_completions AS
+    SELECT t.completed_on                          AS "Date",
+           t.completed_at                          AS "CompletedAt",
+           t.content                               AS "Task",
+           coalesce(p.name, '(unknown project)')   AS "Project",
+           coalesce(s.name, '(no section)')        AS "Section"
+    FROM core.todoist_completed_tasks t
+    LEFT JOIN core.todoist_projects p ON p.project_id = t.project_id
+    LEFT JOIN core.todoist_sections s ON s.section_id = t.section_id;
+
+    -- The cross-source view the spine exists for.
+    CREATE OR REPLACE VIEW mart.daily_overview AS
+    SELECT a."Date"              AS "Date",
+           a."MoveCalories"      AS "MoveCalories",
+           a."ExerciseMinutes"   AS "ExerciseMinutes",
+           a."StandMinutes"      AS "StandMinutes",
+           c."TasksCompleted"    AS "TasksCompleted"
+    FROM mart.daily_activity a
+    LEFT JOIN mart.daily_task_completions c ON c."Date" = a."Date";
 
     -- ---------------------------------------------------------------------
     -- Grants
