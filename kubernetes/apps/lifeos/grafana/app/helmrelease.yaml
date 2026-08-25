@@ -37,13 +37,22 @@ spec:
 
     replicas: 1
 
-    # Deployment-level, which is where Reloader looks. The chart already
-    # checksums its own ConfigMaps into the pod template; this covers the Secret.
-    # Note what that does and does not buy: a changed `secret-key` takes effect
-    # on the restart, but a changed `admin-password` does not — see the
-    # bootstrap-only note on `admin:` below.
+    # Deployment-level, which is where Reloader looks. `auto` rather than
+    # naming grafana-secret explicitly: the pod now pulls from two Secrets
+    # (grafana-secret directly, warehouse-credentials via
+    # GF_WAREHOUSE_READER_PASSWORD below), and a single explicit-name
+    # annotation only watches the one Secret it names — a rotation of the other
+    # would silently need a manual restart. `auto` watches every
+    # ConfigMap/Secret the pod spec actually references, so a third one added
+    # later is covered without remembering to update this line. The chart
+    # already checksums its own ConfigMaps into the pod template regardless.
+    #
+    # Note what a Secret-triggered restart does and does not buy: a changed
+    # `secret-key` or `reader-password` takes effect on the restart, but a
+    # changed `admin-password` does not — see the bootstrap-only note on
+    # `admin:` below.
     annotations:
-      secret.reloader.stakater.com/reload: grafana-secret
+      reloader.stakater.com/auto: "true"
 
     persistence:
       enabled: true

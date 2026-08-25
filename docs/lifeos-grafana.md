@@ -8,7 +8,7 @@ stays focused on the cluster.
 |---|---|---|
 | Hostname | `grafana.${SECRET_DOMAIN}` | `lifeos.${SECRET_DOMAIN}` |
 | Chart | bundled in kube-prometheus-stack | `grafana-community/grafana` (standalone, versions independently) |
-| Data sources | Thanos, Loki, Prometheus | none yet — a Postgres warehouse is next |
+| Data sources | Thanos, Loki, Prometheus | LifeOS warehouse (Postgres) |
 | Database | disposable — rebuild from Git | **load-bearing** — holds UI-authored work |
 | Storage class | `longhorn` | `longhorn` (3 replicas + S3 backups) |
 
@@ -113,15 +113,17 @@ Save As), rework it there, re-export, delete the copy.
 
 ## Data sources
 
-**There are none yet, and that is deliberate.** The reporting warehouse this
-instance is meant to query does not exist yet, and a provisioned data source
-pointing at nothing is worse than an empty list — it fails its health check on
-every page load and teaches you to ignore a red banner.
+**LifeOS Warehouse** (`uid: lifeos-warehouse`) — a Postgres database on the
+shared CNPG cluster in the `database` namespace, written by n8n and read here
+through `lifeos_reader`, a role with `SELECT` on curated views only, nothing on
+the raw landing tables ingestion writes to. Same principle as everywhere else
+in this app: the thing that reports on data cannot mutate it, or reach further
+into it than it needs to. Full design — the layering, the roles, the ingest
+contract — is in `docs/lifeos-warehouse.md`. Postgres is a data source type
+built into Grafana, so no plugin was needed for this one.
 
-Nothing is blocked in the meantime: a data source added through the UI works
-normally and lives in the UI plane like any other browser-authored object.
-
-### Adding one
+Nothing else is provisioned, and adding a second follows the same rule that got
+this one built:
 
 - **Credentials belong in Git** → add the source to `datasources:` in
   `helmrelease.yaml` with an explicit `uid`, and its secret to
@@ -133,14 +135,6 @@ normally and lives in the UI plane like any other browser-authored object.
 The `uid` is the part that matters. Dashboard JSON references data sources by
 uid, so a stable one is what lets a dashboard exported into Git keep working
 after a reprovision.
-
-### The one that's coming
-
-The reporting warehouse: a database on the existing CNPG cluster in the
-`database` namespace, written by scheduled n8n jobs and read here through a
-**read-only** Postgres role — the same principle as everything else in this app,
-where the reporting consumer cannot mutate what it reports on. Grafana's
-Postgres data source is built in, so no plugin is needed.
 
 Cluster metrics are deliberately *not* wired in. If a personal dashboard ever
 wants them, add Thanos as a second data source
@@ -174,9 +168,12 @@ comes up without it and every dashboard depending on it breaks.
   cluster-wide discovery, so nothing in `monitoring/` needed to change.
 - **Ordering**: the app's `ks.yaml` depends on `kube-prometheus-stack` purely
   for the `monitoring.coreos.com` CRDs that the ServiceMonitor needs.
-- **Restarts**: the HelmRelease carries
-  `secret.reloader.stakater.com/reload: grafana-secret`, so a Secret change
-  rolls the pod without manual intervention.
+- **Restarts**: the HelmRelease carries `reloader.stakater.com/auto: "true"`,
+  so a change to any Secret the pod actually references — `grafana-secret` or
+  the warehouse's `warehouse-credentials` — rolls the pod without manual
+  intervention. `auto` rather than naming one Secret because the pod now
+  depends on two of them; an explicit-name annotation would only watch
+  whichever one it names.
 - **The admin password in the Secret is bootstrap-only**, and this is the one
   piece of the setup that behaves counter-intuitively. Grafana writes that
   password into its database when it first creates the admin user and never

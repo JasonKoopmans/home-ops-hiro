@@ -115,32 +115,65 @@ hardening if a workflow ever gets it wrong. It was left out for now because
 PL/pgSQL bodies need dollar-quoting, which Flux's postBuild substitution
 rewrites (see the note at the top of `schema.yaml`).
 
+**Use n8n's Postgres node in parameterized mode — never build this query by
+string-concatenating a field from `payload` into the SQL.** `:source`,
+`:natural_key` and `:payload` above are bind parameters, which is what makes
+arbitrary content in a Todoist task title or a Sheets cell safe to insert
+regardless of what characters it contains. The moment any of this is
+assembled as a string (an n8n Expression building a raw query, `+`-concatenating
+values into `rawSql`, etc.) that guarantee is gone and untrusted API content is
+executing as SQL.
+
 ---
 
 ## Who can do what
 
-Two CNPG-managed roles, declared in `database/postgres/app/cluster.yaml`:
+Three CNPG-managed roles, declared in `database/postgres/app/cluster.yaml`. The
+split isn't just reader vs. writer — it's "does this connection's *job* need
+schema-level rights," and the answer is no for both consumers:
 
 | Role | Used by | Rights |
 |---|---|---|
-| `lifeos_writer` | n8n ingest, the schema CronJob | owns the `lifeos` database and everything in it |
+| `lifeos_writer` | the schema CronJob, and nothing else | owns the `lifeos` database — full DDL |
+| `lifeos_ingest` | n8n | `SELECT` + `INSERT` on `raw` only. No DDL, no reach into `core`/`mart` |
 | `lifeos_reader` | Grafana | `SELECT` on `core` and `mart`. **Nothing on `raw`.** |
 
-The reader reaches raw data only through the views, because a Postgres view
+This wasn't the original design — n8n and the CronJob shared `lifeos_writer`
+until a review pass asked the obvious question: does the role that *writes
+rows* need the same reach as the role that *owns the schema*? It shouldn't. A
+mistyped node or a leaked n8n credential should be able to insert a bad row,
+not `DROP TABLE core.health_metrics`. `lifeos_ingest` is scoped to exactly the
+one thing ingestion does — write raw data, and read it back for the
+idempotent-insert check in the [ingest contract](#the-ingest-contract) above.
+
+The reader reaches curated data only through views, because a Postgres view
 executes with its *owner's* privileges rather than the caller's. So Grafana
-gets curated data and cannot touch the landing tables — the same principle as
-the read-only posture everywhere else in this stack: the thing that reports on
-data cannot mutate it.
+gets `core`/`mart` and cannot touch `raw` at all — the same principle applied a
+second time: the thing that reports on data cannot mutate it, and the thing
+that writes data cannot restructure it.
 
-Neither role is `SUPERUSER`, `CREATEDB` or `CREATEROLE`. The cluster has no
-superuser secret at all (`enableSuperuserAccess` is off), which is also why the
-database is created by a CNPG `Database` CR rather than by SQL — nothing in the
-cluster is able to issue `CREATE DATABASE`.
+None of the three roles is `SUPERUSER`, `CREATEDB` or `CREATEROLE`. The cluster
+has no superuser secret at all (`enableSuperuserAccess` is off), which is also
+why the database is created by a CNPG `Database` CR rather than by SQL —
+nothing in the cluster is able to issue `CREATE DATABASE`.
 
-The two role passwords exist in **two namespaces** — `database` for CNPG, and
-`lifeos` for the CronJob and Grafana — because Secrets do not cross namespaces.
-Rotate both together. n8n will need a third copy in `default` when ingestion
-starts.
+**Known limitation, not fixable from within this role model:** Postgres grants
+`CONNECT` to every database to `PUBLIC` by default, and revoking it needs a
+database's owner or a superuser — neither of which these roles are, for any
+database but `lifeos` itself. So `lifeos_reader` and `lifeos_ingest` could
+technically `CONNECT` to CNPG's default `app` database (or any future one on
+this shared cluster), even though they'd have no table-level privileges once
+there. Fixing it means briefly enabling `enableSuperuserAccess` to run one
+`REVOKE CONNECT`, then disabling it again — judged not worth doing today, since
+nothing else currently uses `app`. Worth revisiting if this cluster starts
+hosting a database with data that actually needs isolating from LifeOS.
+
+**Passwords exist in two namespaces today** — `database` for CNPG's
+`managed.roles`, and `lifeos` for the CronJob (`lifeos_writer`) and Grafana
+(`lifeos_reader`). `lifeos_ingest`'s password is *not* copied into `lifeos` —
+nothing there uses it. It needs a third copy in `default` once n8n's workflow
+exists, since that's where n8n runs. Whichever role's password you rotate,
+rotate every copy of it.
 
 ---
 
@@ -271,8 +304,7 @@ This is the part that matters most, because the characteristic failure here is
 flat for weeks.
 
 `core.typing_failures` surfaces every row whose payload didn't type cleanly,
-across all sources. Point a stat panel at it and it becomes the smoke alarm for
-the whole warehouse:
+across all sources:
 
 ```sql
 SELECT count(*) FROM core.typing_failures;
@@ -281,12 +313,29 @@ SELECT count(*) FROM core.typing_failures;
 Non-zero means a payload stopped matching what `core` expects. The view returns
 the offending `payload` alongside, so diagnosis is the same query.
 
-**This is also wired as a Grafana alert rule**, provisioned in
-`kubernetes/apps/lifeos/grafana/app/helmrelease.yaml` under `alerting:`, so you
-do not have to remember to look. It queries the same count, checked hourly —
-tied to the schema CronJob's own cadence, since there's no reason to check
-faster than the data can change — and shows Firing under **Alerting** in the
-Grafana UI the moment any source produces a row that fails to type.
+Two things surface it, deliberately layered rather than either alone:
+
+**A stat panel on the seed dashboard** (`LifeOS — Start Here` → *Warehouse
+typing failures*) runs exactly that query and turns red at any nonzero count.
+This is the primary mechanism — it's a plain panel query, the same schema as
+every other panel here, nothing about it is provisioning-format-specific or
+unverified.
+
+**A Grafana alert rule**, provisioned in
+`kubernetes/apps/lifeos/grafana/app/helmrelease.yaml` under `alerting:`, checks
+the same count hourly — tied to the schema CronJob's own cadence — and shows
+Firing under **Alerting** in the UI the moment any source produces a row that
+fails to type. Kept as a belt-and-suspenders layer on top of the panel, with
+one honest caveat: unlike everything else in this warehouse, its schema
+(the query → reduce → threshold expression chain Grafana's alerting requires)
+could not be checked against a real Grafana instance from where it was
+written — only against Grafana's own docs and corroborating examples. If it
+failed to provision, the panel above still works independently. Confirm it
+loaded after deploy:
+
+```sh
+kubectl -n lifeos logs deploy/grafana -c grafana | grep -i provisioning
+```
 
 **It notifies nowhere by default**, on purpose. `lifeos` has no SMTP or Telegram
 token configured, and which channel personal alerts should ring on is a
@@ -349,15 +398,17 @@ and every daily count is quietly wrong at the edges.
   `docs/plan-cloudnative-pg.md` §1b treats the restore drill as the thing that
   actually matters, and it hasn't happened. Personal history landing here makes
   that more pressing, not less.
-- **The `typing_failures` alert rule is unverified.** Its top-level shape is
-  copied from Grafana's own docs source; the query→reduce→threshold expression
-  chain is corroborated by multiple independent sources but, unlike this
-  schema's SQL, could not be checked against a real Grafana instance from where
-  it was written. Confirm it actually loaded after the next deploy:
+- **The `typing_failures` *alert rule* is unverified — the dashboard *panel*
+  covering the same check is not.** The panel is a plain query, same schema as
+  any other panel, and works regardless of what happens to the alert. The
+  alert's query→reduce→threshold expression chain is corroborated by multiple
+  independent sources but, unlike this schema's SQL, could not be checked
+  against a real Grafana instance from where it was written. Confirm it
+  actually loaded after the next deploy:
   `kubectl -n lifeos logs deploy/grafana -c grafana | grep -i provisioning`,
   then check **Alerting** in the UI.
-- **That alert notifies nowhere yet.** See above — needs a contact point,
-  deliberately not chosen for you.
+- **That alert notifies nowhere yet.** See *How you find out at all* above —
+  needs a contact point, deliberately not chosen for you.
 - **No freshness check**, which is a different failure than `typing_failures`
   catches. Typing failures mean a source sent something that arrived but didn't
   parse; freshness means a source **stopped sending anything at all**, which is
@@ -367,3 +418,12 @@ and every daily count is quietly wrong at the edges.
   query→reduce→threshold shape pointed at a different query, is the obvious
   next alert once the pattern above is confirmed working.
 - **The ingest contract isn't enforced**, only documented. See above.
+- **`lifeos_reader`/`lifeos_ingest` can technically `CONNECT` to other
+  databases on this shared cluster** (Postgres's default grant to `PUBLIC`),
+  though neither would have table-level access there. Not fixable without a
+  temporary superuser escalation; judged not worth it while nothing else uses
+  the cluster's default `app` database. Full reasoning under *Who can do what*.
+- **No purge path for a record that should never have existed.** The design
+  handles *corrections* well — append a new observation, `core` starts
+  returning it. It has no answer for "this row was bad test data and should be
+  gone," other than a manual `DELETE` outside these documented conventions.

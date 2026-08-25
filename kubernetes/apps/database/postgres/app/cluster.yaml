@@ -35,9 +35,12 @@ spec:
   # CREATE ROLE — and because a role that exists only as a side effect of a
   # migration script is invisible to anyone reading the cluster definition.
   #
-  # The split is the point: the consumer cannot write to what it reports on.
-  # Grafana connects as the reader and holds SELECT on the view layers only;
-  # ingestion connects as the writer, which owns the lifeos database. See
+  # Three roles, three different reaches — "the consumer cannot do more than
+  # its job needs," applied twice. Grafana connects as the reader and holds
+  # SELECT on the view layers only. n8n connects as the ingest role and can
+  # write and read raw data, nothing else. lifeos_writer, which owns the
+  # database and can run arbitrary DDL, is used by nothing except the schema
+  # CronJob — no human-editable workflow holds schema-level rights. See
   # docs/lifeos-warehouse.md.
   managed:
     roles:
@@ -45,9 +48,24 @@ spec:
         login: true
         # Owns database `lifeos` (see database-lifeos.yaml) and every object the
         # schema CronJob creates in it. Deliberately not SUPERUSER, CREATEDB or
-        # CREATEROLE — owning one database is the whole job.
+        # CREATEROLE — owning one database is the whole job. Schema management
+        # only: ingestion connects as lifeos_ingest below, not this role. It
+        # used to be this role too, until a review pass over this file asked
+        # whether the role that writes data needs the same reach as the role
+        # that owns the schema — it should not, since a workflow mistake or a
+        # compromised credential should be able to write a bad row, not run
+        # DROP TABLE.
         passwordSecret:
           name: lifeos-writer-credentials
+      - name: lifeos_ingest
+        login: true
+        # n8n's connection for writing raw data. The schema DDL grants it
+        # SELECT + INSERT on raw only — SELECT because the documented ingest
+        # contract's idempotent-insert check reads the table it is about to
+        # write to. No CREATE, ALTER or DROP anywhere, and no reach into core
+        # or mart at all.
+        passwordSecret:
+          name: lifeos-ingest-credentials
       - name: lifeos_reader
         login: true
         # Holds no privileges at creation. The schema DDL grants it SELECT on

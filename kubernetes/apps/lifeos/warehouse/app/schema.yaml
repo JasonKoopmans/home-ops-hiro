@@ -401,21 +401,38 @@ data:
     -- ---------------------------------------------------------------------
     -- Grants
     --
-    -- The reader gets the view layers and nothing else. It is never granted on
-    -- raw — and does not need to be: a view executes with its owner's
+    -- Three roles, three different reaches. lifeos_writer runs this whole file
+    -- and therefore needs full DDL rights on everything below — but it is used
+    -- for nothing else. Ingestion connects as lifeos_ingest, which can write
+    -- and read raw and nothing more: no CREATE, no ALTER, no DROP, no reach
+    -- into core or mart. SELECT is granted alongside INSERT because the
+    -- documented ingest contract's idempotent-insert check is a subquery
+    -- against the very table it is about to write to — write-only would break
+    -- that check, not make it safer.
+    --
+    -- lifeos_reader gets the view layers and nothing else. It is never granted
+    -- on raw — and does not need to be: a view executes with its owner's
     -- privileges, not the caller's, so selecting core.health_metrics reads the
     -- underlying table through lifeos_writer's rights. The reader sees curated
     -- data and cannot reach the landing tables at all.
     --
-    -- (This holds as long as the views are not created WITH security_invoker,
-    -- which is off by default. Do not turn it on here without re-thinking these
-    -- grants.)
+    -- (The core/mart half holds as long as those views are not created WITH
+    -- security_invoker, which is off by default. Do not turn it on there
+    -- without re-thinking these grants.)
     -- ---------------------------------------------------------------------
+    GRANT USAGE ON SCHEMA raw TO lifeos_ingest;
+    GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA raw TO lifeos_ingest;
+
     GRANT USAGE ON SCHEMA core, mart TO lifeos_reader;
     GRANT SELECT ON ALL TABLES IN SCHEMA core, mart TO lifeos_reader;
 
-    -- Covers views added by a later run of this same DDL, so a new mart view is
-    -- readable the moment it exists rather than after someone remembers to
-    -- re-grant.
+    -- Covers tables and views added by a later run of this same DDL, so
+    -- anything new is readable/writable the moment it exists rather than after
+    -- someone remembers to re-grant. Reaches only future objects created by
+    -- lifeos_writer specifically — the role that runs this file — which is
+    -- exactly the role that will create them, so the two line up without
+    -- needing an explicit FOR ROLE.
+    ALTER DEFAULT PRIVILEGES IN SCHEMA raw
+        GRANT SELECT, INSERT ON TABLES TO lifeos_ingest;
     ALTER DEFAULT PRIVILEGES IN SCHEMA core, mart
         GRANT SELECT ON TABLES TO lifeos_reader;
