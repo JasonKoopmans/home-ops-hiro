@@ -24,6 +24,7 @@ includes:
   crd: .taskfiles/crd
   lifeos: .taskfiles/lifeos
   mcp: .taskfiles/mcp
+  pg: .taskfiles/postgres
   talos: .taskfiles/talos
   template: .taskfiles/template
   sops: .taskfiles/sops

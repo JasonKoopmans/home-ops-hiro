@@ -261,3 +261,120 @@ spec:
           annotations:
             summary: Postgres metrics collector is failing or an instance stopped reporting
             description: Either the CloudNativePG exporter cannot collect from an instance, or fewer than the expected 3 instances are reporting metrics at all. Values behind the backup and archiver alerts may be stale or partial, so treat those as unreliable until this clears.
+
+    # Coverage for the weekly restore drill (kubernetes/apps/database/postgres-restore-drill/).
+    #
+    # WHY THIS IS A SEPARATE GROUP FROM postgres.rules ABOVE
+    # Everything in postgres.rules reads cnpg_* series from the instance PodMonitor: they answer "did the backup
+    # job report success?". These rules read kube-state-metrics instead, and answer a strictly harder question —
+    # "was a backup actually turned back into a working database?". That distinction is the whole point of the
+    # drill (docs/plan-cloudnative-pg.md §1c): CNPG reporting a successful base backup is the operator's own
+    # account of its own work, and a backup can be reported healthy while being unrestorable.
+    #
+    # The independence is also deliberate at the metrics level. If the PodMonitor scrape breaks, every rule in
+    # postgres.rules goes silent — PostgresMetricsMissing is the guard for that, but it is one guard. These rules
+    # keep working through a CNPG exporter outage because kube-state-metrics is a different collector on a
+    # different path.
+    - name: postgres-restore-drill.rules
+      rules:
+        # Fast signal. Keyed on the failed Job but bounded by recency so it self-clears in 14 days whether or not
+        # the Job object still exists — the latching failure mode that kept a critical firing for a week in
+        # August 2026 (see prometheusrule-recording-annotator.yaml). 14d spans two weekly cycles: long enough to
+        # be noticed across a vacation, short enough to stop nagging once it is stale.
+        - alert: PostgresRestoreDrillFailed
+          expr: |
+            kube_job_failed{namespace="database", job_name=~"postgres-restore-drill-.*"} > 0
+            and on (namespace, job_name)
+            (time() - kube_job_created{namespace="database", job_name=~"postgres-restore-drill-.*"} < 1209600)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: PostgreSQL weekly restore drill failed
+            description: >-
+              The postgres-restore-drill CronJob failed — the CloudNativePG backups in S3 could NOT be proven
+              restorable this week. Treat PITR as unverified until this is fixed and re-run with `task pg:drill`.
+              Check the Job logs first; the drill names which of three things broke — recovery never replayed
+              past the base backup, a write that should have been recovered was missing, or PITR replayed PAST
+              its target (the serious one: recovering from a mistake would hand the mistake back). Each points
+              somewhere different (docs/runbook-postgres-recovery.md §3).
+
+        # Slow signal, different failure shape: catches a drill that silently stops running at all — suspended
+        # CronJob, deleted CronJob, scheduler wedged, node pressure preventing the Job from ever being created.
+        # PostgresRestoreDrillFailed cannot see any of those, because no Job object is ever produced to fail.
+        # 10 days tolerates exactly one missed weekly run before complaining.
+        - alert: PostgresRestoreDrillNotSucceeding
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="database", cronjob="postgres-restore-drill"} > 864000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: PostgreSQL restore drill has no recent successful run
+            description: >-
+              The postgres-restore-drill CronJob has not recorded a successful run in over 10 days against a
+              weekly schedule. The backups may still be fine — but nothing has proven it recently, which is the
+              state this drill exists to prevent.
+
+        # The rule above evaluates *empty*, and therefore never fires, until the drill has succeeded at least
+        # once — which is exactly the state a fresh deploy is in, and precisely when a broken drill matters most.
+        #
+        # The age test is done with kube_cronjob_created rather than a long `for:`, deliberately. `for:` state is
+        # held in memory and RESETS on a Prometheus restart, so a `for: 9d` on a server that restarts for every
+        # config reload and upgrade would in practice almost never reach 9 days — the alert would look correct
+        # and silently never fire. Reading the CronJob's own creation timestamp is stateless and survives
+        # restarts, so the short `for:` here only debounces scrape flapping.
+        #
+        # Both sides going empty when the CronJob does not exist is intentional: nothing is deployed, so there is
+        # nothing to complain about. The trade-off is that DELETING the CronJob silences drill alerting entirely
+        # — accepted because it is Flux-managed with prune, so removal is a reviewable change in git, not drift.
+        - alert: PostgresRestoreDrillNeverSucceeded
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="database", cronjob="postgres-restore-drill"})
+            and on()
+            (time() - max(kube_cronjob_created{namespace="database", cronjob="postgres-restore-drill"}) > 777600)
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: PostgreSQL restore drill has never completed successfully
+            description: >-
+              No successful run of postgres-restore-drill has ever been recorded, over at least 9 days of a
+              weekly schedule. Expected briefly right after first deploy; if it persists, the CloudNativePG
+              backups have never been proven restorable by automation at all.
+
+        # Closes the hole every other rule in this group shares: they all key on series that only exist WHILE the
+        # CronJob exists. Delete the CronJob and `Failed` has no Jobs to match, `NotSucceeding` loses its
+        # last-success series, and `NeverSucceeded` loses the kube_cronjob_created side of its own expression —
+        # so drills stop running AND every alert about drills not running goes quiet at the same moment. That is
+        # the silent-failure shape this whole app exists to prevent, so it gets its own detector.
+        #
+        # Keying on object existence is normally the anti-pattern that latched a critical on for a week
+        # (prometheusrule-recording-annotator.yaml). It is correct HERE for the inverse reason: this fires on
+        # ABSENCE of an object that Git guarantees should exist, and it resolves the instant Flux puts it back.
+        - alert: PostgresRestoreDrillCronJobMissing
+          expr: absent(kube_cronjob_created{namespace="database", cronjob="postgres-restore-drill"})
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: PostgreSQL restore-drill CronJob does not exist
+            description: >-
+              The postgres-restore-drill CronJob is absent from the database namespace. No restore drills will
+              run, and every other drill alert is silent because they key on series this object produces. Either
+              Flux has not reconciled it yet (expected briefly after first deploy), or it was removed. Restore
+              it — an unverified backup is the failure mode this app exists to catch.
+
+        # Leak detector. The drill deletes its scratch cluster on every exit path including failure, and refuses
+        # to start if a scratch PVC survived — so a scratch volume outliving one drill run means the teardown
+        # path itself broke. Left alone it burns a Longhorn volume and blocks all future drills, which would
+        # otherwise only surface indirectly, a week later, as a drill failure.
+        - alert: PostgresRestoreDrillScratchVolumeLeaked
+          expr: |
+            time() - kube_persistentvolumeclaim_created{namespace="database", persistentvolumeclaim=~"postgres-restore-drill-scratch-.*"} > 5400
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: PostgreSQL restore-drill scratch volume was not cleaned up
+            description: "A restore-drill scratch PVC ({{ $$labels.persistentvolumeclaim }}) has existed for over 90 minutes, well past the ~30 minute worst case for a drill run. The drill's teardown did not complete. Remove it by hand or every future drill will refuse to run: kubectl -n database delete pvc -l cnpg.io/cluster=postgres-restore-drill-scratch"

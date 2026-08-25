@@ -1,0 +1,75 @@
+---
+# Least-privilege identity for the weekly restore drill.
+#
+# The dangerous verb here is `delete` on clusters.postgresql.cnpg.io: the drill's whole job is to create a
+# throwaway Cluster and then remove it, and the production `postgres` Cluster lives in this same namespace.
+# So `delete` is pinned to the scratch cluster's exact name via resourceNames and CANNOT name `postgres`.
+# `create` cannot be name-restricted by RBAC (the object does not exist yet), which is accepted: a compromised
+# drill could create clusters, but it still cannot delete the real one.
+#
+# Deliberately NOT granted: delete on persistentvolumeclaims. CNPG's Cluster deletion cascades to its own PVCs,
+# so the drill never needs to remove one directly, and granting it would hand this ServiceAccount the ability to
+# destroy the production Postgres volumes. If a scratch PVC ever does leak, the drill fails loudly with a
+# message telling a human to remove it — see PostgresRestoreDrillScratchVolumeLeaked.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-restore-drill
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: postgres-restore-drill
+rules:
+  # Cannot be scoped to a name — the scratch Cluster does not exist at create time.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["create"]
+
+  # list/watch cannot be narrowed by resourceNames: they are collection operations, and RBAC only matches
+  # resourceNames on requests that name a single object. Both are needed because `kubectl delete --wait`
+  # establishes a collection watch to observe the object disappear. Read-only, so the blast radius is limited to
+  # reading Cluster specs in this namespace — the destructive verb (delete) stays pinned to the scratch name.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["list", "watch"]
+
+  # Read the production cluster so the drill can mirror its storage size, and read/delete ONLY the scratch one.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: ["postgres"]
+    verbs: ["get"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: ["postgres-restore-drill-scratch"]
+    verbs: ["get", "delete"]
+
+  # Poll the scratch instance's pod, and run the verification query inside it. exec is pinned to the scratch
+  # pod name so this token can never open a shell in a production Postgres pod.
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["postgres-restore-drill-scratch-1"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    resourceNames: ["postgres-restore-drill-scratch-1"]
+    verbs: ["create"]
+
+  # Read-only. `list` cannot be name-restricted, which is why this is read-only: it exists purely so the drill
+  # can detect a leaked scratch PVC before reusing the name and silently recovering onto stale data.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: postgres-restore-drill
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: postgres-restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: postgres-restore-drill
+    namespace: database

@@ -1,0 +1,162 @@
+---
+version: '3'
+
+vars:
+  NS: database
+  CLUSTER: postgres
+  OBJECTSTORE: postgres-backup
+
+tasks:
+
+  status:
+    desc: Show CloudNativePG cluster, instance placement and backup state
+    cmds:
+      - kubectl -n {{.NS}} get cluster {{.CLUSTER}}
+      - |
+        echo
+        echo "--- instances ---"
+        kubectl -n {{.NS}} get pods -l cnpg.io/cluster={{.CLUSTER}} \
+          -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeName,ROLE:.metadata.labels.cnpg\\.io/instanceRole,READY:.status.containerStatuses[0].ready
+      - |
+        echo
+        echo "--- backups (most recent last) ---"
+        kubectl -n {{.NS}} get backups.postgresql.cnpg.io --sort-by=.metadata.creationTimestamp
+      - |
+        echo
+        echo "--- next scheduled base backup ---"
+        kubectl -n {{.NS}} get scheduledbackup -o custom-columns=NAME:.metadata.name,SCHEDULE:.spec.schedule,LAST:.status.lastScheduleTime,NEXT:.status.nextScheduleTime
+
+  drill:
+    desc: Run the restore drill now, out of schedule, and follow it
+    summary: |
+      Triggers the weekly postgres-restore-drill CronJob immediately. Takes roughly 15-30 minutes: it waits out
+      the WAL archive_timeout, builds a throwaway cluster from S3, verifies a canary row, then tears it down.
+      Safe to run any time — it never writes to a real tenant database and never touches the live cluster.
+    cmds:
+      - |
+        JOB="postgres-restore-drill-manual-$(date -u +%Y%m%d%H%M%S)"
+        echo "creating $JOB from cronjob/postgres-restore-drill"
+        kubectl -n {{.NS}} create job "$JOB" --from=cronjob/postgres-restore-drill
+
+        # Wait for the POD to exist, not for it to be Ready. During the init container's archive wait the pod is
+        # deliberately not Ready for several minutes, so waiting on Ready would time out and report a scary
+        # failure for a drill that is running perfectly.
+        POD=""
+        for _ in $(seq 1 60); do
+          POD="$(kubectl -n {{.NS}} get pods -l job-name="$JOB" -o name 2>/dev/null | head -1)"
+          [ -n "$POD" ] && break
+          sleep 2
+        done
+        if [ -z "$POD" ]; then
+          echo "pod never appeared; check: kubectl -n {{.NS}} describe job/$JOB"
+          exit 1
+        fi
+
+        echo
+        echo "=== phase 1/2: canary write + wait for WAL to reach S3 ==="
+        echo "(ctrl-c is safe — the job keeps running in the cluster)"
+        kubectl -n {{.NS}} logs -f "$POD" -c canary --pod-running-timeout=5m || true
+
+        echo
+        echo "=== phase 2/2: restore into a scratch cluster and verify ==="
+        kubectl -n {{.NS}} logs -f "$POD" -c drill --pod-running-timeout=10m || true
+
+        sleep 5
+        if [ "$(kubectl -n {{.NS}} get job "$JOB" -o jsonpath='{.status.succeeded}')" = "1" ]; then
+          echo
+          echo "DRILL PASSED — backups are proven restorable as of now."
+        else
+          echo
+          echo "DRILL FAILED — see output above, and docs/runbook-postgres-recovery.md §3."
+          exit 1
+        fi
+
+  drill:status:
+    desc: Show recent restore-drill runs and whether the last one passed
+    cmds:
+      - kubectl -n {{.NS}} get cronjob postgres-restore-drill
+      - |
+        echo
+        echo "--- recent drill jobs ---"
+        kubectl -n {{.NS}} get jobs -l batch.kubernetes.io/cronjob-name=postgres-restore-drill \
+          --sort-by=.metadata.creationTimestamp 2>/dev/null \
+          || kubectl -n {{.NS}} get jobs --sort-by=.metadata.creationTimestamp | grep restore-drill || echo "none yet"
+      - |
+        echo
+        echo "--- leaked scratch resources (should be empty) ---"
+        kubectl -n {{.NS}} get cluster,pvc -l cnpg.io/cluster=postgres-restore-drill-scratch 2>/dev/null || true
+        kubectl -n {{.NS}} get cluster postgres-restore-drill-scratch 2>/dev/null || echo "no scratch cluster (good)"
+
+  drill:clean:
+    desc: Remove a leaked restore-drill scratch cluster and its volume
+    summary: |
+      Only needed when PostgresRestoreDrillScratchVolumeLeaked fires, or when `task pg:drill` refuses to start
+      because a scratch PVC survived a previous run. Deletes ONLY the scratch cluster — never the real one.
+    cmds:
+      - kubectl -n {{.NS}} delete cluster postgres-restore-drill-scratch --ignore-not-found --wait --timeout=5m
+      - kubectl -n {{.NS}} delete pvc -l cnpg.io/cluster=postgres-restore-drill-scratch --ignore-not-found
+      - echo "scratch resources removed"
+
+  recover:
+    desc: 'Print a ready-to-apply recovery Cluster manifest. Args: name=<new-cluster> [target="<timestamp>"]'
+    summary: |
+      Generates the manifest for a REAL recovery, so that recovering under pressure is a copy-paste rather than
+      an exercise in remembering CNPG's bootstrap schema.
+
+        task pg:recover name=postgres-recovered
+        task pg:recover name=postgres-pitr target="2026-08-25 01:20:00+00"
+
+      Omit `target` to replay all available WAL (latest possible point). Supply `target` to stop at a specific
+      instant — that is the form to use when recovering FROM a mistake, where the goal is the moment before it.
+
+      This only prints. Review it, then apply it yourself. It never modifies the live cluster: recovery always
+      builds a NEW cluster alongside the existing one, which is why cutting over is a deliberate, separate step.
+      See docs/runbook-postgres-recovery.md.
+    requires:
+      vars: ["name"]
+    cmds:
+      - |
+        SIZE="$(kubectl -n {{.NS}} get cluster {{.CLUSTER}} -o jsonpath='{.spec.storage.size}')"
+        IMAGE="$(kubectl -n {{.NS}} get cluster {{.CLUSTER}} -o jsonpath='{.spec.imageName}')"
+        CLASS="$(kubectl -n {{.NS}} get cluster {{.CLUSTER}} -o jsonpath='{.spec.storage.storageClass}')"
+        STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        TARGET_BLOCK=""
+        if [ -n "{{.target}}" ]; then
+          TARGET_BLOCK="$(printf '\n      recoveryTarget:\n        targetTime: "%s"' '{{.target}}')"
+        fi
+        cat <<EOF
+        ---
+        # Recovery cluster generated by 'task pg:recover' on $STAMP.
+        # Source: {{.CLUSTER}} via ObjectStore {{.OBJECTSTORE}}.
+        #
+        # Creates a NEW cluster from object storage. Does NOT touch {{.CLUSTER}}.
+        # Verify the data in here BEFORE repointing any application at it.
+        apiVersion: postgresql.cnpg.io/v1
+        kind: Cluster
+        metadata:
+          name: {{.name}}
+          namespace: {{.NS}}
+        spec:
+          instances: 1
+          imageName: $IMAGE
+          storage:
+            storageClass: $CLASS
+            size: $SIZE
+          bootstrap:
+            recovery:
+              # Must match the ORIGINAL cluster name: barman-cloud lays out the bucket by serverName.
+              source: {{.CLUSTER}}$TARGET_BLOCK
+          externalClusters:
+            - name: {{.CLUSTER}}
+              plugin:
+                name: barman-cloud.cloudnative-pg.io
+                parameters:
+                  barmanObjectName: {{.OBJECTSTORE}}
+                  serverName: {{.CLUSTER}}
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+        EOF
