@@ -1,0 +1,411 @@
+---
+# Weekly proof that the CloudNativePG backups are actually restorable.
+#
+# WHY THIS EXISTS
+# docs/plan-cloudnative-pg.md records the failure mode this guards against: a green Flux Kustomization, a healthy
+# Cluster, a serving database — and every WAL archive silently failing against S3. Nothing in the normal health
+# signals distinguishes "backups work" from "backups have been broken for a month". The manual drill proved the
+# mechanism once, on 2026-08-25. This CronJob keeps that true by re-proving it on a schedule.
+#
+# WHAT IT PROVES — TWO DIFFERENT THINGS
+#   1. Restore to latest: everything archived can be replayed. Guards hardware/volume loss.
+#   2. Restore to a point in time: replay STOPS where told. Guards the "someone dropped a table" case, which is
+#      the scenario HA cannot help with and the one the runbook actually sends you to under pressure.
+# Only (2) proves exclusion, and exclusion is the whole point of PITR — a restore that silently replayed past
+# the target would hand the mistake straight back. So the drill writes TWO canaries with a recovery target
+# captured between them, and asserts A present AND B absent.
+#
+# The canaries land in the default `app` database, which is otherwise unused (CNPG created it because bootstrap
+# was unspecified). Real tenants such as LifeOS get their own Database CRs and are never written to here. The
+# table self-prunes to the 20 most recent rows.
+#
+# ⚠ WATCH — SCRIPT SIZE (docs/revisit-register.md)
+# This is ~230 lines of shell embedded in YAML. It matches repo precedent (recording-annotator-mirror-cronjob)
+# but is several times larger, and embedded shell gets no shellcheck, no syntax highlighting and no unit tests —
+# the distroless-image bug that would have broken this job on its first run was invisible to every static check
+# and only surfaced by executing it. If this script grows another meaningful step, or needs branching logic,
+# stop extending it and move it to a real container image via the repo's containers/ + GHCR pattern, where it
+# can be linted and tested. Do not let it drift past "readable in one sitting".
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-restore-drill
+spec:
+  # Sundays 08:00 local. Offset from everything else touching storage: the nightly CNPG base backup is 03:00,
+  # and the Longhorn trim/snapshot jobs run 01:30 / 03:00 / 05:00 / 06:30. Weekly rather than monthly because
+  # the S3 retention window is only 7d — a drill less frequent than the retention window could "pass" against
+  # backups that no longer exist by the time they are actually needed.
+  schedule: "0 8 * * 0"
+  timeZone: ${TIMEZONE}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # No retry. A failed drill is a signal to look, not to try again — a second attempt costs another ~40
+      # minutes and two more scratch clusters. `task pg:drill` re-runs it on demand once the cause is known.
+      backoffLimit: 0
+      # Worst case: 10m archive wait + 2 x (12m restore + teardown) + pre-clean. 60m leaves headroom without
+      # letting a wedged drill hold scratch resources indefinitely. Kept BELOW the 90m threshold on
+      # PostgresRestoreDrillScratchVolumeLeaked so a timeout surfaces as a drill failure first, not a leak alert.
+      activeDeadlineSeconds: 3600
+      # Bounded history so a failed Job object cannot latch an alert on forever — the failure mode that kept a
+      # critical firing for a week in August 2026 (see prometheusrule-recording-annotator.yaml). Two weeks,
+      # matching the recency bound on PostgresRestoreDrillFailed.
+      ttlSecondsAfterFinished: 1209600
+      template:
+        spec:
+          serviceAccountName: postgres-restore-drill
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 26
+            runAsGroup: 26
+            fsGroup: 26
+          initContainers:
+            # Runs to completion before the drill container starts. Uses the CNPG image purely because it ships
+            # psql; it talks to the database over the normal -rw service as the unprivileged `app` role, and does
+            # NOT exec into a production pod or use superuser credentials.
+            #
+            # CREDENTIAL SCOPE — known and accepted, but not zero. `app` is not superuser and has no
+            # createdb/createrole/replication, but PostgreSQL grants CONNECT on every database to PUBLIC by
+            # default, so this credential can open a connection to any database in the cluster (verified, not
+            # assumed). It cannot read tables it holds no grant on, and `app` is CNPG's throwaway default
+            # database holding nothing but these canaries — so the exposure is proportionate to a weekly
+            # verification job. Two things keep it that way, and both are worth preserving:
+            #   1. Real tenants (LifeOS et al) get their OWN Database + role, never this one.
+            #   2. Those tenant databases should REVOKE CONNECT ON DATABASE <db> FROM PUBLIC at creation.
+            # If this job ever needs more than writing canary rows, give it a dedicated least-privilege
+            # DatabaseRole instead of widening `app`.
+            - name: canary
+              image: ghcr.io/cloudnative-pg/postgresql:18.6
+              env:
+                - name: PGHOST
+                  value: postgres-rw
+                - name: PGDATABASE
+                  value: app
+                # Bound each connection attempt so the retry loop below actually retries instead of hanging.
+                - name: PGCONNECT_TIMEOUT
+                  value: "5"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: postgres-app, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: postgres-app, key: password }
+                # An upper BOUND on the archive wait, not a fixed sleep — the container polls and continues the
+                # moment the WAL segment lands. Must comfortably exceed archive_timeout (currently 300s); the
+                # script prints the live value and says to raise this if that setting was increased.
+                - name: ARCHIVE_WAIT_SECONDS
+                  value: "600"
+                - name: HOME
+                  value: /tmp
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  # Wait for the pod network to be usable before the first database call.
+                  # Container start here races Cilium's endpoint programming: an immediate psql has been
+                  # OBSERVED failing with "could not translate host name ... Temporary failure in name
+                  # resolution" on a completely healthy cluster, and the same class appears in CNPG's own
+                  # startup logs as `dial tcp 10.43.0.1:443: i/o timeout`. It is transient — a retried
+                  # connection succeeds within seconds — so without this guard the weekly drill would fail
+                  # at random and report it as a backup problem, which is the worst possible false signal.
+                  # Same shape as the guard in recording-annotator-mirror-cronjob.yaml.
+                  i=0
+                  until psql -Atc "select 1" >/dev/null 2>&1; do
+                    i=$((i + 1))
+                    if [ "$i" -ge 30 ]; then
+                      echo "ERROR: database unreachable at $PGHOST after $i attempts (~60s). Last error:"
+                      psql -Atc "select 1" 2>&1 | head -3
+                      exit 1
+                    fi
+                    echo "waiting for database connectivity (attempt $i)"
+                    sleep 2
+                  done
+
+                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  TOKEN_A="drill-a-$STAMP"
+                  TOKEN_B="drill-b-$STAMP"
+
+                  psql -v ON_ERROR_STOP=1 -c \
+                    "CREATE TABLE IF NOT EXISTS _restore_drill_canary (token text PRIMARY KEY, written_at timestamptz NOT NULL DEFAULT now());"
+
+                  psql -v ON_ERROR_STOP=1 -c \
+                    "INSERT INTO _restore_drill_canary (token) VALUES ('$TOKEN_A');"
+
+                  # Read in a SEPARATE statement so the instant is strictly after A's COMMIT.
+                  # recovery_target_time compares against commit timestamps, so a value taken inside A's own
+                  # transaction could land before A committed — and would then exclude the very row the PITR
+                  # restore asserts must be present. Subtle, and it would look like a PITR bug rather than a
+                  # drill bug.
+                  T_MID="$(psql -Atc "select to_char(clock_timestamp() at time zone 'UTC','YYYY-MM-DD HH24:MI:SS.US')||'+00'")"
+
+                  # Guarantee B commits strictly after T_MID, with room for clock granularity.
+                  sleep 2
+
+                  psql -v ON_ERROR_STOP=1 -c \
+                    "INSERT INTO _restore_drill_canary (token) VALUES ('$TOKEN_B');"
+                  psql -v ON_ERROR_STOP=1 -c \
+                    "DELETE FROM _restore_drill_canary WHERE token NOT IN (SELECT token FROM _restore_drill_canary ORDER BY written_at DESC LIMIT 20);"
+
+                  printf '%s' "$TOKEN_A" > /shared/token_a
+                  printf '%s' "$TOKEN_B" > /shared/token_b
+                  printf '%s' "$T_MID"   > /shared/t_mid
+
+                  echo "canary A (must survive PITR): $TOKEN_A"
+                  echo "canary B (must be EXCLUDED):  $TOKEN_B"
+                  echo "PITR target, between them:    $T_MID"
+
+                  # The WAL segment holding these INSERTs must reach S3 before any restore could see them. This
+                  # POLLS for that specific segment rather than sleeping a fixed interval. A fixed sleep silently
+                  # encodes the current archive_timeout (300s); if someone raised that setting a sleep would not
+                  # fail, it would go FLAKY — passing or failing on timing, which is worse than an honest error.
+                  # pg_switch_wal() would be more direct but needs superuser or an explicit GRANT, and this job
+                  # deliberately holds no elevated database rights.
+                  # Waiting for B's segment implies A's, since A committed earlier.
+                  NEED="$(psql -Atc "select pg_walfile_name(pg_current_wal_lsn())")"
+                  echo "waiting for WAL segment $NEED to be archived (bound: $ARCHIVE_WAIT_SECONDS s)"
+
+                  WAITED=0
+                  while [ "$WAITED" -lt "$ARCHIVE_WAIT_SECONDS" ]; do
+                    # Catch a broken archiver immediately instead of burning the full bound and then failing the
+                    # restore for a reason that looks unrelated. This is the precise, early signal.
+                    FAILING="$(psql -Atc "select (last_failed_time is not null and last_failed_time > coalesce(last_archived_time, '-infinity'))::text from pg_stat_archiver")"
+                    if [ "$FAILING" = "true" ]; then
+                      echo "ERROR: WAL archiving is currently FAILING on the primary."
+                      psql -Atc "select 'last_failed_wal=' || coalesce(last_failed_wal,'?') || ' at ' || coalesce(last_failed_time::text,'?') from pg_stat_archiver"
+                      echo "       Backups cannot be restorable while this is true. Not proceeding to a restore."
+                      exit 1
+                    fi
+
+                    ARCHIVED="$(psql -Atc "select (coalesce(last_archived_wal,'') >= '$NEED')::text from pg_stat_archiver")"
+                    if [ "$ARCHIVED" = "true" ]; then
+                      echo "WAL segment $NEED archived after $WAITED s"
+                      exit 0
+                    fi
+
+                    sleep 10
+                    WAITED=$((WAITED + 10))
+                  done
+
+                  echo "ERROR: WAL segment $NEED was not archived within $ARCHIVE_WAIT_SECONDS s."
+                  echo "       Live archive_timeout is $(psql -Atc "select setting from pg_settings where name='"'"'archive_timeout'"'"'") s."
+                  echo "       If that was raised, raise ARCHIVE_WAIT_SECONDS on this CronJob to match."
+                  exit 1
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - { name: shared, mountPath: /shared }
+                - { name: tmp, mountPath: /tmp }
+          containers:
+            - name: drill
+              # NOT registry.k8s.io/kubectl — that image is distroless and has NO shell, so `/bin/sh -c` fails
+              # before the script runs at all. Verified the hard way; it is invisible to kustomize build,
+              # kubeconform and server-side dry-run, all of which validate the manifest happily.
+              # Pinned to the cluster's server minor version to stay inside kubectl's ±1 skew policy.
+              image: docker.io/alpine/kubectl:1.36.2
+              env:
+                - name: HOME
+                  value: /tmp
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+
+                  NS=database
+                  SRC=postgres
+                  SCRATCH=postgres-restore-drill-scratch
+                  TOKEN_A="$(cat /shared/token_a)"
+                  TOKEN_B="$(cat /shared/token_b)"
+                  T_MID="$(cat /shared/t_mid)"
+
+                  # Safety net so a scratch cluster is never left behind burning CPU and a PVC.
+                  # INT/TERM are listed explicitly and are NOT redundant with EXIT: when activeDeadlineSeconds
+                  # expires Kubernetes sends SIGTERM, and a bare `trap ... EXIT` does not run on a signal —
+                  # exactly the timeout case where cleanup matters most would have leaked the cluster.
+                  cleanup() {
+                    echo "--- cleanup: removing scratch cluster ---"
+                    kubectl -n "$NS" delete cluster "$SCRATCH" --ignore-not-found --wait=false || true
+                  }
+                  trap cleanup EXIT INT TERM
+
+                  # A leaked PVC is not cosmetic: CNPG would reuse a volume of this name and a drill could
+                  # "pass" against stale data from a previous run. Refuse to continue instead.
+                  require_no_scratch_pvc() {
+                    LEFT=""
+                    i=0
+                    while [ "$i" -lt 60 ]; do
+                      LEFT="$(kubectl -n "$NS" get pvc -l cnpg.io/cluster="$SCRATCH" --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+                      [ "$LEFT" = "0" ] && return 0
+                      i=$((i + 1))
+                      sleep 5
+                    done
+                    echo "ERROR: a scratch PVC survived cleanup — a previous drill leaked a volume."
+                    echo "       Refusing to continue: reusing the name risks verifying against stale data."
+                    echo "       Remove it by hand: kubectl -n $NS delete pvc -l cnpg.io/cluster=$SCRATCH"
+                    exit 1
+                  }
+
+                  # Returns: -1 table absent, else the row count for the given token.
+                  # -1 distinguishes "recovery never replayed past the base backup" from "replayed, but this
+                  # particular write was not included" — different failures wanting different investigation.
+                  count_token() {
+                    kubectl -n "$NS" exec "$SCRATCH-1" -c postgres -- psql -U postgres -d app -Atc \
+                      "select case when to_regclass('public._restore_drill_canary') is null then -1 else (select count(*) from _restore_drill_canary where token = '$1') end" | tr -d '[:space:]'
+                  }
+
+                  # restore_and_assert <label> <targetTime|empty> <want_a> <want_b>
+                  restore_and_assert() {
+                    LABEL="$1"; TARGET="$2"; WANT_A="$3"; WANT_B="$4"
+
+                    echo ""
+                    echo "=============== $LABEL ==============="
+                    kubectl -n "$NS" delete cluster "$SCRATCH" --ignore-not-found --wait --timeout=5m
+                    require_no_scratch_pvc
+
+                    TARGET_BLOCK=""
+                    if [ -n "$TARGET" ]; then
+                      TARGET_BLOCK="$(printf '\n      recoveryTarget:\n        targetTime: "%s"' "$TARGET")"
+                    fi
+
+                    START="$(date +%s)"
+
+                    # `create`, not `apply`: apply needs patch rights the RBAC deliberately withholds.
+                    # The heredoc body sits at column 0 on purpose — it is the manifest text itself, and any
+                    # indentation here would be emitted into the YAML and change its meaning.
+                    cat <<EOF | kubectl create -f -
+                  apiVersion: postgresql.cnpg.io/v1
+                  kind: Cluster
+                  metadata:
+                    name: $SCRATCH
+                    namespace: $NS
+                    labels:
+                      purpose: restore-drill-scratch
+                  spec:
+                    instances: 1
+                    imageName: $IMAGE
+                    storage:
+                      storageClass: longhorn-1-no-backup
+                      size: $SIZE
+                    bootstrap:
+                      recovery:
+                        source: $SRC$TARGET_BLOCK
+                    externalClusters:
+                      - name: $SRC
+                        plugin:
+                          name: barman-cloud.cloudnative-pg.io
+                          parameters:
+                            barmanObjectName: postgres-backup
+                            serverName: $SRC
+                    resources:
+                      requests:
+                        cpu: 250m
+                        memory: 512Mi
+                      limits:
+                        memory: 1Gi
+                  EOF
+
+                    if ! kubectl -n "$NS" wait --for=jsonpath='{.status.phase}'='Cluster in healthy state' \
+                         cluster/"$SCRATCH" --timeout=12m; then
+                      echo "ERROR: [$LABEL] scratch cluster never became healthy within 12m."
+                      echo "last phase: $(kubectl -n "$NS" get cluster "$SCRATCH" -o jsonpath='{.status.phase}' 2>/dev/null || echo unknown)"
+                      exit 1
+                    fi
+
+                    ELAPSED=$(( $(date +%s) - START ))
+                    # Rough RTO signal for the CURRENT data volume. Meaningless while the database is near-empty;
+                    # becomes the number that matters once a real tenant has data. See docs/revisit-register.md.
+                    echo "[$LABEL] recovered in $ELAPSED s (RTO proxy at current data volume)"
+
+                    GOT_A="$(count_token "$TOKEN_A")"
+                    GOT_B="$(count_token "$TOKEN_B")"
+                    echo "[$LABEL] canary A=$GOT_A (want $WANT_A) | canary B=$GOT_B (want $WANT_B)"
+
+                    if [ "$GOT_A" = "-1" ]; then
+                      echo "FAIL: [$LABEL] _restore_drill_canary does not exist in the recovered database."
+                      echo "      Recovery did not replay past the base backup at all."
+                      exit 1
+                    fi
+                    if [ "$GOT_A" != "$WANT_A" ]; then
+                      echo "FAIL: [$LABEL] canary A count is $GOT_A, expected $WANT_A."
+                      echo "      A write that should have been recovered was not. Suspect WAL archiving/replay."
+                      exit 1
+                    fi
+                    if [ "$GOT_B" != "$WANT_B" ]; then
+                      if [ "$WANT_B" = "0" ]; then
+                        echo "FAIL: [$LABEL] canary B is PRESENT but should have been excluded by the recovery target."
+                        echo "      PITR replayed PAST $T_MID. This is the serious one: recovering from a mistake"
+                        echo "      would hand the mistake back. Check recovery_target_inclusive and the target format."
+                      else
+                        echo "FAIL: [$LABEL] canary B count is $GOT_B, expected $WANT_B."
+                      fi
+                      exit 1
+                    fi
+                    echo "PASS: [$LABEL]"
+                  }
+
+                  # Same startup-race guard as the canary container, for the API server rather than the
+                  # database. Cheap insurance: every step below is a kubectl call.
+                  i=0
+                  until kubectl -n "$NS" get cluster "$SRC" >/dev/null 2>&1; do
+                    i=$((i + 1))
+                    if [ "$i" -ge 30 ]; then
+                      echo "ERROR: kubernetes API unreachable after $i attempts (~60s). Last error:"
+                      kubectl -n "$NS" get cluster "$SRC" 2>&1 | head -3
+                      exit 1
+                    fi
+                    echo "waiting for API connectivity (attempt $i)"
+                    sleep 2
+                  done
+
+                  echo "--- pre-clean ---"
+                  kubectl -n "$NS" delete cluster "$SCRATCH" --ignore-not-found --wait --timeout=5m
+                  require_no_scratch_pvc
+
+                  # Mirror the live cluster's size and image rather than hardcoding, so the drill keeps working
+                  # after the production volume is resized or the PostgreSQL minor version is bumped.
+                  SIZE="$(kubectl -n "$NS" get cluster "$SRC" -o jsonpath='{.spec.storage.size}')"
+                  IMAGE="$(kubectl -n "$NS" get cluster "$SRC" -o jsonpath='{.spec.imageName}')"
+                  echo "mirroring live cluster: size=$SIZE image=$IMAGE"
+
+                  # 1. Everything archived can be replayed. Guards hardware/volume loss.
+                  restore_and_assert "restore to LATEST" "" 1 1
+
+                  # 2. Replay stops where told. Guards the dropped-table case — the scenario HA cannot help with.
+                  restore_and_assert "PITR to $T_MID" "$T_MID" 1 0
+
+                  echo ""
+                  echo "--- teardown ---"
+                  kubectl -n "$NS" delete cluster "$SCRATCH" --ignore-not-found --wait --timeout=5m
+                  echo "restore drill PASSED (latest + point-in-time)"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - { name: shared, mountPath: /shared }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: shared
+              emptyDir: { sizeLimit: 1Mi }
+            - name: tmp
+              emptyDir: { sizeLimit: 64Mi }

@@ -11,3 +11,4 @@ resources:
   - ./mariadb-operator/ks.yaml
   - ./cloudnative-pg/ks.yaml
   - ./postgres/ks.yaml
+  - ./postgres-restore-drill/ks.yaml

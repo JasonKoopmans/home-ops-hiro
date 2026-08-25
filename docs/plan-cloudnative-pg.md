@@ -28,9 +28,9 @@ Application schema, n8n, and Grafana wiring are explicitly **out of scope**.
 | 1 | CloudNativePG operator (Helm) | **Live** — #470, operator + plugin healthy |
 | 2 | 3-instance `Cluster` (see §7) | **Live** — #495, 3/3 ready on 3 distinct nodes |
 | 3 | Continuous WAL archiving to S3 | **Live and verified** — `ContinuousArchiving=True` |
-| 4 | Scheduled base backup + retention | **Deployed, UNVERIFIED** — see §1b |
-| 5 | **Restore drill** (the part that matters) | Blocked on §1b |
-| 6 | Teardown scratch cluster + recovery runbook | Blocked on phase 5 |
+| 4 | Scheduled base backup + retention | **Live and verified** — first backup fired 2026-08-24 03:00 UTC |
+| 5 | **Restore drill** (the part that matters) | **Done** — passed 2026-08-25, now automated weekly (§1c) |
+| 6 | Teardown scratch cluster + recovery runbook | **Done** — [runbook-postgres-recovery.md](runbook-postgres-recovery.md) |
 | 7 | PDB / failure-mode writeup | **Done** — [postgres-failure-modes.md](postgres-failure-modes.md) |
 | 8 | **Backup observability** (see §5) | **Implemented** — `prometheusrule-postgres.yaml` |
 | 9 | **Cluster/runtime observability** (see §6) | **Implemented** — same rule file + instance PodMonitor |
@@ -61,17 +61,25 @@ so this reads as network settling, not credentials — an auth problem surfaces 
 `AccessDenied`. Harmless here because PostgreSQL retries, but it is precisely
 the failure class phase 8 exists to catch, and nothing would have told us.
 
-### §1b ⚠ Backups are NOT yet proven — come back to this
+### §1b Backups are now proven — resolved 2026-08-25
 
-```
-firstRecoverabilityPoint:  <empty>
-lastSuccessfulBackup:      <empty>
-Backup CRs:                none
-```
+> Kept as history because the reasoning still applies to any new cluster.
+> **This section previously read "Backups are NOT yet proven".** At the time WAL
+> was archiving but no base backup had fired, so nothing was recoverable: WAL
+> segments are a diff against a base, and with no base there is nothing to
+> replay them onto. Archiving being green was not the same as being able to
+> restore.
 
-**WAL is archiving, but no base backup exists, so nothing is recoverable yet.**
-WAL segments are a diff against a base; with no base there is nothing to replay
-them onto. Archiving being green is not the same as being able to restore.
+Both halves are now closed:
+
+| | |
+|---|---|
+| First base backup | `postgres-nightly-20260824030000`, phase `completed` |
+| Restore verified | 2026-08-25 — a canary row written to the live database was recovered into a scratch cluster built from S3 alone (§1c) |
+
+`firstRecoverabilityPoint` is non-empty, so PITR is genuinely possible. The
+drill in §1c is what keeps this claim true instead of letting it decay into a
+one-time result.
 
 The operator scheduled the first run for **2026-08-24 03:00:00 +0000 UTC**
 (`BackupSchedule` event on `scheduledbackup/postgres-nightly`).
@@ -129,6 +137,76 @@ plaintext key ID in the file.
 >
 > A green Kustomization is not evidence that backups work. Verify against the
 > object store — see §1a and §1b.
+
+
+### §1c Restore drill — passed 2026-08-25, now automated weekly
+
+**Operational detail lives in [runbook-postgres-recovery.md](runbook-postgres-recovery.md).** This is the
+record of what was proven and what it cost.
+
+The manual drill wrote a tokenised canary row to the live `app` database, waited for its WAL to reach S3, then
+built a scratch single-instance Cluster from object storage alone via `bootstrap.recovery` and found the token.
+That proves the full chain — base backup, WAL archiving, and WAL replay *past* the base backup — not merely
+that objects exist in the bucket.
+
+Automated as a weekly CronJob in `kubernetes/apps/database/postgres-restore-drill/`, Sundays 08:00 local,
+because a drill run once is a fact about one Sunday and the thing worth knowing is whether it is *still* true.
+
+**The automated drill covers both recovery shapes, and the second is the important one.** It writes two canaries
+with a recovery target captured between them, restores to latest (asserting both present), then restores to that
+target (asserting the later canary is **absent**). Restore-to-latest guards volume loss; PITR-with-exclusion
+guards the dropped-table case — the scenario replication cannot help with (§4), and the only one where a restore
+that silently overshoots its target would hand the mistake straight back. Exclusion is asserted, not assumed.
+
+**Weekly, not monthly, is a consequence of the 7d retention window.** A drill less frequent than the recovery
+window could pass against backups that have since been pruned — it would be verifying something that no longer
+exists by the time it is needed. If retention ever shrinks, the drill cadence has to follow it.
+
+**Alerting deliberately reads a different metrics path.** The drill's four rules
+(`postgres-restore-drill.rules` in `prometheusrule-postgres.yaml`) key on kube-state-metrics, while the phase-8
+backup rules key on the CNPG exporter via the instance PodMonitor. That redundancy is the point: a broken
+PodMonitor scrape silences every `cnpg_*` rule at once, and the drill rules keep working through it.
+
+#### The false alarm, and why it is recorded
+
+The first manual attempt came up healthy with the canary **missing**, despite the WAL segment having finished
+uploading before the scratch cluster was created. That looks exactly like a silent RPO regression to
+"whatever last night's base backup holds", which would have been a serious finding.
+
+It was run down rather than shrugged off. Re-running with an explicit `recoveryTarget.targetTime` set past any
+WAL that could exist produced `FATAL: recovery ended before configured recovery target was reached` — but only
+*after* the log reported `last completed transaction was at log time 2026-08-25 01:19:04`, matching the
+canary's own commit. Replay had reached the row. A third run repeating the original no-target config passed.
+
+Cause: transient S3 read-after-write listing lag immediately after upload. The automated drill's 7-minute
+archive wait now sits between the write and the restore, which removes the race. The lasting lesson is the
+general one: **"recovery completed successfully" is not evidence the target was reached — verify against known
+data.**
+
+#### Cost and blast radius
+
+| | |
+|---|---|
+| Per run | One transient 1-instance cluster: 250m CPU / 512Mi, plus a PVC matching the live volume size, for a few minutes |
+| Why 1 instance | Proving the mechanism needs one instance; CPU is the scarce resource on this cluster (§3) |
+| Drill ServiceAccount | Can create Clusters and delete **only** `postgres-restore-drill-scratch`. Cannot delete the production Cluster, exec into production pods, delete PVCs, or read Secrets — verified with `kubectl auth can-i` |
+
+**In-cluster execution — verified 2026-08-25.** The manual drill proved the mechanism; three live runs of the
+automated CronJob proved the wrapper. The first two caught real bugs invisible to every static check (a
+distroless kubectl image with no shell; a pod-startup network race hitting the database before the pod's network
+was usable — both fixed, see the CronJob's own comments). The third passed clean on both legs:
+
+```
+restore to LATEST:  canary A=1 (want 1) | canary B=1 (want 1)   PASS   recovered in 176s
+PITR to T_MID:       canary A=1 (want 1) | canary B=0 (want 0)   PASS   recovered in 151s
+```
+
+The PITR line is the one that matters: canary B, written after the recovery target, came back **absent** —
+exclusion proven, not assumed. Zero scratch resources leaked across any of the three runs, including the two
+failures.
+
+**Still an informed guess:** all three runs were against an effectively empty database, so recovered-in-N-s is a
+correctness proxy, not a real RTO number. Re-run once LifeOS holds real data.
 
 ---
 
