@@ -177,6 +177,48 @@ rotate every copy of it.
 
 ---
 
+## Exploratory querying
+
+**CloudBeaver** (`kubernetes/apps/lifeos/cloudbeaver`) — a web SQL editor, internal-only at
+`https://sql.${SECRET_DOMAIN}`, for poking at the warehouse by hand outside of
+Grafana dashboards and the ingest pipeline.
+
+First visit runs CloudBeaver's own setup wizard to create an admin account —
+there's no headless/env-var bootstrap for that part. Once in, add a PostgreSQL
+connection with:
+
+| Field | Value |
+|---|---|
+| Host | `postgres-rw.database.svc.cluster.local` |
+| Port | `5432` |
+| Database | `lifeos` |
+| Username | `lifeos_reader` |
+| Password | `sops --decrypt kubernetes/apps/lifeos/warehouse/app/secret.sops.yaml \| yq '.stringData.reader-password'` |
+
+None of the connection metadata is provisioned from Git — deliberately. CloudBeaver
+supports pre-configuring connections via a `data-sources.json` it reads at
+startup, but that mechanism is documented upstream as rough in containerized
+deployments, and it stores whatever credential you give it in **plaintext on
+disk** until the connection is first used. Typing the reader password in once,
+by hand, avoided putting a second unencrypted copy of it next to the one this
+repo already keeps in SOPS.
+
+Connects as `lifeos_reader` — the same read-only role Grafana uses, `SELECT` on
+`core`/`mart`, nothing on `raw`. That was a deliberate default, not the only
+option: Postgres allows `CREATE TEMP TABLE` under this role regardless (temp
+objects live in a session-local schema every role can write to), which covers
+most "let me scratch something together" needs without any elevated grant. If
+that turns out to be insufficient, a narrower write-scoped exploration role is
+a small addition to `cluster.yaml` and `schema.yaml` — ask rather than assume
+you want ad hoc write access to data other things depend on.
+
+The workspace PVC (`longhorn-no-backup`) holds CloudBeaver's own config and any
+saved connections/scripts you build up — convenient to keep, not warehouse
+data, and not backed up. Losing it costs re-running the setup wizard and
+re-adding the connection, not any actual data.
+
+---
+
 ## How schema changes get applied
 
 Edit `kubernetes/apps/lifeos/warehouse/app/schema.yaml`, commit, push. A CronJob
