@@ -84,7 +84,10 @@ spec:
       # account and re-add the connection), not irreplaceable, so this is the
       # opposite call from the LifeOS Grafana's PVC: no backups needed.
       workspace:
-        type: pvc
+        # The full enum value, not the "pvc" shorthand — app-template's own
+        # values schema rejects that short form (confirmed against its
+        # rendered validation error, not guessed).
+        type: persistentVolumeClaim
         storageClassName: longhorn-no-backup
         accessMode: ReadWriteOnce
         # INFORMED GUESS. Config, an embedded metadata store, logs, and a
