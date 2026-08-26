@@ -193,7 +193,7 @@ connection with:
 | Port | `5432` |
 | Database | `lifeos` |
 | Username | `lifeos_reader` |
-| Password | `sops --decrypt kubernetes/apps/lifeos/warehouse/app/secret.sops.yaml` |
+| Password | `sops --decrypt kubernetes/apps/lifeos/warehouse/app/secret.sops.yaml \| yq '.stringData.reader-password'` |
 
 None of the connection metadata is provisioned from Git — deliberately. CloudBeaver
 supports pre-configuring connections via a `data-sources.json` it reads at
