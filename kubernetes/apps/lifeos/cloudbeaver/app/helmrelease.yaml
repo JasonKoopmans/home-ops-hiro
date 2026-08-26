@@ -21,6 +21,18 @@ spec:
     # copy of a password this repo already keeps in SOPS is not a trade worth
     # making to save one minute of typing on first login. Add the connection
     # once through the UI instead.
+    defaultPodOptions:
+      securityContext:
+        # Confirmed against the actual image (a debug pod running `id
+        # dbeaver` / echoing $DBEAVER_UID): the dbeaver user is uid/gid 8978.
+        # launch-product.sh only chowns the workspace and su's to that user
+        # when it detects it's running as root (id -u = 0) — running as
+        # 8978:8978 up front skips that branch entirely, so dropping ALL
+        # capabilities (below) no longer breaks it via a chown/su that needs
+        # CAP_CHOWN/CAP_SETGID it doesn't have.
+        fsGroup: 8978
+        fsGroupChangePolicy: OnRootMismatch
+
     controllers:
       main:
         # CloudBeaver's own workspace is single-writer (Jetty + an embedded
@@ -52,18 +64,9 @@ spec:
               allowPrivilegeEscalation: false
               capabilities: { drop: ["ALL"] }
               seccompProfile: { type: RuntimeDefault }
-              # runAsNonRoot/runAsUser, readOnlyRootFilesystem, and a matching
-              # fsGroup on the pod are all deliberately left unset. This
-              # image's own runtime user and where under /opt/cloudbeaver it
-              # expects to write beyond the workspace volume are both
-              # unverified from here — no cluster access to `exec ... -- id`
-              # the running pod the way mcp-kubernetes's uid was confirmed
-              # (see that app's helmrelease.yaml). Setting runAsNonRoot: true
-              # blind risks a hard startup failure ("container has
-              # runAsNonRoot and image will run as root") with nothing to
-              # catch it before it reaches the cluster, and a guessed fsGroup
-              # asserts a number with no more basis than the uid would have.
-              # Tighten all of it together once observed against the real pod.
+              runAsNonRoot: true
+              runAsUser: 8978
+              runAsGroup: 8978
             # INFORMED GUESS — no measured workload yet. CloudBeaver's backend
             # is a JVM (Jetty), which carries a materially higher memory floor
             # than the lightweight Go/Node apps elsewhere in this repo; sized
