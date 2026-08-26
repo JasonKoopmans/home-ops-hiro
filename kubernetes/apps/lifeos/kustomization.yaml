@@ -8,5 +8,6 @@ components:
 
 resources:
   - ./namespace.yaml
+  - ./cloudbeaver/ks.yaml
   - ./grafana/ks.yaml
   - ./warehouse/ks.yaml

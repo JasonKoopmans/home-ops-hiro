@@ -1,0 +1,125 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app cloudbeaver
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    # A web SQL editor for exploratory querying against the LifeOS warehouse
+    # (kubernetes/apps/lifeos/warehouse) — see docs/lifeos-warehouse.md for
+    # what to actually connect to and as whom.
+    #
+    # Deliberately not pre-provisioning the Postgres connection via
+    # CloudBeaver's own data-sources.json mechanism. It's documented upstream
+    # as having rough edges in containerized deployments, and it stores
+    # credentials in plaintext on disk until first use — a second, unencrypted
+    # copy of a password this repo already keeps in SOPS is not a trade worth
+    # making to save one minute of typing on first login. Add the connection
+    # once through the UI instead.
+    controllers:
+      main:
+        # CloudBeaver's own workspace is single-writer (Jetty + an embedded
+        # datastore for sessions/config), and this is a personal, single-user
+        # tool — no reason to run more than one replica, and RollingUpdate
+        # would briefly run two against the same PVC.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              # renovate: datasource=docker depName=dbeaver/cloudbeaver
+              repository: docker.io/dbeaver/cloudbeaver
+              tag: 26.0.1
+            probes:
+              liveness: &probe
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: &port 8978
+                  initialDelaySeconds: 20
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 6
+              readiness: *probe
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities: { drop: ["ALL"] }
+              seccompProfile: { type: RuntimeDefault }
+              # runAsNonRoot/runAsUser, readOnlyRootFilesystem, and a matching
+              # fsGroup on the pod are all deliberately left unset. This
+              # image's own runtime user and where under /opt/cloudbeaver it
+              # expects to write beyond the workspace volume are both
+              # unverified from here — no cluster access to `exec ... -- id`
+              # the running pod the way mcp-kubernetes's uid was confirmed
+              # (see that app's helmrelease.yaml). Setting runAsNonRoot: true
+              # blind risks a hard startup failure ("container has
+              # runAsNonRoot and image will run as root") with nothing to
+              # catch it before it reaches the cluster, and a guessed fsGroup
+              # asserts a number with no more basis than the uid would have.
+              # Tighten all of it together once observed against the real pod.
+            # INFORMED GUESS — no measured workload yet. CloudBeaver's backend
+            # is a JVM (Jetty), which carries a materially higher memory floor
+            # than the lightweight Go/Node apps elsewhere in this repo; sized
+            # accordingly rather than reusing their numbers. Single-user,
+            # occasional exploratory querying. Revisit with real usage.
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                # No CPU limit, per repo convention.
+                memory: 1Gi
+
+    persistence:
+      # Workspace holds CloudBeaver's own config, sessions, and any saved
+      # connections/scripts once you create them through the UI — not
+      # warehouse data. Reproducible-if-annoying to lose (recreate the admin
+      # account and re-add the connection), not irreplaceable, so this is the
+      # opposite call from the LifeOS Grafana's PVC: no backups needed.
+      workspace:
+        type: pvc
+        storageClassName: longhorn-no-backup
+        accessMode: ReadWriteOnce
+        # INFORMED GUESS. Config, an embedded metadata store, logs, and a
+        # handful of saved scripts — small at single-user scale. Revisit if
+        # it ever fills.
+        size: 2Gi
+        globalMounts:
+          - path: /opt/cloudbeaver/workspace
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: dbeaver
+          gethomepage.dev/title: SQL
+          gethomepage.dev/description: "Exploratory queries against the LifeOS warehouse"
+          gethomepage.dev/group: "LifeOS"
+        # Single-label hostname: the wildcard cert covers ${SECRET_DOMAIN} and
+        # *.${SECRET_DOMAIN} only, not a second label.
+        hostnames: ["sql.${SECRET_DOMAIN}"]
+        parentRefs:
+          # Internal only. This reaches the warehouse's read-only role, but
+          # it's still a SQL console with network access to the shared
+          # Postgres cluster — no reason to expose it past the home network.
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: main
+                port: *port
