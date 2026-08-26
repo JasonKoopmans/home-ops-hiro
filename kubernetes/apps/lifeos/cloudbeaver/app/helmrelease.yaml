@@ -88,7 +88,13 @@ spec:
         # values schema rejects that short form (confirmed against its
         # rendered validation error, not guessed).
         type: persistentVolumeClaim
-        storageClassName: longhorn-no-backup
+        # `storageClass`, not the Kubernetes API's own `storageClassName` —
+        # app-template's persistence schema uses its own field name here.
+        # Confirmed against the chart's actual schema source
+        # (bjw-s-labs/helm-charts, common-5.1.0,
+        # charts/library/common/schemas/persistence.json) after a first wrong
+        # guess (storageClassName) was caught by CI.
+        storageClass: longhorn-no-backup
         accessMode: ReadWriteOnce
         # INFORMED GUESS. Config, an embedded metadata store, logs, and a
         # handful of saved scripts — small at single-user scale. Revisit if
