@@ -192,7 +192,7 @@ data:
                     AND length(translate(payload ->> 'value', '0123456789.-', '')) = 0
                    THEN (payload ->> 'value')::numeric
            END AS value,
-           payload ->> 'units' AS units,
+           payload ->> 'unit' AS unit,
            ingested_at
     FROM raw.health_metrics
     ORDER BY source, natural_key, ingested_at DESC;
