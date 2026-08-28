@@ -116,15 +116,20 @@ spec:
           chatID: 8854064758
           sendResolved: true
           parseMode: HTML
+          # job_name wins over pod when both are set: KubeJobFailed carries
+          # job_name for the batch Job that actually failed *and* pod for
+          # whichever kube-state-metrics replica happened to scrape it — the
+          # exporter's own identity, not the failure's. Showing pod there
+          # named kube-state-metrics itself in every one of these alerts.
           message: |-
             {{ if gt (len .Alerts.Firing) 0 }}🔥 <b>FIRING</b>{{ else }}✅ <b>RESOLVED</b>{{ end }} ({{ .Alerts.Firing | len }} firing, {{ .Alerts.Resolved | len }} resolved)
             {{ range .Alerts.Firing }}
             {{ if eq .Labels.severity "critical" }}🔴{{ else }}🟠{{ end }} <b>{{ .Labels.alertname }}</b> [{{ .Labels.severity }}]
-            {{ if .Labels.node }}node: <code>{{ .Labels.node }}</code>{{ end }}{{ if .Labels.namespace }} ns: <code>{{ .Labels.namespace }}</code>{{ end }}{{ if .Labels.pod }} pod: <code>{{ .Labels.pod }}</code>{{ end }}{{ if .Labels.instance }} instance: <code>{{ .Labels.instance }}</code>{{ end }}
+            {{ if .Labels.node }}node: <code>{{ .Labels.node }}</code>{{ end }}{{ if .Labels.namespace }} ns: <code>{{ .Labels.namespace }}</code>{{ end }}{{ if .Labels.job_name }} job: <code>{{ .Labels.job_name }}</code>{{ else if .Labels.pod }} pod: <code>{{ .Labels.pod }}</code>{{ end }}{{ if .Labels.instance }} instance: <code>{{ .Labels.instance }}</code>{{ end }}
             {{ .Annotations.description }}
             since {{ .StartsAt.Format "15:04 MST" }}
             {{ end }}{{ range .Alerts.Resolved }}
-            ✅ <b>{{ .Labels.alertname }}</b> resolved{{ if .Labels.node }} — <code>{{ .Labels.node }}</code>{{ end }}{{ if .Labels.pod }} — <code>{{ .Labels.pod }}</code>{{ end }}{{ if .Labels.instance }} — <code>{{ .Labels.instance }}</code>{{ end }} (was {{ .Labels.severity }}, {{ .StartsAt.Format "15:04" }}–{{ .EndsAt.Format "15:04 MST" }})
+            ✅ <b>{{ .Labels.alertname }}</b> resolved{{ if .Labels.node }} — <code>{{ .Labels.node }}</code>{{ end }}{{ if .Labels.job_name }} — <code>{{ .Labels.job_name }}</code>{{ else if .Labels.pod }} — <code>{{ .Labels.pod }}</code>{{ end }}{{ if .Labels.instance }} — <code>{{ .Labels.instance }}</code>{{ end }} (was {{ .Labels.severity }}, {{ .StartsAt.Format "15:04" }}–{{ .EndsAt.Format "15:04 MST" }})
             {{ end }}
     # Separate receiver purely for the template: a namespace digest can carry 20+
     # alerts, and the verbose per-alert format above would blow past Telegram's
@@ -139,6 +144,6 @@ spec:
           parseMode: HTML
           message: |-
             🟠 <b>{{ .Alerts.Firing | len }} warning(s)</b>{{ if .GroupLabels.namespace }} in <code>{{ .GroupLabels.namespace }}</code>{{ end }}
-            {{ range .Alerts.Firing }}• <b>{{ .Labels.alertname }}</b>{{ if .Labels.pod }} <code>{{ .Labels.pod }}</code>{{ else if .Labels.node }} <code>{{ .Labels.node }}</code>{{ else if .Labels.instance }} <code>{{ .Labels.instance }}</code>{{ end }} — since {{ .StartsAt.Format "15:04" }}
+            {{ range .Alerts.Firing }}• <b>{{ .Labels.alertname }}</b>{{ if .Labels.job_name }} <code>{{ .Labels.job_name }}</code>{{ else if .Labels.pod }} <code>{{ .Labels.pod }}</code>{{ else if .Labels.node }} <code>{{ .Labels.node }}</code>{{ else if .Labels.instance }} <code>{{ .Labels.instance }}</code>{{ end }} — since {{ .StartsAt.Format "15:04" }}
             {{ end }}{{ if gt (len .Alerts.Resolved) 0 }}
             ✅ <b>{{ .Alerts.Resolved | len }} resolved</b>: {{ range .Alerts.Resolved }}{{ .Labels.alertname }} {{ end }}{{ end }}
