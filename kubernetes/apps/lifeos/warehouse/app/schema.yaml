@@ -7,6 +7,20 @@
 # converge on their own instead of depending on someone remembering to re-run
 # something.
 #
+# The one thing that isn't free: CREATE OR REPLACE VIEW (and FUNCTION) can
+# only change a view's query, never its column names, order, or types —
+# Postgres raises rather than allow it, and CREATE TABLE has no REPLACE at
+# all. A rename, drop, or type change on something already deployed needs an
+# explicit one-time statement, guarded (via information_schema) so it only
+# fires on a database still carrying the old shape and becomes a permanent
+# no-op after. Keep that guarded statement inline, immediately above the
+# CREATE OR REPLACE it repairs — see the DO block above core.health_metrics
+# for the pattern — rather than collecting migrations into their own file or
+# section. One schema owner and roughly one breaking change a year doesn't
+# justify the ordering/tracking-table machinery a real migration tool buys
+# you; revisit that trade if this ever gets more than one contributor or
+# more than a handful of these.
+#
 # Deliberately no dollar-quoted strings anywhere in this SQL. Flux's postBuild
 # substitution rewrites `$$` to `$`, so a PL/pgSQL function body would be
 # silently mangled on its way into the cluster. If this schema ever needs a
@@ -178,6 +192,28 @@ data:
     -- COALESCE(payload ->> 'newName', payload ->> 'oldName') keys off the
     -- payload itself rather than off a cutover date, because the payload is
     -- self-describing and a date is a proxy that can be wrong.
+    --
+    -- The view itself was briefly named "units" (#506) before the typo was
+    -- caught. CREATE OR REPLACE VIEW can add columns but never rename one —
+    -- Postgres rejects the whole statement instead — so once the old name
+    -- had shipped, re-running this file with the corrected name failed
+    -- every time at exactly this statement (ON_ERROR_STOP + single
+    -- transaction meant nothing past it ever applied either, e.g. dim_date
+    -- stopped growing). This DO block migrates the one database that ever
+    -- ran the old version; the IF EXISTS makes it a no-op forever after,
+    -- including on a fresh database that never had "units" to begin with.
+    DO $$
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'core'
+              AND table_name = 'health_metrics'
+              AND column_name = 'units'
+        ) THEN
+            ALTER VIEW core.health_metrics RENAME COLUMN units TO unit;
+        END IF;
+    END $$;
+
     CREATE OR REPLACE VIEW core.health_metrics AS
     SELECT DISTINCT ON (source, natural_key)
            source,
