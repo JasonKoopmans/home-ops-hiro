@@ -199,20 +199,26 @@ data:
     -- had shipped, re-running this file with the corrected name failed
     -- every time at exactly this statement (ON_ERROR_STOP + single
     -- transaction meant nothing past it ever applied either, e.g. dim_date
-    -- stopped growing). This DO block migrates the one database that ever
-    -- ran the old version; the IF EXISTS makes it a no-op forever after,
-    -- including on a fresh database that never had "units" to begin with.
-    DO $$
-    BEGIN
-        IF EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'core'
-              AND table_name = 'health_metrics'
-              AND column_name = 'units'
-        ) THEN
-            ALTER VIEW core.health_metrics RENAME COLUMN units TO unit;
-        END IF;
-    END $$;
+    -- stopped growing).
+    --
+    -- This migrates the one database that ever ran the old version, using
+    -- psql's own \gset/\if rather than a PL/pgSQL DO block: a dollar-quoted
+    -- block is exactly what the file-header warning above rules out, and
+    -- landing one here first-hand is what confirmed why — a doubled dollar
+    -- sign is Flux's escape for a literal single one, so postBuild
+    -- substitution silently halved the block's opening and closing quotes
+    -- on the way into the cluster, and every run failed on a syntax error
+    -- instead. \if reads 'true'/'false' as plain text, so nothing here
+    -- needs a dollar sign at all, and it becomes a permanent no-op once
+    -- the rename has happened once.
+    SELECT CASE WHEN count(*) = 1 THEN 'true' ELSE 'false' END AS already_unit
+    FROM information_schema.columns
+    WHERE table_schema = 'core'
+      AND table_name = 'health_metrics'
+      AND column_name = 'units' \gset
+    \if :already_unit
+        ALTER VIEW core.health_metrics RENAME COLUMN units TO unit;
+    \endif
 
     CREATE OR REPLACE VIEW core.health_metrics AS
     SELECT DISTINCT ON (source, natural_key)
