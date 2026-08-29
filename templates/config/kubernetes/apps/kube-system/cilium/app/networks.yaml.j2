@@ -1,5 +1,5 @@
 ---
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumLoadBalancerIPPool
 metadata:
   name: pool
@@ -23,7 +23,7 @@ spec:
       kubernetes.io/os: linux
 #% if cilium_bgp_enabled %#
 ---
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumBGPAdvertisement
 metadata:
   name: bgp-advertisement-config
@@ -39,7 +39,7 @@ spec:
         matchExpressions:
           - { key: somekey, operator: NotIn, values: ["never-used-value"] }
 ---
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumBGPPeerConfig
 metadata:
   name: bgp-peer-config-v4
@@ -51,7 +51,7 @@ spec:
         matchLabels:
           advertise: bgp
 ---
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumBGPClusterConfig
 metadata:
   name: bgp-cluster-config
