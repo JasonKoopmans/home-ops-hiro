@@ -4,5 +4,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ./schema.yaml
+  - ./goals-seed.yaml
   - ./cronjob-schema.yaml
   - ./secret.sops.yaml
