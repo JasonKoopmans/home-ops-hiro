@@ -60,6 +60,10 @@ spec:
       ports:
         - protocol: TCP
           port: 3000
-  # Empty egress = deny all outbound. Intentionally not "egress: []" omitted —
-  # listing Egress in policyTypes with no rules is what makes the denial active.
+  # Deny all outbound traffic. Two things are required for this and both are
+  # above: "Egress" must appear in policyTypes (that is what switches egress
+  # enforcement on at all), and the egress rule list must then be empty (an
+  # empty list allows nothing). Omitting the "egress" key entirely would behave
+  # the same way, but it is spelled out here so the denial is visibly
+  # deliberate rather than looking like an oversight.
   egress: []
