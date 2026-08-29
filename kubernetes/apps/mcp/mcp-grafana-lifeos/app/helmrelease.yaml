@@ -1,0 +1,206 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# MCP server for the LifeOS Grafana instance (kubernetes/apps/lifeos/grafana).
+# Sibling app mcp-grafana-monitoring targets the other instance
+# (kube-prometheus-stack's Grafana) — upstream (grafana/mcp-grafana) connects
+# to exactly one Grafana per process, so "both/either" here means two small
+# deployments sharing one image, not one deployment with two URLs. Read
+# docs/mcp-onboarding.md before editing — port, path and hostname shape are a
+# contract shared by every MCP server, not a per-app choice.
+#
+# Image is docker.io/grafana/mcp-grafana (upstream, semver-tagged), not the
+# hub.docker.com/r/mcp/grafana catalog mirror the app was requested from —
+# that mirror only ever publishes `latest`, no versioned tags for Renovate to
+# track. Same source, same maintainer, just the tagged registry instead of
+# the untagged mirror of it.
+#
+# Auth-ladder step 2, ahead of every sibling MCP server here: this Grafana's
+# "LifeOS Warehouse" datasource (kubernetes/apps/lifeos/grafana/app/
+# helmrelease.yaml) is a Postgres connection in `access: proxy` mode, so any
+# datasource-query tool this server exposes can read that database using
+# Grafana's own stored credentials — a bigger exposure than "read some
+# dashboards", and this Grafana is explicitly the personal-data instance.
+# --disable-write doesn't touch that path (queries aren't writes), so callers
+# are gated instead: MCP_GRAFANA_SERVER_TOKEN below (env, not --server-auth-
+# token as a flag, for the same reason GRAFANA_SERVICE_ACCOUNT_TOKEN isn't a
+# flag — keeps it out of the process list / `kubectl describe pod`). Verified
+# in upstream source (cmd/mcp-grafana/main.go) that this only wraps /mcp and
+# /sse — /healthz stays open, so it doesn't collide with the probe fix below.
+# mcp-grafana-monitoring stays phase 1: it only reaches Prometheus/Loki, not
+# a personal-data store.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app mcp-grafana-lifeos
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        # Deployment-level (not pod-level) annotation — that's where Reloader
+        # looks. `auto` rather than naming one Secret: the pod now reads two
+        # (secret.sops.yaml's GRAFANA_SERVICE_ACCOUNT_TOKEN and secret-auth-
+        # token.sops.yaml's MCP_GRAFANA_SERVER_TOKEN), and a single named
+        # annotation only watches the one Secret it names — rotating the
+        # other would silently need a manual restart.
+        annotations:
+          reloader.stakater.com/auto: "true"
+        # One replica because traffic is low, same default every MCP server
+        # here uses. Whether the Go SDK's streamable-http mode is session-
+        # sticky is unverified against a running pod (the one-line test from
+        # docs/mcp-onboarding.md: `tools/list` with no mcp-session-id header) —
+        # check that before ever raising this.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: grafana/mcp-grafana
+              tag: 1.3.0
+            # The image's ENTRYPOINT hardcodes `--transport sse --address
+            # 0.0.0.0:8000` (see upstream Dockerfile) with no CMD, so `args:`
+            # alone would just append to that fixed list rather than replace
+            # it. `command:` is what actually overrides ENTRYPOINT.
+            command:
+              - /app/mcp-grafana
+            args:
+              - -t
+              - streamable-http
+              - --address
+              - 0.0.0.0:3000
+              # --endpoint-path already defaults to /mcp — the contract path —
+              # so it isn't passed explicitly.
+              #
+              # Unlike mcp-kubernetes's single-value host allow-list, this one
+              # takes a comma-separated list, so both callers can be named
+              # explicitly instead of disabling the check outright.
+              - --allowed-hosts
+              - mcp-grafana-lifeos.mcp.svc.cluster.local:3000,mcp-grafana-lifeos.${SECRET_DOMAIN}
+              # Second lock on the door, same shape as mcp-kubernetes's
+              # ALLOW_ONLY_READONLY_TOOLS: phase-1 endpoints are
+              # unauthenticated, so don't also expose dashboard/alert/
+              # datasource create-or-update tools. Bundles raw-SQL query tools
+              # in with "write" upstream too (--enable-query would bring those
+              # back) — doesn't touch the read/query tools against Prometheus
+              # or Loki datasources, which is the actual point of this server.
+              - --disable-write
+            env:
+              TZ: ${TIMEZONE}
+              GRAFANA_URL: http://grafana.lifeos.svc.cluster.local:80
+              GRAFANA_SERVICE_ACCOUNT_TOKEN:
+                secretKeyRef:
+                  name: mcp-grafana-lifeos-secret
+                  key: GRAFANA_SERVICE_ACCOUNT_TOKEN
+              # Caller-facing bearer token — see the file-level comment above
+              # for why this is a second Secret rather than a key alongside
+              # GRAFANA_SERVICE_ACCOUNT_TOKEN.
+              MCP_GRAFANA_SERVER_TOKEN:
+                secretKeyRef:
+                  name: mcp-grafana-lifeos-auth-token
+                  key: MCP_GRAFANA_SERVER_TOKEN
+            # KubeLinter (liveness-port/readiness-port) flagged the probes
+            # below as referencing a port the container never declares —
+            # cosmetic (Service routing works on Pod IP regardless), but
+            # cheap to make accurate.
+            ports:
+              - name: http
+                containerPort: 3000
+                protocol: TCP
+            probes:
+              # httpGet, not TCP: unlike the other native-http servers in this
+              # namespace, upstream documents a real health path on both sse
+              # and streamable-http — GET /healthz -> 200 "ok". Sourced from
+              # the README, not a live curl (no cluster access from where this
+              # was written) — worth a manual confirm post-deploy.
+              #
+              # httpHeaders.Host is required, not decorative: kubelet's httpGet
+              # probe defaults the Host header to the pod IP
+              # (https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/#HTTPGetAction,
+              # "You probably want to set 'Host' in httpHeaders instead"), and
+              # --allowed-hosts below enforces an exact-match allow-list on
+              # every route including /healthz. Without this override the pod
+              # 403s its own liveness/readiness check and never goes Ready.
+              # No Authorization header needed even with the auth token above —
+              # confirmed in upstream source that /healthz isn't wrapped by the
+              # caller-auth middleware (see the file-level comment).
+              #
+              # The Host value must match an --allowed-hosts entry EXACTLY,
+              # port included: mcp-grafana's check is `slices.Contains(hosts,
+              # strings.ToLower(r.Host))` (http_security.go) — no host/port
+              # splitting, no normalisation. Omitting `:3000` here still 403s,
+              # just against a different string than the pod-IP default.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 3000
+                    httpHeaders:
+                      - name: Host
+                        value: mcp-grafana-lifeos.mcp.svc.cluster.local:3000
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                # Unmeasured guess: a static Go binary, bracketed between
+                # mcp-kubernetes's 64Mi (also Go) and mcp-prometheus's 128Mi
+                # (Python). Revisit against real usage once deployed.
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+
+    defaultPodOptions:
+      automountServiceAccountToken: false
+      securityContext:
+        # UID read from the image's own Dockerfile (debian:bookworm-slim
+        # stage creates non-root user `mcp-grafana`, UID 1000, and USERs it)
+        # rather than guessed. This is the image's own default, so pinning it
+        # changes nothing at runtime — it just stops a future tag from being
+        # *able* to start as root if it drops that USER line.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+
+    # No persistence block: this is a stateless Go HTTP client over the
+    # Grafana HTTP API — no cache directory or state file documented anywhere
+    # upstream. Add a scratch emptyDir only if a deployed pod actually crashes
+    # wanting to write somewhere; never by flipping readOnlyRootFilesystem.
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: 3000
+
+    route:
+      main:
+        # Single-label hostname: the wildcard cert is ["${SECRET_DOMAIN}",
+        # "*.${SECRET_DOMAIN}"] and does not cover a second label.
+        hostnames: ["mcp-grafana-lifeos.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: 3000

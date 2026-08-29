@@ -8,6 +8,8 @@ components:
 
 resources:
   - ./namespace.yaml
+  - ./mcp-grafana-lifeos/ks.yaml
+  - ./mcp-grafana-monitoring/ks.yaml
   - ./mcp-kubernetes/ks.yaml
-  - ./mcp-prometheus/ks.yaml
   - ./mcp-postgres/ks.yaml
+  - ./mcp-prometheus/ks.yaml
