@@ -1,0 +1,140 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# MCP server for the "postgres" CNPG cluster (database `lifeos`), using
+# crystaldba/postgres-mcp ("Postgres MCP Pro") in --access-mode=restricted
+# (read-only, protected against COMMIT/ROLLBACK injection).
+#
+# Deliberate, documented exception to this cluster's Streamable-HTTP/mcp:3000
+# MCP contract (see docs/mcp-onboarding.md): the upstream image only ships
+# stdio/SSE transports on its published tags as of 0.3.0 — Streamable HTTP
+# support is an unmerged upstream PR
+# (https://github.com/crystaldba/postgres-mcp/pull/78). Chosen deliberately
+# over (a) building a custom supergateway-wrapped image, and (b) switching to
+# a thinner native-HTTP alternative that lacks EXPLAIN/index-tuning tools.
+# Revisit once upstream ships a released streamable-http tag: swap the args
+# below, drop the second HTTPRoute rule, and this app rejoins the contract.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app mcp-postgres
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        # SSE is stateful and session-bound (GET /sse opens a long-lived
+        # stream; POST /messages/ references that session), unlike this
+        # cluster's other MCP servers — more than one replica would need
+        # sticky sessions the gateway does not provide.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: crystaldba/postgres-mcp
+              tag: 0.3.0
+            args:
+              - --access-mode=restricted
+              - --transport=sse
+              # Default --sse-host is localhost — must bind all interfaces to
+              # be reachable from the Service.
+              - --sse-host=0.0.0.0
+              - --sse-port=8000
+            env:
+              TZ: ${TIMEZONE}
+              # The only env var this image reads (verified in source: no
+              # PGHOST/PGUSER-style vars, just this one connection string).
+              # Deliberately not a CLI arg — that would put the password in
+              # the process list / `kubectl describe pod`.
+              DATABASE_URI:
+                secretKeyRef:
+                  name: mcp-postgres-secret
+                  key: DATABASE_URI
+            probes:
+              # TCP, not HTTP: GET /sse opens an event stream that never
+              # completes, and — verified by running the image against both
+              # an unreachable and a reachable Postgres — the process does not
+              # bind its port at all until a database connection succeeds. It
+              # logs "Starting PostgreSQL MCP Server" then loops connection
+              # warnings with nothing listening until DATABASE_URI answers.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: &port 8000
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                # UNMEASURED GUESS: idle (retrying a bad DSN, no real query
+                # traffic yet) sits at ~70Mi. Revisit with real usage — a wide
+                # EXPLAIN or workload-analysis call could pull more into
+                # memory than simple SELECTs do.
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+
+    # No persistence block: verified with `docker run --read-only --user
+    # 65534:65534` that the server needs no writable path at all — starts
+    # clean, no crash. Never flip readOnlyRootFilesystem to false instead of
+    # adding a mount back if a future version needs scratch space.
+
+    defaultPodOptions:
+      automountServiceAccountToken: false
+      securityContext:
+        # The image runs as root by default (no USER in its Dockerfile —
+        # verified with `docker run --entrypoint sh ... -c id` => uid=0).
+        # 65534/65534 (nobody/nogroup) is an arbitrary non-root uid, not the
+        # image's own; confirmed working read-only + non-root above.
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        # Single-label hostname: the wildcard cert is
+        # ["${SECRET_DOMAIN}", "*.${SECRET_DOMAIN}"] and does not cover a
+        # second label.
+        hostnames: ["mcp-postgres.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          # Two paths, not the contract's single /mcp: the MCP SDK's SSE
+          # transport mounts GET /sse (the event stream) and POST /messages/
+          # (client-to-server) as separate routes.
+          - matches:
+              - path:
+                  value: /sse
+            backendRefs:
+              - identifier: main
+                port: *port
+          - matches:
+              - path:
+                  value: /messages
+            backendRefs:
+              - identifier: main
+                port: *port

@@ -505,6 +505,18 @@ data:
     GRANT USAGE ON SCHEMA core, mart TO lifeos_reader;
     GRANT SELECT ON ALL TABLES IN SCHEMA core, mart TO lifeos_reader;
 
+    -- mcp_postgres (the mcp-postgres MCP server) is deliberately NOT granted
+    -- here despite reading this same core/mart data — it isn't a LifeOS
+    -- consumer, so its access is provisioned by its own independent
+    -- automation: kubernetes/apps/database/postgres/app/mcp-postgres-grants.yaml
+    -- + cronjob-mcp-postgres-grants.yaml. Keeping it out of this file means
+    -- decommissioning or restructuring the LifeOS warehouse app can't
+    -- silently strand — or, via this script's --single-transaction, break —
+    -- an unrelated app's database access. It still runs as lifeos_writer,
+    -- unavoidably (GRANT on these objects can only come from their owner or a
+    -- superuser), but that's Postgres' ownership model, not a coupling this
+    -- file introduces.
+
     -- Covers tables and views added by a later run of this same DDL, so
     -- anything new is readable/writable the moment it exists rather than after
     -- someone remembers to re-grant. Reaches only future objects created by

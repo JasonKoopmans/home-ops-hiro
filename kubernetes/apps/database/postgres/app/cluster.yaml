@@ -74,6 +74,17 @@ spec:
         # able to touch the landing tables.
         passwordSecret:
           name: lifeos-reader-credentials
+      - name: mcp_postgres
+        login: true
+        # Dedicated credential for the mcp-postgres MCP server
+        # (kubernetes/apps/mcp/mcp-postgres) — deliberately a separate role
+        # from lifeos_reader rather than sharing it, so an LLM-driven client's
+        # access can be revoked or narrowed without touching Grafana's. Same
+        # scope as lifeos_reader in practice: the schema DDL (see
+        # kubernetes/apps/lifeos/warehouse/app/schema.yaml) grants it SELECT
+        # on core and mart only, never raw.
+        passwordSecret:
+          name: mcp-postgres-credentials
 
   # Single Longhorn replica on purpose: PostgreSQL is already replicating across
   # the three instances, so 3-replica Longhorn underneath would store 9 physical

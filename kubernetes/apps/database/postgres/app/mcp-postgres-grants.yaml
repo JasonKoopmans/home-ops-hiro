@@ -1,0 +1,51 @@
+---
+# Access grant for the mcp-postgres MCP server
+# (kubernetes/apps/mcp/mcp-postgres), applied by the CronJob in this same
+# directory. Deliberately NOT part of kubernetes/apps/lifeos/warehouse's own
+# schema.sql/CronJob, even though it grants on the exact same core/mart
+# objects: mcp-postgres is a separate application that happens to read
+# LifeOS's curated data, not part of the LifeOS app itself. Folding it into
+# lifeos/warehouse would mean decommissioning or restructuring that app could
+# silently strand this server's database access, and a mistake in either
+# app's grants could break the other's schema sync — both scripts run
+# ON_ERROR_STOP + --single-transaction, so one bad statement fails the whole
+# run, not just itself.
+#
+# Still runs as lifeos_writer, unavoidably: GRANT and ALTER DEFAULT PRIVILEGES
+# on core/mart's tables and views can only be issued by their owner (or a
+# superuser) — lifeos_writer owns every object there. That's Postgres'
+# ownership model, not a design choice; only the *automation* — which file,
+# which CronJob, which app's lifecycle it's tied to — is what's actually
+# separable, and that's what this split buys.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-postgres-grants
+data:
+  grants.sql: |
+    -- Same privilege scope as lifeos_reader (see
+    -- kubernetes/apps/lifeos/warehouse/app/schema.yaml) — SELECT on core and
+    -- mart, never raw — kept as its own role rather than shared, so revoking
+    -- mcp-postgres's access later is a one-line diff here, not a list edit
+    -- that also touches Grafana's.
+    GRANT USAGE ON SCHEMA core, mart TO mcp_postgres;
+    GRANT SELECT ON ALL TABLES IN SCHEMA core, mart TO mcp_postgres;
+
+    -- Covers tables and views lifeos/warehouse adds later, so mcp_postgres's
+    -- access stays current without this file needing to change in lockstep
+    -- with that app's schema.
+    ALTER DEFAULT PRIVILEGES IN SCHEMA core, mart
+        GRANT SELECT ON TABLES TO mcp_postgres;
+
+    -- mcp_postgres SHOULD also carry a statement_timeout/
+    -- idle_in_transaction_session_timeout (it's an LLM-driven client on the
+    -- shared primary — nothing else bounds how expensive a query it can
+    -- generate). Can't be done here: ALTER ROLE <other role> SET ... requires
+    -- CREATEROLE + ADMIN option on the target role, or superuser, and
+    -- lifeos_writer deliberately has neither (verified against a throwaway
+    -- Postgres 16 instance: NOCREATEROLE gets "permission denied to alter
+    -- role" doing exactly this). Run once, manually, as the cluster
+    -- superuser instead:
+    --   kubectl cnpg psql postgres -n database
+    --   ALTER ROLE mcp_postgres SET statement_timeout = '30s';
+    --   ALTER ROLE mcp_postgres SET idle_in_transaction_session_timeout = '30s';

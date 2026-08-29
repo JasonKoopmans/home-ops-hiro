@@ -1,0 +1,113 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/batch/v1/cronjob_v1.json
+# Applies mcp-postgres-grants.yaml's grants.sql — see that file for why this
+# is a separate CronJob from kubernetes/apps/lifeos/warehouse's warehouse-
+# schema.
+#
+# CronJob rather than a one-shot Job, same reasoning as warehouse-schema
+# (kubernetes/apps/lifeos/warehouse/app/cronjob-schema.yaml): editing
+# grants.sql updates the ConfigMap but not an already-run Job, so nothing
+# would notice the database silently stop matching Git. Idempotent DDL on a
+# schedule converges the two on its own.
+#
+# Uses lifeos-writer-credentials directly — already a Secret in this same
+# namespace (it's what the CNPG operator reads to set lifeos_writer's
+# password), so no new copy is needed here the way lifeos/warehouse needs its
+# own lifeos ns copy.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mcp-postgres-grants
+spec:
+  schedule: "23 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            # Matches the CNPG postgres image's own user, same as
+            # warehouse-schema's CronJob.
+            runAsUser: 26
+            runAsGroup: 26
+          containers:
+            - name: psql
+              image: ghcr.io/cloudnative-pg/postgresql:18.6
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  # mcp_postgres (the CNPG operator creates it) and the
+                  # core/mart schemas (lifeos/warehouse's own CronJob creates
+                  # them) are reconciled independently of this Job and of each
+                  # other, so either can lag behind on a first deploy.
+                  # ON_ERROR_STOP + --single-transaction below mean granting
+                  # on either before it exists fails the whole run — wait for
+                  # both first, same pattern as warehouse-schema's own
+                  # readiness check.
+                  RETRIES=0
+                  until [ "$(psql -tAc "SELECT (SELECT count(*) FROM pg_roles WHERE rolname = 'mcp_postgres') + (SELECT count(*) FROM pg_namespace WHERE nspname IN ('core', 'mart'))" 2>/dev/null)" = "3" ]; do
+                    RETRIES=$((RETRIES + 1))
+                    if [ "$RETRIES" -ge 30 ]; then
+                      echo "ERROR: mcp_postgres role / core+mart schemas not ready after 150s (as $PGUSER on $PGDATABASE)" >&2
+                      exit 1
+                    fi
+                    echo "waiting for mcp_postgres role and core/mart schemas... (attempt $RETRIES/30)"
+                    sleep 5
+                  done
+
+                  psql --set ON_ERROR_STOP=1 --single-transaction --file /grants/grants.sql
+                  echo "grants applied"
+              env:
+                - name: PGHOST
+                  value: postgres-rw.database.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: lifeos
+                - name: PGUSER
+                  value: lifeos_writer
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: lifeos-writer-credentials
+                      key: password
+                - name: PGSSLMODE
+                  value: require
+                # psql wants a writable HOME for its history file; pointing it
+                # at the emptyDir is what lets the root filesystem stay
+                # read-only.
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: grants
+                  mountPath: /grants
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+          volumes:
+            - name: grants
+              configMap:
+                name: mcp-postgres-grants
+            - name: tmp
+              emptyDir: {}

@@ -12,3 +12,10 @@ resources:
   # consumer, in kubernetes/apps/lifeos/warehouse.
   - ./database-lifeos.yaml
   - ./lifeos-role-credentials.sops.yaml
+  # mcp-postgres MCP server's login role (kubernetes/apps/mcp/mcp-postgres) —
+  # not a LifeOS role, kept in its own file for that reason. Its access grant
+  # on core/mart is also its own CronJob here, independent of
+  # lifeos/warehouse's — see mcp-postgres-grants.yaml.
+  - ./mcp-postgres-credentials.sops.yaml
+  - ./mcp-postgres-grants.yaml
+  - ./cronjob-mcp-postgres-grants.yaml

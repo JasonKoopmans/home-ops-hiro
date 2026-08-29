@@ -3,6 +3,10 @@
     "kubernetes": {
       "type": "http",
       "url": "https://mcp-kubernetes.koopmans.co/mcp"
+    },
+    "postgres": {
+      "type": "sse",
+      "url": "https://mcp-postgres.koopmans.co/sse"
     }
   }
 }
