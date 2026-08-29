@@ -632,9 +632,17 @@ data:
     -- base_metric and source_metric are plain text, not foreign keys (see the
     -- comment on core.goals), so a typo in goals.csv doesn't error — it just
     -- makes a gauge silently empty. This surfaces those typos as rows instead
-    -- of "why is this panel blank." Lives in mart rather than core because it
-    -- needs mart.daily_metric_values to know the valid source_metric
-    -- vocabulary, and core does not depend on mart.
+    -- of "why is this panel blank." Lives in mart because the source_metric
+    -- vocabulary below is mart's (it names mart.daily_metric_values columns),
+    -- and core does not depend on mart.
+    --
+    -- The vocabulary is a literal list, NOT "does a row for this
+    -- source_metric currently exist in mart.daily_metric_values" — checking
+    -- data presence instead of the schema means an empty daily_overview
+    -- (fresh deploy, an ingest outage, a quiet day before any rows land)
+    -- would flag every threshold goal as drift even though the names are
+    -- fine. Keep this list in sync with the source_metric values
+    -- mart.daily_metric_values UNIONs above when a metric is added.
     CREATE OR REPLACE VIEW mart.goal_drift AS
     SELECT 'unknown_base_metric'::text AS issue,
            g.metric                    AS "Goal",
@@ -648,9 +656,7 @@ data:
            g.source_metric
     FROM core.goals g
     WHERE g.goal_type = 'threshold'
-      AND NOT EXISTS (
-          SELECT 1 FROM mart.daily_metric_values mv WHERE mv.source_metric = g.source_metric
-      );
+      AND g.source_metric NOT IN ('MoveCalories', 'ExerciseMinutes', 'StandMinutes', 'TasksCompleted');
 
     -- ---------------------------------------------------------------------
     -- Grants
