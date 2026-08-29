@@ -225,16 +225,9 @@ data:
            source,
            natural_key,
            observed_on,
-           payload ->> 'metric' AS metric,
-           CASE
-               WHEN jsonb_typeof(payload -> 'value') = 'number'
-                   THEN (payload ->> 'value')::numeric
-               WHEN jsonb_typeof(payload -> 'value') = 'string'
-                    AND payload ->> 'value' ~ '[0-9]'
-                    AND length(translate(payload ->> 'value', '0123456789.-', '')) = 0
-                   THEN (payload ->> 'value')::numeric
-           END AS value,
-           payload ->> 'unit' AS unit,
+           payload ->> 'Metric' AS metric,
+           payload ->> ('Value'::text)::numeric AS value,
+           payload ->> 'Units' AS unit,
            ingested_at
     FROM raw.health_metrics
     ORDER BY source, natural_key, ingested_at DESC;
