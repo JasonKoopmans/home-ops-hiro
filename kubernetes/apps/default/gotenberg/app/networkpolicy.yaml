@@ -1,0 +1,65 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/networking.k8s.io/networkpolicy_v1.json
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gotenberg
+spec:
+  # THREAT MODEL
+  # ------------
+  # Gotenberg exists to parse documents whose provenance is "whatever was
+  # dropped in the inbox". That makes it the one workload in this cluster whose
+  # input is untrusted by design, and LibreOffice is a very large parser surface.
+  # The specific risk this policy addresses is not code execution but outbound
+  # contact: several LibreOffice document constructs (embedded/OLE objects,
+  # linked images, floating frames — the CVE-2023-2255 family) cause the
+  # renderer to FETCH REMOTE CONTENT while converting. A hostile document can
+  # therefore turn a conversion into an outbound request that:
+  #   * phones home, confirming the document was opened and by whom, or
+  #   * reaches sideways at in-cluster services — the Kubernetes API, MinIO,
+  #     Longhorn, the OPNsense box — from a pod already inside the network.
+  #
+  # WHY DENY-ALL EGRESS IS FREE HERE
+  # --------------------------------
+  # Gotenberg has no legitimate outbound traffic whatsoever. Documents arrive as
+  # multipart uploads; the URL-fetching "downloadFrom" feature is disabled at the
+  # binary level (--api-disable-download-from in the HelmRelease). It does not
+  # need DNS: it resolves nothing. So an empty egress rule costs zero function
+  # and removes the entire class of outbound abuse.
+  #
+  # This is the ONLY thing in the cluster with an egress policy — everything else
+  # is flat and unrestricted. That is a broader gap, tracked separately; this
+  # policy is not a claim that the rest of the cluster is contained.
+  #
+  # WHAT WOULD BREAK THIS
+  # ---------------------
+  # Enabling Gotenberg's async webhook feature (it POSTs results to a callback
+  # URL) requires egress and would fail silently-ish here — the conversion
+  # succeeds, the callback is dropped, the caller waits forever. If you ever
+  # enable webhooks, add a narrow egress rule to that specific destination
+  # rather than removing this policy.
+  #
+  # NOTE ON SEMANTICS: dropped traffic is DROPPED, not refused. Callers see a
+  # hang-then-timeout, never a fast connection-refused. Budget for that when
+  # debugging — the same trap that made Longhorn metrics look "down" rather than
+  # blocked (see storage/longhorn-system/app/networkpolicy.yaml).
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gotenberg
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only n8n drives conversions. Scoped to the pod, not the namespace: this is
+    # an unauthenticated API that will parse anything it is handed, so "any pod
+    # in default" would be a meaningful widening.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: n8n
+      ports:
+        - protocol: TCP
+          port: 3000
+  # Empty egress = deny all outbound. Intentionally not "egress: []" omitted —
+  # listing Egress in policyTypes with no rules is what makes the denial active.
+  egress: []

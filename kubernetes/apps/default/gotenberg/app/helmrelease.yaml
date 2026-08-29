@@ -1,0 +1,126 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app gotenberg
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: gotenberg
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      main:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        pod:
+          securityContext:
+            # runAsUser/runAsGroup are LOAD-BEARING, not boilerplate. The image
+            # declares `User: gotenberg` as a *name*, and the kubelet cannot
+            # verify a non-numeric user against runAsNonRoot — dropping these
+            # lines yields CreateContainerConfigError, not a silent fallback.
+            # Verified against the image: uid=1001(gotenberg) gid=1001(gotenberg),
+            # HOME=/home/gotenberg (owned 1001:0, group-writable).
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+        containers:
+          app:
+            image:
+              # LibreOffice-only variant: this deployment converts Office documents
+              # to PDF and never renders HTML, so the Chromium layer is dead weight
+              # (smaller image, smaller CVE surface).
+              repository: docker.io/gotenberg/gotenberg
+              tag: 8.36.0-libreoffice
+            args:
+              - gotenberg
+              - --api-port=3000
+              # Default is 30s; large pptx/xlsx conversions routinely exceed it.
+              # Any client (n8n) MUST use an HTTP timeout longer than this, or it
+              # will abandon requests Gotenberg is still working on.
+              - --api-timeout=120s
+              # Hard cap on multipart upload size. Memory use during conversion
+              # scales with document size, so this is the primary DoS bound.
+              - --api-body-limit=50MB
+              # Kill the "downloadFrom" feature outright: it makes Gotenberg fetch
+              # a user-supplied URL, i.e. a built-in SSRF primitive. Nothing here
+              # uses it — files arrive as multipart uploads. Defense in depth
+              # alongside the deny-all egress NetworkPolicy.
+              - --api-disable-download-from
+              # Bound the queue so a burst fails fast with a clear error instead
+              # of accumulating in memory until the pod is OOM-killed.
+              - --libreoffice-max-queue-size=10
+              # Release LibreOffice's ~200Mi RSS between batches. This is a
+              # bursty, idle-most-of-the-day workload.
+              - --libreoffice-idle-shutdown-timeout=30m
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: 3000
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+              # NOT readOnlyRootFilesystem: LibreOffice writes its profile and
+              # scratch files under the container filesystem during conversion.
+            resources:
+              requests:
+                cpu: 50m
+                # Measured: ~215Mi idle (LibreOffice resident), effectively flat
+                # across 4 concurrent trivial conversions since LibreOffice
+                # serializes. 512Mi leaves room for real documents.
+                memory: 512Mi
+              limits:
+                # DELIBERATE EXCEPTION to the repo's "no CPU limits" convention.
+                # That convention exists because CFS throttling hurts latency-
+                # sensitive workloads holding locks (databases, upload sidecars).
+                # Gotenberg is a batch converter with no latency SLO and no locks,
+                # and its input is untrusted documents — a malformed file that
+                # sends LibreOffice into a spin loop would otherwise have no
+                # ceiling on a 2-core node. Throttling is the correct failure mode
+                # here; starving hiro-cmp-03/04 is not.
+                cpu: 1500m
+                # INFORMED GUESS for the ceiling. Idle is measured (~215Mi) but
+                # peak depends on document complexity, for which there is no
+                # history yet. Revisit against
+                #   max_over_time(container_memory_working_set_bytes{pod=~"gotenberg-.*"}[14d])
+                # once ~2 weeks of real conversions have run.
+                memory: 2Gi
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: 3000
+
+    # NO route block, deliberately. Gotenberg's whole job is to parse untrusted
+    # documents with LibreOffice — one of the densest parser attack surfaces in
+    # open source — so it is not published on the internal gateway. The only
+    # caller (n8n) is in-cluster and reaches it at
+    #   http://gotenberg.default.svc.cluster.local:3000
+    # For ad-hoc testing from a workstation:
+    #   kubectl -n default port-forward svc/gotenberg 3000:3000
+    # If it is ever exposed, Gotenberg does support auth natively
+    # (--api-enable-basic-auth / --api-enable-oidc-auth) — use it, and note that
+    # basic auth alone would not stop a cross-site form POST from a browser on
+    # the LAN.
