@@ -344,6 +344,29 @@ real: a rebinding attack arrives with `Host: attacker.com`, matches no HTTPRoute
 and Envoy 404s it before the server sees it. Check for an equivalent setting on
 every new image.
 
+**An `httpGet` probe can 403 itself against a host allow-list.** If an image
+validates the `Host` header (`mcp-grafana`'s `--allowed-hosts`, and it
+explicitly covers `/healthz` too — "enforced on every route on the listener"),
+a plain `httpGet` liveness/readiness probe will likely fail against it:
+kubelet defaults the `Host` header to **the pod IP** when the probe doesn't
+override it, and a dynamic pod IP is never on the allow-list. Both probes
+share the same failure, so the pod never goes Ready. Fix is one line, not a
+reason to fall back to `tcpSocket`:
+
+```yaml
+httpGet:
+  path: /healthz
+  port: 3000
+  httpHeaders:
+    - name: Host
+      value: mcp-<name>.mcp.svc.cluster.local
+```
+
+Caught before deploy this time by reading the Kubernetes API reference for
+`HTTPGetAction` rather than by watching a rollout hang — check for this
+whenever a new server's healthz-equivalent shares a listener with a Host
+allow-list.
+
 **Don't guess the container UID.** A wrong `runAsUser` yields a pod that never
 starts. Deploy without it, then read it off the running pod and pin it:
 
@@ -423,4 +446,6 @@ kubectl auth can-i --list --as=system:serviceaccount:mcp:mcp-kubernetes | grep l
 |---|---|---|---|
 | `mcp/mcp-kubernetes` | native-http | none (phase 1) | Read-only cluster access |
 | `mcp/mcp-prometheus` | native-http | none (phase 1) | Queries **Thanos Query**, not Prometheus, so history reaches past local TSDB retention. `get_metric_metadata` returns empty even against a healthy Prometheus — 5 of its 6 tools are useful |
+| `mcp/mcp-grafana-lifeos` | native-http | **step 2** (`MCP_GRAFANA_SERVER_TOKEN` bearer) | `grafana/mcp-grafana` against the LifeOS Grafana. `--disable-write`, Viewer-role service account token. Jumped straight to step 2 — its "LifeOS Warehouse" datasource is `access: proxy` Postgres, so a query tool reads that DB with Grafana's own stored credentials; that's a materially bigger exposure than "read some dashboards" |
+| `mcp/mcp-grafana-monitoring` | native-http | none (phase 1) | Same image against the kube-prometheus-stack Grafana. Upstream connects to one Grafana per process — two deployments, not one with two URLs |
 | `default/obsidian` | — | none | Existing app exposing `/mcp` at `obsidian-mcp.${SECRET_DOMAIN}` |
