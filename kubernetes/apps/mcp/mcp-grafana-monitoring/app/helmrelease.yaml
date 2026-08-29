@@ -102,6 +102,12 @@ spec:
               # --allowed-hosts below enforces an exact-match allow-list on
               # every route including /healthz. Without this override the pod
               # 403s its own liveness/readiness check and never goes Ready.
+              #
+              # The Host value must match an --allowed-hosts entry EXACTLY,
+              # port included: mcp-grafana's check is `slices.Contains(hosts,
+              # strings.ToLower(r.Host))` (http_security.go) — no host/port
+              # splitting, no normalisation. Omitting `:3000` here still 403s,
+              # just against a different string than the pod-IP default.
               liveness: &probes
                 enabled: true
                 custom: true
@@ -111,7 +117,7 @@ spec:
                     port: 3000
                     httpHeaders:
                       - name: Host
-                        value: mcp-grafana-monitoring.mcp.svc.cluster.local
+                        value: mcp-grafana-monitoring.mcp.svc.cluster.local:3000
                   initialDelaySeconds: 10
                   periodSeconds: 10
                   timeoutSeconds: 3

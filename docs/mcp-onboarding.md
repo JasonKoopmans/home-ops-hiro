@@ -351,7 +351,7 @@ a plain `httpGet` liveness/readiness probe will likely fail against it:
 kubelet defaults the `Host` header to **the pod IP** when the probe doesn't
 override it, and a dynamic pod IP is never on the allow-list. Both probes
 share the same failure, so the pod never goes Ready. Fix is one line, not a
-reason to fall back to `tcpSocket`:
+reason to fall back to `tcpSocket` — but get the value exact, port included:
 
 ```yaml
 httpGet:
@@ -359,13 +359,20 @@ httpGet:
   port: 3000
   httpHeaders:
     - name: Host
-      value: mcp-<name>.mcp.svc.cluster.local
+      value: mcp-<name>.mcp.svc.cluster.local:3000
 ```
 
 Caught before deploy this time by reading the Kubernetes API reference for
 `HTTPGetAction` rather than by watching a rollout hang — check for this
 whenever a new server's healthz-equivalent shares a listener with a Host
-allow-list.
+allow-list. **The first pass at this fix on `mcp-grafana-lifeos`/`-monitoring`
+still shipped broken**: the `httpHeaders` value omitted `:3000` while the
+matching `--allowed-hosts` entry had it, and `mcp-grafana`'s check
+(`slices.Contains(hosts, strings.ToLower(r.Host))`, no host/port splitting)
+treats those as different strings — caught by Copilot's PR review, not by the
+build. Whatever you put in `httpHeaders.Host` has to be byte-for-byte one of
+the `--allowed-hosts` entries; a hostname that's merely *reasonable* isn't
+enough.
 
 **Don't guess the container UID.** A wrong `runAsUser` yields a pod that never
 starts. Deploy without it, then read it off the running pod and pin it:
