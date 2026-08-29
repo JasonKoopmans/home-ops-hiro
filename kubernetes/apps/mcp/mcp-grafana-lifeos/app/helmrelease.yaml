@@ -102,6 +102,14 @@ spec:
                 secretKeyRef:
                   name: mcp-grafana-lifeos-auth-token
                   key: MCP_GRAFANA_SERVER_TOKEN
+            # KubeLinter (liveness-port/readiness-port) flagged the probes
+            # below as referencing a port the container never declares —
+            # cosmetic (Service routing works on Pod IP regardless), but
+            # cheap to make accurate.
+            ports:
+              - name: http
+                containerPort: 3000
+                protocol: TCP
             probes:
               # httpGet, not TCP: unlike the other native-http servers in this
               # namespace, upstream documents a real health path on both sse
