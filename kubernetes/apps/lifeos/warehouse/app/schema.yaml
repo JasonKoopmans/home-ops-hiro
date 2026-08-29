@@ -225,44 +225,88 @@ data:
            source,
            natural_key,
            observed_on,
-           payload ->> 'Metric' AS metric,
-           payload ->> ('Value'::text)::numeric AS value,
-           payload ->> 'Units' AS unit,
+           -- PascalCase keys, not a typo: they're the sheet's own column
+           -- headers, passed through by n8n verbatim. Every other payload
+           -- in this file is lowercase because it comes from an API with
+           -- its own naming, not a spreadsheet.
+           payload ->> 'metric' AS metric,
+           CASE
+               WHEN jsonb_typeof(payload -> 'value') = 'number'
+                   THEN (payload ->> 'value')::numeric
+               WHEN jsonb_typeof(payload -> 'value') = 'string'
+                    AND payload ->> 'value' ~ '[0-9]'
+                    AND length(translate(payload ->> 'value', '0123456789.-', '')) = 0
+                   THEN (payload ->> 'value')::numeric
+           END AS value,
+           payload ->> 'unit' AS unit,
            ingested_at
     FROM raw.health_metrics
     ORDER BY source, natural_key, ingested_at DESC;
 
+    DROP VIEW IF EXISTS core.todoist_completed_tasks;
     CREATE OR REPLACE VIEW core.todoist_completed_tasks AS
-    SELECT DISTINCT ON (source, natural_key)
-           source,
-           natural_key                                          AS task_key,
-           completed_at,
-           -- The local day, which is the one a human means by "what did I get
-           -- done Tuesday". Todoist returns UTC; without this conversion a task
-           -- finished at 7pm Central lands on the following day.
-           (completed_at AT TIME ZONE '${TIMEZONE}')::date       AS completed_on,
-           payload ->> 'content'                                AS content,
-           payload ->> 'project_id'                             AS project_id,
-           payload ->> 'section_id'                             AS section_id,
-           -- Present only when the ingest includes it; Todoist's completed-task
-           -- payloads do not always carry labels. NULL rather than missing, so
-           -- a join degrades to "unlabelled" instead of dropping the row.
-           payload -> 'labels'                                  AS labels,
-           ingested_at
-    FROM raw.todoist_completed_tasks
+    WITH src AS (
+    SELECT
+        t.*,
+        ARRAY(
+        SELECT jsonb_array_elements_text(t.payload->'labels')
+        WHERE jsonb_typeof(t.payload->'labels') = 'array'
+        ) AS label_arr
+    FROM raw.todoist_completed_tasks t
+    )
+    SELECT DISTINCT ON (source, natural_key) source,
+        natural_key AS task_key,
+        completed_at,
+        ingested_at,
+        (completed_at AT TIME ZONE '${TIMEZONE}'::text)::date AS completed_on,
+        payload ->> 'parent_project_id'::text AS project_id,
+        (payload ->> 'parent_item_id')::text as parent_item_id,
+        payload ->> NULL AS section_id,
+        payload ->> 'object_id'::text as id,
+        (payload->>'priority')::int as priority,
+        payload ->> 'content'::text AS content,
+        payload ->> 'description'::text as description,
+        (payload ->> 'due_date')::timestamptz as due_date,
+        (payload ->> 'event_date')::timestamptz as event_date,
+        (payload ->> 'was_overdue')::boolean as was_overdue,
+        payload -> 'labels'::text AS labels,
+    (
+    SELECT split_part(l, '.', 2)
+    FROM unnest(label_arr) AS l
+    WHERE l LIKE 'Energy.%'
+    LIMIT 1
+    ) AS energy,
+    (
+    SELECT CASE l
+        WHEN 'Time.Minimal'     THEN 2
+        WHEN 'Time.2Hour'     THEN 120
+        WHEN 'Time.4Hour' THEN 240
+        ELSE NULLIF(regexp_replace(l, '^Time\.(\d+)Min$', '\1'), l)::int
+    END
+    FROM unnest(label_arr) AS l
+    WHERE l LIKE 'Time.%'
+    LIMIT 1
+    ) AS time_minutes,
+    ('~Personal' = ANY(label_arr)) AS is_personal,
+    ('~Work'     = ANY(label_arr)) AS is_Work,
+    ('next'     = ANY(label_arr)) AS indicator_next,
+    ('ondeck'     = ANY(label_arr)) AS indicator_ondeck,
+    ('Someday.Soon'     = ANY(label_arr)) AS indicator_soon,
+    ('Someday.Later'     = ANY(label_arr)) AS indicator_later
+    FROM src
     ORDER BY source, natural_key, ingested_at DESC;
 
-    CREATE OR REPLACE VIEW core.todoist_lookups AS
-    SELECT DISTINCT ON (source, kind, natural_key)
-           source,
-           kind,
-           natural_key            AS lookup_id,
-           payload ->> 'name'     AS name,
-           payload,
-           observed_on,
-           ingested_at
-    FROM raw.todoist_lookups
-    ORDER BY source, kind, natural_key, ingested_at DESC;
+        CREATE OR REPLACE VIEW core.todoist_lookups AS
+        SELECT DISTINCT ON (source, kind, natural_key)
+            source,
+            kind,
+            natural_key            AS lookup_id,
+            payload ->> 'name'     AS name,
+            payload,
+            observed_on,
+            ingested_at
+        FROM raw.todoist_lookups
+        ORDER BY source, kind, natural_key, ingested_at DESC;
 
     -- Thin conveniences over the discriminator, so joins read as what they are.
     -- Adding the next lookup kind is a copy of one of these.
