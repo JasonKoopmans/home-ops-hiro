@@ -215,7 +215,7 @@ spec:
               # before the script runs at all. Verified the hard way; it is invisible to kustomize build,
               # kubeconform and server-side dry-run, all of which validate the manifest happily.
               # Pinned to the cluster's server minor version to stay inside kubectl's ±1 skew policy.
-              image: docker.io/alpine/kubectl:1.36.2
+              image: docker.io/alpine/kubectl:1.37.0
               env:
                 - name: HOME
                   value: /tmp
