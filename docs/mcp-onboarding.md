@@ -152,6 +152,17 @@ Checked in at the repo root, so a fresh clone gets it:
     "kubernetes": {
       "type": "http",
       "url": "https://mcp-kubernetes.koopmans.co/mcp"
+    },
+    "grafana-monitoring": {
+      "type": "http",
+      "url": "https://mcp-grafana-monitoring.koopmans.co/mcp"
+    },
+    "grafana-lifeos": {
+      "type": "http",
+      "url": "https://mcp-grafana-lifeos.koopmans.co/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_GRAFANA_LIFEOS_TOKEN}"
+      }
     }
   }
 }
@@ -161,11 +172,28 @@ The literal domain is fine here — this file is read by Claude Code, not by Flu
 so `${SECRET_DOMAIN}` would not be substituted. `Taskfile.yaml` hardcodes it for
 the same reason.
 
-`.claude/settings.json` carries `enabledMcpjsonServers: ["kubernetes"]`, which
-pre-approves it. Without that, every session prompts on first use — fine
+`.claude/settings.json` carries `enabledMcpjsonServers`, which pre-approves the
+listed servers. Without that, every session prompts on first use — fine
 interactively, a hang anywhere non-interactive. Adding a server to `.mcp.json`
 therefore means adding its name there too; that second step is deliberate, so a
 new endpoint is an explicit decision rather than an inherited one.
+
+**`grafana-lifeos` is the first entry here needing auth-ladder step 2.**
+Claude Code expands `${VAR}` in `.mcp.json` string values (including
+`headers`) from the process environment at session start — the file commits
+the *reference*, never the token. Export the real value before launching
+`claude`, e.g. in `~/.zshrc`:
+
+```sh
+export MCP_GRAFANA_LIFEOS_TOKEN="<value from
+  kubernetes/apps/mcp/mcp-grafana-lifeos/app/secret-auth-token.sops.yaml>"
+```
+
+Claude Code does not read repo `.env` files for this — it has to be a real
+exported variable in the shell that starts `claude`. No such step exists yet
+for n8n/Hermes wiring to this same server; each carries the header its own
+way when that's set up (n8n: a credential object on the MCP node; Hermes:
+`hermes mcp add ... --header`), not via this env var.
 
 This is redundant with the `Bash(kubectl get:*)` allow-list **only when the local
 kubeconfig exists**. It does not in a fresh clone or a git worktree — the paths

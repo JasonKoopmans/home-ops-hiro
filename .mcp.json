@@ -8,6 +8,16 @@
       "type": "sse",
       "url": "https://mcp-postgres.koopmans.co/sse"
     },
+    "grafana-monitoring": {
+      "type": "http",
+      "url": "https://mcp-grafana-monitoring.koopmans.co/mcp"
+    },
+    "grafana-lifeos": {
+      "type": "http",
+      "url": "https://mcp-grafana-lifeos.koopmans.co/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_GRAFANA_LIFEOS_TOKEN}"
+      }
     "playwright": {
       "type": "http",
       "url": "https://mcp-playwright.koopmans.co/mcp"
