@@ -144,18 +144,22 @@ spec:
       # Never calls the Kubernetes API — no ServiceAccount token needed.
       automountServiceAccountToken: false
       securityContext:
-        # Base image is node:22-bookworm-slim with USER node, so the image
-        # already refuses to run as root — runAsNonRoot enforces that without
-        # needing the exact number. Deliberately NOT pinning runAsUser/
-        # runAsGroup/fsGroup: this repo's own convention (see mcp-kubernetes)
-        # is never to guess a container's UID, and this session has no
-        # cluster or docker-daemon access to read it off a running pod.
-        # TODO: after first deploy, pin it:
-        #   kubectl -n mcp exec deploy/mcp-playwright -- id
-        # then add runAsUser/runAsGroup/fsGroup here (expect 1000/1000 per
-        # the official Node image's own convention, but confirm — don't copy
-        # this number in without checking).
+        # Base image is node:22-bookworm-slim with USER node — a *named*
+        # user, not numeric. That's exactly why runAsNonRoot: true alone
+        # doesn't work: kubelet cannot resolve "node" to a UID from image
+        # metadata to verify it's non-root, and refuses to start the
+        # container rather than guess — confirmed against the real pod:
+        #   Error: container has runAsNonRoot and image has non-numeric
+        #   user (node), cannot verify user is non-root
+        # (CreateContainerConfigError, not a transient failure). Pinned
+        # below after reading it off a disposable pod running this exact
+        # image/tag (`kubectl run ... --image=mcr.microsoft.com/playwright/mcp:v0.0.79
+        # --command -- id` → uid=1000(node) gid=1000(node)), not guessed.
         runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
 
     persistence:
       # $HOME (the image's own WORKDIR) and the --output-dir above both need
