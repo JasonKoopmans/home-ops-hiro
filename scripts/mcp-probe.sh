@@ -41,13 +41,20 @@ probe_script="sleep 2; out=''; "
 while IFS=: read -r name port; do
   [[ -n "${name}" ]] || continue
   url="http://${name}.${NAMESPACE}.svc.cluster.local:${port}/mcp"
-  probe_script+="init=\$(curl -sS -D - -o /dev/null --max-time 15 "
+  # Headers go to a file, not stdout, so -w's status code (also captured) has
+  # stdout to itself instead of getting mixed into the header dump.
+  probe_script+="init_code=\$(curl -sS -D /tmp/h -o /dev/null -w '%{http_code}' --max-time 15 "
   probe_script+="-X POST '${url}' "
   probe_script+="-H 'Content-Type: application/json' "
   probe_script+="-H 'Accept: application/json, text/event-stream' "
   probe_script+="-d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"mcp-probe\",\"version\":\"0\"}}}' "
   probe_script+="2>/dev/null); "
-  probe_script+="session=\$(printf '%s' \"\${init}\" | grep -i '^mcp-session-id:' | tr -d '\\r' | awk '{print \$2}'); "
+  # Short-circuit on a dead endpoint rather than also paying tools/list's
+  # own --max-time 15 for a connection that's already proven unreachable —
+  # an outage would otherwise make every check here twice as slow as it
+  # needs to be.
+  probe_script+="if [ \"\${init_code}\" = 000 ]; then code=000; else "
+  probe_script+="session=\$(grep -i '^mcp-session-id:' /tmp/h | tr -d '\\r' | awk '{print \$2}'); "
   # $() strips trailing newlines but not a body-less "000" from a connection
   # that never completed — curl's -w always prints *something*, so unlike the
   # old `|| echo unreachable` fallback (which appended to, rather than
@@ -58,7 +65,7 @@ while IFS=: read -r name port; do
   probe_script+="-H 'Accept: application/json, text/event-stream' "
   probe_script+="\${session:+-H \"Mcp-Session-Id: \${session}\"} "
   probe_script+="-d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' "
-  probe_script+="2>/dev/null); "
+  probe_script+="2>/dev/null); fi; "
   probe_script+="out=\"\${out}\$(printf '%-32s %s' '${name}' \"\${code}\")\n\"; "
 done <<< "${services}"
 probe_script+="printf '%b' \"\${out}\""
