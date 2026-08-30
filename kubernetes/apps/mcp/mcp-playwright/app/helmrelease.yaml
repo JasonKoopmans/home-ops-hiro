@@ -27,6 +27,13 @@
 # docs/mcp-onboarding.md already documents for this namespace; revisit via
 # the SecurityPolicy seam above before anything less trusted gets access to
 # this endpoint.
+#
+# That "navigate anywhere the pod's network reaches" half is addressed
+# separately in networkpolicy.yaml: egress is blocked to the LAN and to the
+# cluster's own pod/service CIDRs, so the SSRF/internal-recon path a security
+# review flagged is closed even though the auth question above is still
+# deliberately open. Two different axes — who can call this server (open) vs
+# what it can reach once called (now restricted) — see that file for detail.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
