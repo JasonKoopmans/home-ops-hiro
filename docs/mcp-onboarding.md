@@ -297,6 +297,29 @@ so "internal-only" means the whole LAN plus every pod. That is an acceptable
 trade for a read-only Kubernetes view. It is **not** acceptable for Proxmox or
 Gmail — those should ship at step 2 or later of the ladder below.
 
+### Egress restriction — a second axis, orthogonal to the ladder
+
+The ladder above answers "who can call this server." A server that can act on
+attacker-chosen *targets* — a browser, a shell, anything that takes a
+host/URL as input rather than talking to one fixed backend — needs a second
+question answered: "what can it reach once called." `mcp-kubernetes` and
+`mcp-prometheus` don't need this; their target is fixed by the deployment
+(the K8s API, one `PROMETHEUS_URL`). `mcp-playwright` does: unrestricted, its
+Chromium instance can navigate to any host/port the pod's network reaches,
+turning an unauthenticated phase-1 server into an open internal SSRF/recon
+tool against the LAN and every other in-cluster Service.
+
+Fix with a pod-scoped egress `NetworkPolicy` (see
+`kubernetes/apps/mcp/mcp-playwright/app/networkpolicy.yaml` for the reference
+implementation) rather than by moving up the auth ladder — the two are
+independent and both may be needed. Shape: allow `0.0.0.0/0` except the LAN
+and the cluster's own pod/service CIDRs (see the cluster reference table in
+`.github/copilot-instructions.md` for current values), plus an explicit
+carve-out to CoreDNS since its ClusterIP sits inside the excluded service
+CIDR. IP-based, so it isn't defeated by DNS-rebinding tricks the way a
+hostname-matching check would be. Confirm the CIDRs against the live cluster
+before writing one — this cluster does not use Talos/Kubernetes defaults.
+
 ### Auth ladder
 
 Each step is an added file, not a redesign. Nothing about phase 1 forecloses them.
@@ -306,7 +329,11 @@ Each step is an added file, not a redesign. Nothing about phase 1 forecloses the
    `X-MCP-AUTH` in `mcp-server-kubernetes`), read from a SOPS secret.
    Claude Desktop already runs through an `mcp-remote` bridge for reachability
    reasons (see above), so it carries the header via `--header` and costs
-   nothing extra at this step.
+   nothing extra at this step. **"Most" is doing real work in that sentence —
+   verify against the image's own source/README before assuming this step
+   exists.** `playwright-mcp` has zero built-in auth of any kind (checked
+   against upstream directly, not inferred), so for it this step doesn't
+   exist at all; the real next rung for a server like that is step 3.
 3. **Envoy `SecurityPolicy`** targeting the HTTPRoute (apiKeyAuth / JWT / OIDC /
    extAuth). Moves auth off the app and in front of it.
 4. **`envoy-external` + Cloudflare Access.** See
@@ -386,6 +413,15 @@ real: a rebinding attack arrives with `Host: attacker.com`, matches no HTTPRoute
 and Envoy 404s it before the server sees it. Check for an equivalent setting on
 every new image.
 
+This is a category, not a one-off: `playwright-mcp`'s `--allowed-hosts` genuinely
+takes a comma-separated list (no single-value bug), and it *still* defaulted to
+rejecting Service DNS with a live `403` — confirmed via `task mcp:probe`, not
+assumed. Binding `--host 0.0.0.0` widens what interface the server listens on;
+it does not widen who it accepts requests *from*. Assume a restrictive default
+until `task mcp:probe` proves otherwise, and when the flag does support a list,
+name both callers explicitly (Service DNS with port, gateway hostname without)
+rather than disabling the check.
+
 **An `httpGet` probe can 403 itself against a host allow-list.** If an image
 validates the `Host` header (`mcp-grafana`'s `--allowed-hosts`, and it
 explicitly covers `/healthz` too — "enforced on every route on the listener"),
@@ -417,11 +453,25 @@ the `--allowed-hosts` entries; a hostname that's merely *reasonable* isn't
 enough.
 
 **Don't guess the container UID.** A wrong `runAsUser` yields a pod that never
-starts. Deploy without it, then read it off the running pod and pin it:
+starts. "Deploy without it, then exec in and read it" only works if the pod
+*can* start without it — it can't when `runAsNonRoot: true` is set (the
+scaffold does this by default) and the image's `USER` is a **name**, not a
+number: kubelet can't resolve "node" to a UID from image metadata, so it
+refuses to start the container at all (`CreateContainerConfigError`, event
+text `container has runAsNonRoot and image has non-numeric user (<name>),
+cannot verify user is non-root`). Hit for real on `mcp-playwright`
+(`node:22-bookworm-slim`, `USER node`). There is nothing running to `exec`
+into in that state, so read the UID off a disposable pod instead — this
+works whether or not the real Deployment ever came up, and needs no local
+Docker:
 
 ```sh
-kubectl -n mcp exec deploy/mcp-<name> -- id
+kubectl run mcp-uid-check --rm -it --restart=Never --image=<repo>:<tag> --command -- id
 ```
+
+Once confirmed, pin `runAsUser`/`runAsGroup`/`fsGroup` explicitly; don't leave
+`runAsNonRoot: true` unpaired with a UID as a "safe default" — for a
+named-`USER` image it isn't a no-op, it's a guaranteed `CreateContainerConfigError`.
 
 **Don't disable `readOnlyRootFilesystem`.** If the server needs scratch, find the
 path it wanted and mount it. `mcp-kubernetes` shells out to kubectl, which writes
