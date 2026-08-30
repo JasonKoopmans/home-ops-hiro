@@ -347,6 +347,20 @@ single named vendor group is fine — `view` itself does this.
 
 All of these were hit for real on the first server.
 
+**Two PRs editing `.mcp.json`/`settings.json` can merge "cleanly" into invalid
+JSON.** Unlike `kubernetes/apps/mcp/kustomization.yaml` (append-only, so
+parallel branches always show a visible conflict marker — trivial, both lines
+wanted), these two files have entries that end in a closing brace. Two PRs
+each inserting a new entry right before that brace, branched before either
+merged, can have line-level diffs that don't textually overlap — so GitHub
+merges both with **no conflict shown**, but the combined file is syntactically
+broken (a missing `}`/comma). This happened for real merging the grafana and
+playwright servers' client wiring back to back. `.mcp.json` failing to parse
+means **no** MCP server loads, not just the newest one. Run
+`python3 -m json.tool .mcp.json .claude/settings.json` after any merge that
+touches either file alongside another recently-merged MCP PR — don't trust
+"GitHub merged without a conflict" as proof the result is valid.
+
 **Hostnames must be single-label.** The wildcard cert is
 `["${SECRET_DOMAIN}", "*.${SECRET_DOMAIN}"]`, which does not cover a second
 label. `anything.mcp.${SECRET_DOMAIN}` fails TLS in every client. Applies
