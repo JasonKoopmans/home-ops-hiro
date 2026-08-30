@@ -28,11 +28,47 @@ should not duplicate managed keys once migration is verified (see "Post-merge").
 
 ## Provider routing
 
-- **Primary / default: Gemini** — `model.provider=gemini`, `model.default=gemini-flash-latest`
-  (alias, not a pinned version — see below). Uses `GOOGLE_API_KEY` (Google AI Pro / AI
-  Studio). This is what unattended cron uses.
+- **Primary / default: OpenRouter free tier** — `model.provider=openrouter`,
+  `model.default=minimax/minimax-m3:free`. Uses `OPENROUTER_API_KEY`. This is what
+  unattended cron uses. Verified 2026-08-29 end-to-end through Hermes including a real
+  tool call.
+- **Fallback: Gemini** — `gemini-flash-lite-latest`, no daily request cap. Fires on
+  OpenRouter rate-limit/overload/connection errors, **not** on task difficulty.
+- **Anthropic is deliberately NOT in the chain** — it cannot succeed for Hermes-shaped
+  traffic. See "Claude subscription-OAuth" below before re-adding it.
 
-  **Why an alias, not a pinned model:** on 2026-07-31, `gemini-2.5-flash` (the original
+### Why this chain (2026-08-29 rebuild)
+
+The previous chain (Gemini `flash-latest` primary → Claude Haiku fallback) had **no working
+link**. Measured that day:
+
+| endpoint | result |
+|---|---|
+| `gemini-flash-latest` | 503 `UNAVAILABLE` (free-tier capacity, not quota) |
+| `gemini-flash-lite-latest` | 200 OK |
+| `gemini-2.5-flash` | 404 — retired, again |
+| Claude, any model, Hermes-shaped payload | 400, demoted (see below) |
+
+**OpenRouter free-tier limits:** 20 requests/minute; **50/day at $0 lifetime credits, 1000/day
+once ≥$10 has ever been purchased**. Each agent turn spends one request per tool round-trip,
+so 50/day is roughly 4–5 real conversations before it 429s and drops to Gemini. The cap — not
+model quality — is the binding constraint.
+
+**Model choice:** of the 18 free models, 17 support tool calling, but the top-spec ones are
+unusable in practice — `thinkingmachines/inkling*` 403s ("only available on agentic
+harnesses"), `z-ai/glm-5.2:free` was 429 upstream on every attempt, and
+`nvidia/nemotron-3-ultra-550b-a55b:free` took ~42s/call and emitted no tool call.
+`minimax/minimax-m3:free` (1M context) was fast and correct. On a small smoke test it landed
+in Claude Haiku's neighborhood, which matches its paid-twin pricing ($0.30/$1.20 vs Haiku
+$1/$5); nothing free is near Sonnet ($3/$15).
+
+**Privacy caveat:** OpenRouter free variants are generally gated behind an account data-policy
+setting that permits providers to train on prompts, and this account evidently allows it since
+the calls succeed. Hermes touches the Obsidian vault, memory, and Telegram — confirm the
+setting at openrouter.ai/settings/privacy is what you want before treating this as the daily
+driver. Inverting the chain (Gemini primary, OpenRouter fallback-only) reduces the exposure.
+
+  **Gemini: why an alias, not a pinned model:** on 2026-07-31, `gemini-2.5-flash` (the original
   pin) started returning `404: This model ... is no longer available to new users` for
   this key — Google retires versioned model ids out from under existing keys with no
   warning. Fallback correctly routed to Claude when this happened (see below), but it's
@@ -43,32 +79,47 @@ should not duplicate managed keys once migration is verified (see "Post-merge").
   `curl -s -X POST -H 'Content-Type: application/json' "https://generativelanguage.googleapis.com/v1beta/models/<id>:generateContent?key=$GOOGLE_API_KEY" -d '{"contents":[{"parts":[{"text":"hi"}]}]}'`
   — check for a `candidates` response, not just a non-404 status (a bare `-w '%{http_code}'`
   check without `-H 'Content-Type: application/json'` can itself 404 and mislead).
-- **Fallback: Claude Haiku 4.5** — resilience only; `fallback_providers` fires on Gemini
-  rate-limit/overload/connection errors, **not** on task difficulty. Pinned to
-  `claude-haiku-4-5` (alias) rather than Sonnet — see the cap section below.
-- **Claude selectively for hard tasks** — manual `/model claude-sonnet-4-6` in Telegram,
-  or per-cron `-m claude-sonnet-4-6`. Not automatic by design.
+### Claude subscription-OAuth: why it can't serve Hermes
 
-### Claude subscription-OAuth: what actually limits it
+> **This section previously documented a wrong root cause** (per-model weekly caps). The
+> bisect below landed after that text was merged. Anthropic's behavior has not changed —
+> the earlier diagnosis was simply incomplete.
 
-Claude via `CLAUDE_CODE_OAUTH_TOKEN` routes through the Pro subscription instead of
-pay-per-token, and **this works** — subscription OAuth is not blocked for programmatic
-use. Verified 2026-08-09 on the live token, same headers, same second:
+`CLAUDE_CODE_OAUTH_TOKEN` works, and plan billing is real — but **which billing lane a
+request lands in is decided by the request's shape, not by the token.** Anthropic classifies
+each request; anything that looks like a third-party agent harness is demoted to the
+*extra-usage* lane. With a $0 extra-usage balance that is an immediate
+`HTTP 400 "You're out of extra usage. Add more at claude.ai/settings/usage"`.
 
-| model | result |
+Bisected 2026-08-09 by replaying Hermes' own captured request payload, and re-verified
+unchanged 2026-08-29:
+
+| variant | result |
 |---|---|
-| `claude-haiku-4-5` | 200 OK (plan-billed) |
-| `claude-sonnet-4-6` | 429 `rate_limit_error` |
-| `claude-opus-5` | 429 `rate_limit_error` |
+| Hermes' exact payload | 400 demoted |
+| same, all 33 tools removed | 400 demoted |
+| same, system prompt replaced with just the Claude Code line | **200 plan-billed** |
+| 16,844 chars of *neutral filler* as system prompt | **200 plan-billed** |
+| `block1[3000:4474]` — 1,474 real chars of Hermes' prompt, alone | 400 demoted |
 
-**What runs out is the per-model-tier weekly cap, not the plan.** Symptom when the Sonnet
-cap trips: `HTTP 400 "You're out of extra usage. Add more at claude.ai/settings/usage"`.
-That is *not* "plan quota gone" — Anthropic offers extra usage as the overflow lane once a
-tier cap is hit, and with a $0 extra-usage balance the request 400s while the plan still
-shows plenty of headroom. Don't read that 400 as a policy revocation.
+So it is **not** tool names (Hermes normalizes those to `mcp__` correctly), **not** payload
+size, **not** `max_tokens`/streaming/`tool_choice`, and **not** the product name (scrubbing
+every "Hermes"/"Nous" changed nothing). The classifier scores the *system prompt* for
+agent-harness signals — memory rules, skill management, `session_search`. Two sub-sections
+each pass alone and fail together, so there is no single string to patch. Any model is
+affected, Haiku included.
 
-Corollary: pin unattended work to the cheapest adequate tier. Haiku had full headroom at
-the moment Sonnet and Opus were both capped, which is why fallback targets Haiku.
+**Consequences:**
+- No config change makes Hermes draw on the Pro plan. Don't re-add Anthropic to the chain
+  expecting it to work.
+- Reshaping the system prompt to score below the threshold is circumventing the enforcement
+  mechanism, not a fix — and it would break on any classifier update.
+- Paths that *do* work, none free: buy extra-usage credits on claude.ai; use a metered
+  `ANTHROPIC_API_KEY` (see the pool warning below); or run real Claude Code headless
+  (`claude -p`) as a delegate behind a shim, where Claude Code is the client and carries the
+  genuine fingerprint. The last is the only plan-based route and needs a new container.
+- A short, Claude-Code-shaped request still gets plan billing, which is why one-off `curl`
+  probes mislead — they are not a valid proxy for Hermes' traffic.
 
 ### ⚠️ The credential pool rotates onto metered billing by itself
 
@@ -189,24 +240,40 @@ Run inside the pod (`kubectl -n default exec -it deploy/hermes-ai-agent -c app -
 
 ```sh
 hermes backup
-hermes config set model.provider gemini
-hermes config set model.default gemini-flash-latest   # alias, not a pin — see "Why an alias" above
+hermes config set model.provider openrouter
+hermes config set model.default minimax/minimax-m3:free
 hermes config set skills.write_approval true       # skill writes need approval
 hermes config set skills.guard_agent_created true  # guard agent-created skills
 hermes curator pause
 # Fallback must be added interactively (writes full provider metadata):
-hermes fallback add        # pick: anthropic / claude-haiku-4-5
+hermes fallback add        # pick: gemini / gemini-flash-lite-latest
 hermes fallback list       # verify
 ```
+
+Do **not** add Anthropic to the chain — it cannot succeed for Hermes-shaped traffic (see
+"Claude subscription-OAuth" above).
 
 `hermes fallback` has **no non-interactive flags** (`add`/`remove` are pickers only), so
 retargeting an existing chain from a script means editing `/opt/data/config.yaml` directly.
 Back the file up first — the shape is minimal:
 
 ```yaml
+model:
+  default: minimax/minimax-m3:free
+  provider: openrouter
+  api_mode: chat_completions
 fallback_providers:
-  - provider: anthropic
-    model: claude-haiku-4-5
+  - provider: gemini
+    model: gemini-flash-lite-latest
+```
+
+Verify a candidate free model resolves and still serves before pinning it — free endpoints
+get saturated and gated without warning:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' https://openrouter.ai/api/v1/chat/completions \
+  -H "authorization: Bearer $OPENROUTER_API_KEY" -H 'content-type: application/json' \
+  -d '{"model":"<id>:free","max_tokens":8,"messages":[{"role":"user","content":"say ok"}]}'
 ```
 
 Then restart the pod to reload (see "Restart to reload config.yaml").
