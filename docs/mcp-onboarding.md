@@ -423,11 +423,24 @@ They live in `.taskfiles/mcp/resources/` instead.
 ## Verifying
 
 ```sh
-task mcp:probe   # tools/list against every MCP Service, over in-cluster DNS
+task mcp:probe   # a real initialize -> tools/list handshake against every MCP Service
 ```
 
+Does a full `initialize` first and carries the returned `Mcp-Session-Id` into
+`tools/list`, not a bare `tools/list` — some servers (`mcp-grafana`, confirmed
+by hand) are session-stateful and 404 a session-less request even though
+they're completely healthy. `initialize` is the actual first message of the
+protocol regardless, so this is correct for every server here, not a
+workaround for one of them.
+
 Expects `200` from each. A `406` means the `Accept` header was lost; a `403`
-means a host allow-list is rejecting the Service DNS name.
+means a host allow-list is rejecting the Service DNS name; a `401` means
+caller auth is required and working as intended (auth-ladder step 2+,
+e.g. `mcp-grafana-lifeos` — this only proves the *check* is enforced, not that
+a specific token is valid; use a real client for that). `mcp-postgres` is a
+known, separate exception here: its `404` is the SSE/`/mcp`-path deviation
+documented in its own `helmrelease.yaml`, not a probe bug — it'll resolve on
+its own once that app rejoins the Streamable-HTTP contract.
 
 For a server that reaches the Kubernetes API, the end-to-end check is a real
 query — it exercises RBAC, the ServiceAccount token and the transport at once:

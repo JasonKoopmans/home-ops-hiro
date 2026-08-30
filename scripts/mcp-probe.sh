@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Probe every MCP endpoint in the cluster by calling tools/list on it.
+# Probe every MCP endpoint in the cluster with a real initialize -> tools/list
+# handshake.
 #
 # Uses in-cluster Service DNS rather than the gateway hostname on purpose:
 # pods cannot resolve internal-only hostnames. CoreDNS forwards to public
@@ -28,17 +29,36 @@ fi
 # anything the container prints before the stream is established is silently
 # lost. Results are also collected and printed in one block at the end for the
 # same reason.
+#
+# Every check is a real two-request MCP handshake, not a bare tools/list.
+# Streamable HTTP servers can be session-stateful (mcp-grafana: confirmed by
+# hand, POST tools/list with no session -> 404 "Invalid session ID") or
+# session-less (mcp-kubernetes, mcp-prometheus: a session ID is accepted if
+# offered but never required). `initialize` is the actual first message of
+# the MCP protocol regardless, so sending it first is correct for every
+# server here, not a workaround for one of them.
 probe_script="sleep 2; out=''; "
 while IFS=: read -r name port; do
   [[ -n "${name}" ]] || continue
   url="http://${name}.${NAMESPACE}.svc.cluster.local:${port}/mcp"
+  probe_script+="init=\$(curl -sS -D - -o /dev/null --max-time 15 "
+  probe_script+="-X POST '${url}' "
+  probe_script+="-H 'Content-Type: application/json' "
+  probe_script+="-H 'Accept: application/json, text/event-stream' "
+  probe_script+="-d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"mcp-probe\",\"version\":\"0\"}}}' "
+  probe_script+="2>/dev/null); "
+  probe_script+="session=\$(printf '%s' \"\${init}\" | grep -i '^mcp-session-id:' | tr -d '\\r' | awk '{print \$2}'); "
+  # $() strips trailing newlines but not a body-less "000" from a connection
+  # that never completed — curl's -w always prints *something*, so unlike the
+  # old `|| echo unreachable` fallback (which appended to, rather than
+  # replaced, that already-printed "000"), there's nothing to catch here.
   probe_script+="code=\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "
   probe_script+="-X POST '${url}' "
   probe_script+="-H 'Content-Type: application/json' "
-  # Both media types are required — a bare application/json gets a 406.
   probe_script+="-H 'Accept: application/json, text/event-stream' "
-  probe_script+="-d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}' "
-  probe_script+="2>/dev/null || echo unreachable); "
+  probe_script+="\${session:+-H \"Mcp-Session-Id: \${session}\"} "
+  probe_script+="-d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' "
+  probe_script+="2>/dev/null); "
   probe_script+="out=\"\${out}\$(printf '%-32s %s' '${name}' \"\${code}\")\n\"; "
 done <<< "${services}"
 probe_script+="printf '%b' \"\${out}\""
@@ -51,4 +71,11 @@ kubectl -n "${NAMESPACE}" run "mcp-probe-$$" \
   --image=curlimages/curl:8.11.1 -- sh -c "${probe_script}"
 
 echo
-echo "200 = healthy.  406 = Accept header lost.  403 = host allow-list rejecting Service DNS."
+echo "200 = healthy.  406 = Accept header lost.  403 = host allow-list rejecting"
+echo "Service DNS.  401 = caller auth required (expected for auth-ladder step 2+"
+echo "servers, e.g. mcp-grafana-lifeos — this only proves auth is enforced, not"
+echo "that a real token works; use a real client for that).  404 here means the"
+echo "session handshake itself failed, not a missing path.  000 = could not"
+echo "connect at all (DNS/network) — retry once before assuming an outage, a"
+echo "single throwaway pod can occasionally lose the race on its own network"
+echo "setup."
