@@ -243,7 +243,18 @@ data:
     FROM raw.health_metrics
     ORDER BY source, natural_key, ingested_at DESC;
 
-    DROP VIEW IF EXISTS core.todoist_completed_tasks;
+    -- No DROP VIEW before this CREATE OR REPLACE — there was one, and it broke
+    -- every hourly run from 2026-08-29 22:17 onward: once mart.daily_overview,
+    -- mart.daily_task_completions, and mart.task_completions exist and depend
+    -- on this view, an unconditional DROP fails with "cannot drop view ...
+    -- because other objects depend on it", ON_ERROR_STOP takes down the whole
+    -- single-transaction script (including core.goals and everything else
+    -- below it — nothing in this file applied, every run, until this line was
+    -- found and removed), and the next run hits the exact same error forever.
+    -- CREATE OR REPLACE VIEW alone is enough for any change that doesn't
+    -- reorder or remove a column; if one ever does, use the guarded
+    -- information_schema pattern above (see core.health_metrics) instead of a
+    -- bare DROP.
     CREATE OR REPLACE VIEW core.todoist_completed_tasks AS
     WITH src AS (
     SELECT
