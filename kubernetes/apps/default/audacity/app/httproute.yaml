@@ -1,0 +1,34 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/gateway.networking.k8s.io/httproute_v1.json
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: audacity
+  annotations:
+    gethomepage.dev/enabled: "true"
+    gethomepage.dev/icon: https://audacityteam.org/favicon.ico
+    gethomepage.dev/title: Audacity
+    gethomepage.dev/description: "Audio editor"
+    gethomepage.dev/group: "Media"
+spec:
+  hostnames: ["audacity.${SECRET_DOMAIN}"]
+  parentRefs:
+    - name: envoy-internal
+      namespace: network
+      sectionName: https
+  rules:
+    # backendRef is the KEDA interceptor, not audacity's own Service. The interceptor
+    # matches on the Host header (declared in ./httpscaledobject.yaml), holds the
+    # request while it scales the Deployment 0 -> 1, then proxies to audacity:3000.
+    # Cross-namespace, so it needs the ReferenceGrant in
+    # kubernetes/apps/keda/keda-http-add-on/app/referencegrant.yaml.
+    - backendRefs:
+        - name: keda-add-ons-http-interceptor-proxy
+          namespace: keda
+          port: 8080
+      # No `timeouts:` here, deliberately. Envoy Gateway already serves every route in
+      # this cluster with `timeout: 0s` / `idle_timeout: 0s` and websocket upgrade
+      # enabled (checked against the live config_dump: all 43 routes). Setting any
+      # value would *introduce* a cap where none exists — fatal for audacity, which is
+      # a Selkies GUI stream held open over a websocket for the length of a session.
+      # Cold-start hold is the interceptor's job, via spec.timeouts.conditionWait.
