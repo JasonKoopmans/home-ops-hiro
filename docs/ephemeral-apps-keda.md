@@ -163,9 +163,9 @@ if typing it gets old.
 
 Staged deliberately, each stage gated on the previous one working live.
 
-**audacity — first.** Single container, plain HTTP UI, ~40s cold start. Its
-cold-request → scale 0→1 → response → idle → back to 0 cycle is the go/no-go for the
-whole approach.
+**audacity — first, and now measured.** See "What the first pilot actually measured"
+below. The cycle works; two prerequisites came out of it that apply to every app wired
+after this one.
 
 **freecad — second, with a known risk.** It is a browser-streamed KasmVNC GUI, so an
 active session may be one long-lived connection rather than a stream of discrete
@@ -205,6 +205,78 @@ Each participating app's `ks.yaml` also needs
 `dependsOn: [{name: keda-http-add-on, namespace: keda}]`, or its `HTTPScaledObject`
 can be applied before the `http.keda.sh` CRDs exist. `task validate` will *not* catch
 this — `scripts/kubeconform.sh` runs with `-ignore-missing-schemas`.
+
+## What the first pilot actually measured
+
+Live on audacity, 2026-08-30. **The mechanism is sound.** Both problems found are in the
+app and the cluster around it, not in KEDA.
+
+| Stage | Result |
+|---|---|
+| Wake latency (request → pod scheduled) | **~6s** |
+| Warm request, Envoy → interceptor → app | **HTTP 200 in 100ms** |
+| Idle scale-down | fired at **303s** against `scaledownPeriod: 300` |
+| Longhorn RWO detach/attach across cycles | **non-issue** — `SuccessfulAttachVolume` in 12s |
+| Cross-namespace ReferenceGrant | `Accepted=True`, `ResolvedRefs=True` |
+
+That Longhorn result is worth keeping: the RWO-volume problem that disqualified Knative
+does not apply here, because KEDA only changes the replica count and never touches the
+PVC.
+
+### Prerequisite: the app must have a real readiness probe
+
+audacity shipped without one. A container with no readiness probe is Ready the instant its
+process starts — which was a lie by **4m11s**, the measured gap between container start and
+the app actually listening on :3000 (Selkies and Xwayland come up, then `DOCKER_MODS`
+apt-installs ffmpeg). `curl localhost:3000` from inside the pod returned exit 7 while
+Kubernetes reported the pod healthy.
+
+This is harmless while a pod runs permanently and fatal under scale-to-zero: the
+interceptor waits for the Deployment to report a ready replica, then proxies to it. A
+probe-less pod makes it forward to a backend that refuses the connection, so the cold
+request fails even though scaling worked perfectly.
+
+**Check for probes before wiring an app, not after.** `freecad` already has
+liveness/readiness/startup; `audacity` had none until this was found.
+
+### The real constraint: cold start can be a 1 GB image pull
+
+```
+Successfully pulled image "lscr.io/linuxserver/audacity@sha256:ea751b7f..."
+in 15m50.514s. Image size: 1120762877 bytes.
+```
+
+The image was cached only on `hiro-cmp-03` and `-04`, where it had been running. KEDA
+scheduled the wake onto `hiro-cmp-05`, which had no layers — roughly 1.1 MB/s from lscr.io.
+
+This is structural rather than bad luck. At 0 replicas the pod can be scheduled to **any**
+node; only nodes that have run it hold layers; and an app sitting at 0 most of the time is
+exactly what kubelet image garbage collection evicts first. So even a warm node degrades
+over time.
+
+**Raising `conditionWait` does not fix this** — it only makes the browser hang longer. The
+timeouts here deliberately cover real app boot (10m, ~2x the measured 4m11s) and not a cold
+pull; failing and letting the retry land after the pull finishes beats a 20-minute hang.
+
+The real fix is a **LAN registry pull-through cache** (Talos `registries.mirrors`), which
+would speed every image pull in the cluster rather than just these three apps. Interim
+options are pinning these apps to nodes that already hold the image, or accepting a slow
+first request after a cold placement. To see which nodes cache an image:
+
+```bash
+kubectl get node <node> -o jsonpath='{.status.images[*].names}' | tr ' ' '\n' | grep <image>
+```
+
+### Timeout knobs, for reference
+
+- `interceptor.readinessTimeout` (chart value) → `KEDA_HTTP_READINESS_TIMEOUT`, the global
+  cold-start hold. **The chart's own default leaves this unset, which disables the wait
+  entirely and fails every cold request.** Set to 10m here.
+- `HTTPScaledObject.spec.timeouts.conditionWait` — per-app override of the above.
+- Envoy is **not** a constraint. Every route in this cluster runs `timeout: 0s` /
+  `idle_timeout: 0s` with websocket upgrade enabled, so never set
+  `HTTPRoute.rules[].timeouts` — it can only introduce a cap that is not there today, which
+  on a GUI-stream route would sever live sessions.
 
 ## Explicitly not covered
 

@@ -28,8 +28,14 @@ spec:
     concurrency:
       targetValue: 100
   timeouts:
-    # How long the interceptor holds a cold request while the pod comes up. audacity's
-    # start is not just an image pull — DOCKER_MODS/INSTALL_PACKAGES apt-installs
-    # ffmpeg on every boot, so it is network-dependent. 5m is deliberately generous
-    # and matches the interceptor's global KEDA_HTTP_READINESS_TIMEOUT. UNMEASURED.
-    conditionWait: 5m
+    # How long the interceptor holds a cold request while the pod comes up. Now that
+    # audacity has a readiness probe, "ready" genuinely means "serving", so this has to
+    # cover real app boot: 4m11s measured on 2026-08-30 (Selkies + Xwayland, then the
+    # DOCKER_MODS ffmpeg apt install, which is network-dependent). 10m gives ~2x margin.
+    #
+    # This deliberately does NOT try to cover a cold image pull. audacity's image is
+    # 1.07 GB and took 15m50s to pull onto a node that had no layers cached. Stretching
+    # this to 20m would just hang the browser for 20 minutes; failing and letting the
+    # retry land after the pull completes is the better outcome. The real fix is a LAN
+    # registry pull-through cache — see docs/ephemeral-apps-keda.md.
+    conditionWait: 10m

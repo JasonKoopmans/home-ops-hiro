@@ -65,7 +65,7 @@ spec:
       # How long the interceptor waits for a scaled-from-zero backend to become ready.
       # The chart leaves this unset, which disables the wait entirely — that would fail
       # every cold request. Per-app spec.timeouts.conditionWait overrides this.
-      readinessTimeout: 5m
+      readinessTimeout: 10m
       resources:
         limits:
           cpu: null

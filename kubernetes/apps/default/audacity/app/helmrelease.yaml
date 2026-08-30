@@ -32,6 +32,52 @@ spec:
               PGID: "1001"
               DOCKER_MODS: linuxserver/mods:universal-package-install
               INSTALL_PACKAGES: ffmpeg
+            # Without these, the container is Ready the instant its process starts,
+            # which is a lie: measured live on 2026-08-30, audacity took 4m11s from
+            # container start to actually serving on :3000 (Selkies + Xwayland come
+            # up, then DOCKER_MODS apt-installs ffmpeg). That did not matter while a
+            # pod ran permanently, but under scale-to-zero the KEDA interceptor waits
+            # for the Deployment to report a ready replica and then proxies to it — so
+            # a probe-less pod makes it forward to a backend that refuses the
+            # connection, and the cold request fails even though scaling worked.
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: &port 3000
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: *port
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /
+                    port: *port
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  # 60 x 10s = 10m of boot allowance, against 4m11s measured. Deliberately
+                  # generous: the ffmpeg apt install runs on every start and depends on
+                  # Debian mirrors being reachable, so a slow day costs real time. A
+                  # startup probe is free when the app is fast — it stops once it passes.
+                  failureThreshold: 60
             resources:
               requests:
                 cpu: 25m
@@ -51,7 +97,7 @@ spec:
         controller: main
         ports:
           http:
-            port: 3000
+            port: *port
 
     # No `route:` block on purpose. audacity's HTTPRoute lives in ./httproute.yaml so
     # its backendRef can point at the KEDA interceptor in the `keda` namespace instead
