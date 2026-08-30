@@ -1,0 +1,33 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/v1/configmap_v1.json
+# Seed data for core.goals, loaded by cronjob-schema.yaml's second psql step
+# (load-goals.sql, in schema.yaml). Editing this file is the entire workflow
+# for changing a goal: commit, push, wait for the next hourly CronJob tick (or
+# force one — see the comment atop cronjob-schema.yaml). No separate migration
+# or apply step.
+#
+# This file is plaintext in git, not SOPS-encrypted, deliberately — goal
+# values aren't secrets. goal_text ends up on dashboards, so keep it to
+# workout/task-style targets and tooltip copy; it isn't the place for
+# anything you wouldn't want sitting in git history in the clear.
+#
+# To retire a goal without losing its history, don't delete its row — add a
+# new row for the same metric with a new effective_date and the old goal_text/
+# value, or just stop referencing that metric in a dashboard. Deleting a row
+# here removes it from core.goals on the next reload with no trace beyond git
+# history.
+#
+# Columns match core.goals exactly. Leave source_metric/base_metric/
+# window_days blank (not "null" — just empty) for the fields that don't apply
+# to a row's goal_type; \copy reads an empty CSV field as SQL NULL.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warehouse-goals-seed
+data:
+  goals.csv: |
+    metric,goal_type,source_metric,base_metric,window_days,effective_date,goal_text,value,unit
+    MoveCaloriesPerDay,threshold,MoveCalories,,,2026-01-01,"SAMPLE - daily Apple Move ring target, adjust to your real goal",500,kcal
+    ExerciseMinutesPerDay,threshold,ExerciseMinutes,,,2026-01-01,"SAMPLE - daily Apple Exercise ring target, adjust to your real goal",30,minutes
+    StandMinutesPerDay,threshold,StandMinutes,,,2026-01-01,"SAMPLE - daily Apple Stand ring target, adjust to your real goal",720,minutes
+    MoveCaloriesPerDayHitPerWeek,frequency,,MoveCaloriesPerDay,7,2026-01-01,"SAMPLE - hit the Move ring target at least 5 of 7 days this week",5,days

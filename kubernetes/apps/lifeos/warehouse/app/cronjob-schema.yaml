@@ -106,6 +106,13 @@ spec:
                   # A single transaction so a partial schema is never left behind.
                   psql --set ON_ERROR_STOP=1 --single-transaction --file /schema/schema.sql
                   echo "schema applied"
+
+                  # Separate invocation, separate transaction, deliberately: a
+                  # malformed goals.csv fails only this step, not the schema
+                  # apply above. See the comment above CREATE TABLE core.goals
+                  # in schema.yaml.
+                  psql --set ON_ERROR_STOP=1 --single-transaction --file /schema/load-goals.sql
+                  echo "goals loaded"
               env:
                 - name: PGHOST
                   value: postgres-rw.database.svc.cluster.local
@@ -130,6 +137,9 @@ spec:
                 - name: schema
                   mountPath: /schema
                   readOnly: true
+                - name: goals-seed
+                  mountPath: /seed
+                  readOnly: true
                 - name: tmp
                   mountPath: /tmp
               securityContext:
@@ -149,5 +159,8 @@ spec:
             - name: schema
               configMap:
                 name: warehouse-schema
+            - name: goals-seed
+              configMap:
+                name: warehouse-goals-seed
             - name: tmp
               emptyDir: {}

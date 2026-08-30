@@ -375,6 +375,94 @@ data:
     ANALYZE core.dim_date;
 
     -- ---------------------------------------------------------------------
+    -- core.goals: configurable goal lines, git-owned like dim_date
+    --
+    -- Not a raw+view stack: nothing "observes" a goal, you declare it in
+    -- goals.csv and it converges into the table on the next CronJob tick —
+    -- same TRUNCATE+reload contract as dim_date's INSERT, just table-wide
+    -- instead of append-only, because history here lives in the effective_date
+    -- column (and git log), not in extra rows.
+    --
+    -- Two goal shapes share one table via goal_type:
+    --   threshold   a single day's target for one metric (e.g. Move >= 500
+    --               kcal/day). source_metric names which
+    --               mart.daily_metric_values series to compare against.
+    --   frequency   "hit the underlying threshold N times in a trailing
+    --               window" (e.g. 5 of the last 7 days). base_metric points
+    --               at the threshold row's `metric` by name — not a FK, by
+    --               design: goals.csv is small and human-edited, and a name
+    --               match keeps the CSV flat instead of needing a surrogate
+    --               id column just for this one reference.
+    --
+    -- effective_date supports goals changing over time: core.goals_by_date
+    -- below resolves, for every day, whichever row has the latest
+    -- effective_date <= that day.
+    --
+    -- No direction column (>=  vs <=) on purpose — comparison direction is
+    -- left to the dashboard. That is also why mart.goal_progress below stops
+    -- at "here is the actual value and here is the goal value" for frequency
+    -- rows rather than a computed hit-count: counting hits needs direction,
+    -- which does not exist here. Add a direction column first if a materialized
+    -- hit-count view is ever wanted.
+    -- value > 0 for every goal shape currently in scope (a calorie/minute/
+    -- hit-count target of zero or negative is a fat-fingered CSV edit, not a
+    -- real goal) — catches that at load time instead of on a Grafana panel.
+    CREATE TABLE IF NOT EXISTS core.goals (
+        metric         text    NOT NULL,
+        goal_type      text    NOT NULL CHECK (goal_type IN ('threshold', 'frequency')),
+        source_metric  text,
+        base_metric    text,
+        window_days    int,
+        effective_date date    NOT NULL,
+        goal_text      text    NOT NULL,
+        value          numeric NOT NULL CHECK (value > 0),
+        unit           text,
+        PRIMARY KEY (metric, effective_date),
+        CONSTRAINT goals_shape_by_type CHECK (
+            (goal_type = 'threshold' AND source_metric IS NOT NULL
+                AND base_metric IS NULL AND window_days IS NULL)
+            OR
+            (goal_type = 'frequency' AND source_metric IS NULL
+                AND base_metric IS NOT NULL AND window_days IS NOT NULL AND window_days > 0)
+        )
+    );
+
+    -- Data is loaded by load-goals.sql, run as its own psql invocation by
+    -- cronjob-schema.yaml — deliberately NOT in this file's transaction. A
+    -- malformed goals.csv (bad date, wrong column count, a blanked file)
+    -- would otherwise roll back everything else in this script, including
+    -- dim_date's daily extension, on every hourly tick until someone
+    -- noticed. Splitting it out means a bad CSV fails its own step loudly
+    -- (the CronJob still fails, still alerts) without taking unrelated
+    -- schema maintenance down with it.
+
+    -- Resolves one row per (metric, date): whichever goals row has the
+    -- latest effective_date on or before that date. Cross join against the
+    -- distinct metric list rather than a plain join so a metric's goal line
+    -- still appears (via the most recent effective_date) on every day in
+    -- range, not only on days a new goal happened to start.
+    CREATE OR REPLACE VIEW core.goals_by_date AS
+    SELECT dd.date,
+           gm.metric,
+           g.goal_type,
+           g.source_metric,
+           g.base_metric,
+           g.window_days,
+           g.goal_text,
+           g.value,
+           g.unit
+    FROM core.dim_date dd
+    CROSS JOIN (SELECT DISTINCT metric FROM core.goals) gm
+    JOIN LATERAL (
+        SELECT goal_type, source_metric, base_metric, window_days, goal_text, value, unit
+        FROM core.goals g
+        WHERE g.metric = gm.metric AND g.effective_date <= dd.date
+        ORDER BY g.effective_date DESC
+        LIMIT 1
+    ) g ON true
+    WHERE dd.date BETWEEN current_date - (365 * 3) AND current_date;
+
+    -- ---------------------------------------------------------------------
     -- Drift detection
     --
     -- The failure mode this schema is otherwise blind to: a source renames a
@@ -477,6 +565,99 @@ data:
     FROM mart.daily_activity a
     LEFT JOIN mart.daily_task_completions c ON c."Date" = a."Date";
 
+    -- daily_overview pivoted back to long format, keyed by the same
+    -- source_metric vocabulary core.goals.source_metric uses ('MoveCalories',
+    -- 'ExerciseMinutes', 'StandMinutes', 'TasksCompleted'). Exists so
+    -- mart.goal_progress below can join a goal to its actual with one join
+    -- condition instead of a FILTER/CASE per metric — add a metric here (and
+    -- a matching source_metric value in goals.csv) rather than editing
+    -- goal_progress when the next goal-able metric shows up.
+    CREATE OR REPLACE VIEW mart.daily_metric_values AS
+    SELECT "Date" AS date, 'MoveCalories'::text AS source_metric, "MoveCalories" AS value FROM mart.daily_overview
+    UNION ALL
+    SELECT "Date", 'ExerciseMinutes', "ExerciseMinutes" FROM mart.daily_overview
+    UNION ALL
+    SELECT "Date", 'StandMinutes', "StandMinutes" FROM mart.daily_overview
+    UNION ALL
+    SELECT "Date", 'TasksCompleted', "TasksCompleted"::numeric FROM mart.daily_overview;
+
+    -- Gauge/goal-line feed. One row per (day, goal), both goal_type shapes
+    -- unioned into one shape dashboards can filter on "GoalType".
+    --
+    -- threshold rows carry the day's actual value straight from
+    -- daily_metric_values via source_metric.
+    --
+    -- frequency rows do NOT carry a computed hit-count (see the no-direction
+    -- note on core.goals above) — "ActualValue" here is the *base* threshold
+    -- metric's actual value for that day, and "BaseGoalValue" is the
+    -- threshold it's being compared against. A Grafana panel windows and
+    -- counts hits itself: e.g. count days in the trailing WindowDays where
+    -- ActualValue crossed BaseGoalValue, then compare that count to
+    -- GoalValue. Add a direction column to core.goals first if this ever
+    -- needs to be a single pre-computed number instead.
+    CREATE OR REPLACE VIEW mart.goal_progress AS
+    SELECT gd.date                AS "Date",
+           gd.metric               AS "Goal",
+           gd.goal_type            AS "GoalType",
+           gd.goal_text            AS "GoalText",
+           gd.value                AS "GoalValue",
+           gd.unit                 AS "Unit",
+           mv.value                AS "ActualValue",
+           NULL::int               AS "WindowDays",
+           NULL::text              AS "BaseGoal",
+           NULL::numeric           AS "BaseGoalValue"
+    FROM core.goals_by_date gd
+    LEFT JOIN mart.daily_metric_values mv
+        ON mv.source_metric = gd.source_metric AND mv.date = gd.date
+    WHERE gd.goal_type = 'threshold'
+    UNION ALL
+    SELECT gd.date                AS "Date",
+           gd.metric               AS "Goal",
+           gd.goal_type            AS "GoalType",
+           gd.goal_text            AS "GoalText",
+           gd.value                AS "GoalValue",
+           NULL::text              AS "Unit",
+           mv.value                AS "ActualValue",
+           gd.window_days          AS "WindowDays",
+           gd.base_metric          AS "BaseGoal",
+           base.value              AS "BaseGoalValue"
+    FROM core.goals_by_date gd
+    LEFT JOIN core.goals_by_date base
+        ON base.metric = gd.base_metric AND base.date = gd.date
+    LEFT JOIN mart.daily_metric_values mv
+        ON mv.source_metric = base.source_metric AND mv.date = gd.date
+    WHERE gd.goal_type = 'frequency';
+
+    -- Drift detection for core.goals, same idea as core.typing_failures:
+    -- base_metric and source_metric are plain text, not foreign keys (see the
+    -- comment on core.goals), so a typo in goals.csv doesn't error — it just
+    -- makes a gauge silently empty. This surfaces those typos as rows instead
+    -- of "why is this panel blank." Lives in mart because the source_metric
+    -- vocabulary below is mart's (it names mart.daily_metric_values columns),
+    -- and core does not depend on mart.
+    --
+    -- The vocabulary is a literal list, NOT "does a row for this
+    -- source_metric currently exist in mart.daily_metric_values" — checking
+    -- data presence instead of the schema means an empty daily_overview
+    -- (fresh deploy, an ingest outage, a quiet day before any rows land)
+    -- would flag every threshold goal as drift even though the names are
+    -- fine. Keep this list in sync with the source_metric values
+    -- mart.daily_metric_values UNIONs above when a metric is added.
+    CREATE OR REPLACE VIEW mart.goal_drift AS
+    SELECT 'unknown_base_metric'::text AS issue,
+           g.metric                    AS "Goal",
+           g.base_metric               AS detail
+    FROM core.goals g
+    WHERE g.goal_type = 'frequency'
+      AND NOT EXISTS (SELECT 1 FROM core.goals b WHERE b.metric = g.base_metric)
+    UNION ALL
+    SELECT 'unknown_source_metric',
+           g.metric,
+           g.source_metric
+    FROM core.goals g
+    WHERE g.goal_type = 'threshold'
+      AND g.source_metric NOT IN ('MoveCalories', 'ExerciseMinutes', 'StandMinutes', 'TasksCompleted');
+
     -- ---------------------------------------------------------------------
     -- Grants
     --
@@ -527,3 +708,53 @@ data:
         GRANT SELECT, INSERT ON TABLES TO lifeos_ingest;
     ALTER DEFAULT PRIVILEGES IN SCHEMA core, mart
         GRANT SELECT ON TABLES TO lifeos_reader;
+  load-goals.sql: |
+    -- Loads core.goals from goals.csv (mounted at /seed by
+    -- cronjob-schema.yaml, from the warehouse-goals-seed ConfigMap). Run as
+    -- its own psql invocation, deliberately separate from schema.sql's
+    -- transaction — see the comment above CREATE TABLE core.goals in
+    -- schema.yaml for why. This file's own ON_ERROR_STOP + --single-transaction
+    -- give it the same all-or-nothing guarantee schema.sql has, just scoped
+    -- to goals data instead of the whole schema.
+    --
+    -- No dollar-quoted blocks here either, same reason as schema.sql: Flux's
+    -- postBuild substitution rewrites `$$` to `$` and would mangle one.
+    CREATE TEMP TABLE goals_staging (LIKE core.goals INCLUDING DEFAULTS);
+
+    \copy goals_staging (metric, goal_type, source_metric, base_metric, window_days, effective_date, goal_text, value, unit) FROM '/seed/goals.csv' WITH (FORMAT csv, HEADER true)
+
+    -- goals.csv is the single source of truth for core.goals, so an empty
+    -- load is (almost certainly) a mistake — a blanked file, a bad merge, a
+    -- ConfigMap generation hiccup — not a deliberate "delete every goal".
+    -- Refuse rather than silently truncating every gauge to empty; \quit 1
+    -- fails this step (and therefore the CronJob, so it alerts) before
+    -- TRUNCATE ever runs, leaving the existing core.goals data untouched.
+    SELECT (count(*) > 0) AS has_rows FROM goals_staging \gset
+    \if :has_rows
+    \else
+        \warn 'load-goals.sql: goals.csv produced 0 rows, refusing to replace core.goals'
+        \quit 1
+    \endif
+
+    TRUNCATE core.goals;
+
+    -- trim() on the text join keys (metric/source_metric/base_metric/unit),
+    -- not case-folding — metric names are deliberately mixed-case identifiers
+    -- (e.g. MoveCaloriesPerDay) and folding would break that. This only
+    -- guards against invisible whitespace from a copy-paste or a spreadsheet
+    -- export, which otherwise breaks the exact-match joins in
+    -- core.goals_by_date / mart.goal_progress silently — no error, just a
+    -- blank gauge. nullif(..., '') turns a trimmed-to-empty optional field
+    -- back into NULL so the goals_shape_by_type CHECK still sees NULL rather
+    -- than '' for the column that doesn't apply to a row's goal_type.
+    INSERT INTO core.goals (metric, goal_type, source_metric, base_metric, window_days, effective_date, goal_text, value, unit)
+    SELECT trim(metric),
+           goal_type,
+           nullif(trim(source_metric), ''),
+           nullif(trim(base_metric), ''),
+           window_days,
+           effective_date,
+           trim(goal_text),
+           value,
+           nullif(trim(unit), '')
+    FROM goals_staging;
