@@ -2,7 +2,7 @@
   "enabledMcpjsonServers": [
     "kubernetes",
     "grafana-monitoring",
-    "grafana-lifeos"
+    "grafana-lifeos",
     "playwright"
   ],
   "permissions": {
