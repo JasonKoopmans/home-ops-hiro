@@ -429,6 +429,8 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 | Nodes | 5 (Proxmox VMs: 192.168.25.21–25). **CPU-asymmetric**: `hiro-cmp-05` has 4 CPU, `hiro-cmp-01`/`-02` have 3 CPU, `hiro-cmp-03`/`-04` have 2 CPU (memory uniform ~11.8Gi). Steer heavy stateful I/O workloads (e.g. Prometheus) to the 3- and 4-CPU nodes — on the 2-CPU nodes the Longhorn instance-manager + kernel I/O path dominates CPU, so high CPU there is usually I/O, not compute. |
 | GitOps engine | Flux CD (flux-operator + flux-instance) |
 | CNI | Cilium |
+| Pod CIDR | `10.42.0.0/16` — **not** the Talos default (`10.244.0.0/16`); confirm via `kubectl get nodes -o jsonpath='{.spec.podCIDR}'` before assuming defaults in a new NetworkPolicy |
+| Service CIDR | `10.43.0.0/16` — **not** the Talos default (`10.96.0.0/12`); confirm via the `--service-cluster-ip-range` flag on the `kube-apiserver` static pods (`kubectl -n kube-system get pod kube-apiserver-<node> -o yaml | grep -i cluster-ip-range`) |
 | Ingress | Envoy Gateway (Gateway API): `envoy-external`, `envoy-internal` |
 | DNS (external) | external-dns → Cloudflare |
 | DNS (internal) | k8s_gateway |
