@@ -22,10 +22,6 @@ spec:
   install:
     remediation:
       retries: -1
-  upgrade:
-    cleanupOnFail: true
-    remediation:
-      retries: 3
   values:
     # Chart defaults are sized for a busy multi-tenant cluster: scaler runs 3 replicas,
     # the interceptor's own ScaledObject runs min 3 / max 50, and every component

@@ -213,7 +213,7 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 - **Sidecars and injected containers need their own bounds.** Setting `resources` on the main workload does not cover a sidecar the operator injects. Check the operator's CRD for where sidecar resources are configured (e.g. CloudNativePG's Barman plugin uses `ObjectStore.spec.instanceSidecarConfiguration.resources`).
 - **Size limits from real data, not intuition.** Query `max_over_time(container_memory_working_set_bytes{...}[14d])` via Thanos (it holds ~14d of cadvisor series), then set the limit at roughly **2x** the observed peak — a 30s scrape cannot sample the spike that actually triggers an OOM kill, so a measured peak is a floor, not a ceiling. One-shot Jobs and init containers finish faster than one scrape and never produce metrics; their limits are judgment.
 - **Label unmeasured values as guesses.** For a new workload there is no data yet. Set deliberately-generous starting values, comment them in-manifest as an informed guess, and record the revisit condition in the app's plan/runbook doc — don't let a placeholder silently harden into an assumed-tuned value.
-- Nodes are **CPU-asymmetric** (`hiro-cmp-01`/`-02` have 3 CPU, `-03`/`-04` have 2; memory is uniform ~11.8Gi). CPU is the scarce resource — memory limits are comparatively cheap to set generously, CPU requests are not.
+- Nodes are **CPU-asymmetric** (`hiro-cmp-05` has 4 CPU, `-01`/`-02` have 3, `-03`/`-04` have 2; memory is uniform ~11.8Gi). CPU is the scarce resource — memory limits are comparatively cheap to set generously, CPU requests are not.
 
 ---
 
@@ -426,7 +426,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 | Item | Value |
 |---|---|
 | Kubernetes distribution | Talos Linux |
-| Nodes | 4 (Proxmox VMs: 192.168.25.21–24). **CPU-asymmetric**: `hiro-cmp-01`/`-02` have 3 CPU, `hiro-cmp-03`/`-04` have 2 CPU (memory uniform ~11.8Gi). Steer heavy stateful I/O workloads (e.g. Prometheus) to the 3-CPU nodes — on the 2-CPU nodes the Longhorn instance-manager + kernel I/O path dominates CPU, so high CPU there is usually I/O, not compute. |
+| Nodes | 5 (Proxmox VMs: 192.168.25.21–25). **CPU-asymmetric**: `hiro-cmp-05` has 4 CPU, `hiro-cmp-01`/`-02` have 3 CPU, `hiro-cmp-03`/`-04` have 2 CPU (memory uniform ~11.8Gi). Steer heavy stateful I/O workloads (e.g. Prometheus) to the 3- and 4-CPU nodes — on the 2-CPU nodes the Longhorn instance-manager + kernel I/O path dominates CPU, so high CPU there is usually I/O, not compute. |
 | GitOps engine | Flux CD (flux-operator + flux-instance) |
 | CNI | Cilium |
 | Ingress | Envoy Gateway (Gateway API): `envoy-external`, `envoy-internal` |

@@ -18,10 +18,6 @@ spec:
   install:
     remediation:
       retries: -1
-  upgrade:
-    cleanupOnFail: true
-    remediation:
-      retries: 3
   values:
     # Chart defaults request 100m CPU and cap 1 CPU / 1000Mi on each of the three
     # components. This cluster is CPU-scarce (13.75 CPU allocatable total, two nodes
