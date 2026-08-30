@@ -96,6 +96,22 @@ spec:
               # explicitly rather than assumed.
               - --output-dir
               - /home/node/output
+              # Known trap, hit again here: this server's DNS-rebinding
+              # check ("comma-separated list of hosts this server is
+              # allowed to serve from. Defaults to the host the server is
+              # bound to.") is restrictive by default, and the Docker
+              # ENTRYPOINT's --host 0.0.0.0 doesn't widen it — task
+              # mcp:probe confirmed a live 403 against Service DNS with no
+              # --allowed-hosts set at all. Unlike mcp-server-kubernetes
+              # (single-value wrapper, disabled outright), this flag takes
+              # a real comma-separated list, so both callers are named
+              # explicitly instead — same pattern as mcp-grafana-lifeos's
+              # --allowed-hosts. Port included on the Service DNS entry to
+              # match curl's own Host header for a non-default HTTP port
+              # (confirmed via task mcp:probe's request), omitted on the
+              # gateway entry since that arrives over HTTPS on 443.
+              - --allowed-hosts
+              - mcp-playwright.mcp.svc.cluster.local:3000,mcp-playwright.${SECRET_DOMAIN}
             env:
               TZ: ${TIMEZONE}
             # Not inferable from env (port is set via args, not PORT), so
