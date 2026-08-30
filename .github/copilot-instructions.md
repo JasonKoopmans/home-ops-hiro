@@ -430,7 +430,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 | GitOps engine | Flux CD (flux-operator + flux-instance) |
 | CNI | Cilium |
 | Pod CIDR | `10.42.0.0/16` — **not** the Talos default (`10.244.0.0/16`); confirm via `kubectl get nodes -o jsonpath='{.spec.podCIDR}'` before assuming defaults in a new NetworkPolicy |
-| Service CIDR | `10.43.0.0/16` — **not** the Talos default (`10.96.0.0/12`); confirm via the `--service-cluster-ip-range` flag on the `kube-apiserver` static pods (`kubectl -n kube-system get pod kube-apiserver-<node> -o yaml \| grep -i cluster-ip-range`) |
+| Service CIDR | `10.43.0.0/16` — **not** the Talos default (`10.96.0.0/12`); confirm via the `--service-cluster-ip-range` flag on the `kube-apiserver` static pods (`kubectl -n kube-system get pod kube-apiserver-<node> -o yaml | grep -i cluster-ip-range`) |
 | Ingress | Envoy Gateway (Gateway API): `envoy-external`, `envoy-internal` |
 | DNS (external) | external-dns → Cloudflare |
 | DNS (internal) | k8s_gateway |

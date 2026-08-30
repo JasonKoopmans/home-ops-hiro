@@ -466,7 +466,7 @@ works whether or not the real Deployment ever came up, and needs no local
 Docker:
 
 ```sh
-kubectl run mcp-uid-check --rm -it --restart=Never --image=<repo>:<tag> --command -- id
+kubectl -n mcp run mcp-uid-check --rm -it --restart=Never --image=<repo>:<tag> --command -- id
 ```
 
 Once confirmed, pin `runAsUser`/`runAsGroup`/`fsGroup` explicitly; don't leave
