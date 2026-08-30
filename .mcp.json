@@ -18,6 +18,9 @@
       "headers": {
         "Authorization": "Bearer ${MCP_GRAFANA_LIFEOS_TOKEN}"
       }
+    "playwright": {
+      "type": "http",
+      "url": "https://mcp-playwright.koopmans.co/mcp"
     }
   }
 }

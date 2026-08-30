@@ -4,6 +4,12 @@ kind: Kustomization
 metadata:
   name: audacity
 spec:
+  # ./app/httpscaledobject.yaml is an http.keda.sh CR, so the add-on's CRDs must
+  # exist before this Kustomization applies. `task validate` will not catch a missing
+  # dependency here — scripts/kubeconform.sh runs with -ignore-missing-schemas.
+  dependsOn:
+    - name: keda-http-add-on
+      namespace: keda
   interval: 1h
   path: ./kubernetes/apps/default/audacity/app
   postBuild:

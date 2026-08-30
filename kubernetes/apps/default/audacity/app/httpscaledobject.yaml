@@ -1,0 +1,35 @@
+---
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: audacity
+spec:
+  hosts: ["audacity.${SECRET_DOMAIN}"]
+  scaleTargetRef:
+    # One object carries both the workload and the Service. `service` is required;
+    # `port` and `portName` are mutually exclusive (CEL-validated by the CRD).
+    name: audacity
+    service: audacity
+    port: 3000
+  replicas:
+    min: 0
+    max: 1
+  # Seconds of no in-flight requests before scaling back to zero. 300 is a guess:
+  # long enough that closing a browser tab briefly does not cost a full cold start,
+  # short enough to observe the cycle during this pilot. UNMEASURED — revisit once
+  # there is real usage data. See docs/ephemeral-apps-keda.md.
+  scaledownPeriod: 300
+  scalingMetric:
+    # concurrency (in-flight requests), NOT requestRate. audacity is a Selkies GUI
+    # stream: an active session is one long-lived websocket that generates no new
+    # requests once established. Under requestRate that session reads as idle and
+    # gets scaled out from under the user mid-use. Under concurrency the held
+    # connection counts as in-flight for its whole duration.
+    concurrency:
+      targetValue: 100
+  timeouts:
+    # How long the interceptor holds a cold request while the pod comes up. audacity's
+    # start is not just an image pull — DOCKER_MODS/INSTALL_PACKAGES apt-installs
+    # ffmpeg on every boot, so it is network-dependent. 5m is deliberately generous
+    # and matches the interceptor's global KEDA_HTTP_READINESS_TIMEOUT. UNMEASURED.
+    conditionWait: 5m
