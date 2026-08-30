@@ -6,6 +6,14 @@ metadata:
   name: keda-core
 spec:
   interval: 1h
+  # 10m, not Flux's default 5m. KEDA's first install overran the default: the
+  # operator generates its own `kedaorg-certs` Secret then deliberately exits
+  # ("Secrets have been updated; exiting so pod can be restarted", exit 0) while
+  # keda-admission-webhooks blocks on that Secret not existing yet. That bootstrap
+  # plus the image pulls takes longer than 5m on a cold node, and Helm's --wait gives
+  # up mid-sequence. `spec.timeout` is not set by the cluster-apps patch, so this
+  # value survives.
+  timeout: 10m
   chart:
     spec:
       chart: keda

@@ -53,24 +53,16 @@ spec:
           http:
             port: 3000
 
-    route:
-      app:
-        annotations:
-          gethomepage.dev/enabled: "true"
-          gethomepage.dev/icon: https://audacityteam.org/favicon.ico
-          gethomepage.dev/title: Audacity
-          gethomepage.dev/description: "Audio editor"
-          gethomepage.dev/group: "Media"
-        hostnames:
-          - audacity.${SECRET_DOMAIN}
-        parentRefs:
-          - name: envoy-internal
-            namespace: network
-            sectionName: https
-        rules:
-          - backendRefs:
-              - identifier: app
-                port: 3000
+    # No `route:` block. Audacity's HTTPRoute is hand-authored in ./httproute.yaml
+    # so its backendRef can point at the KEDA interceptor in the `keda` namespace
+    # instead of this app's own Service — a cross-namespace ref the chart's route
+    # helper cannot express. See docs/ephemeral-apps-keda.md.
+    #
+    # Removed here first, on purpose: the chart used to own this HTTPRoute via Helm,
+    # and ./httproute.yaml claims the same object name under Flux's kustomize SSA.
+    # Handing it over in one commit would leave Helm's ownership annotations on an
+    # object Kustomize now manages. Helm deletes it on this commit; the replacement
+    # lands in the next one.
 
     persistence:
       config:
