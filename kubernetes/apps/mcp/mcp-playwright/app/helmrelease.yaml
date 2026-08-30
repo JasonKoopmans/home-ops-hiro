@@ -1,0 +1,224 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# Browser automation MCP server (github.com/microsoft/playwright-mcp).
+# native-http archetype, per docs/mcp-onboarding.md's own survey of this
+# server ("HTTP — --port/--host. Also needs browser binaries, so it wants a
+# real image, not npx"). Read that doc before editing — port, path and
+# hostname are a contract shared by every MCP server here, not a per-app
+# choice.
+#
+# Security posture: phase 1 (none, internal-only) — but unlike every sibling
+# in this namespace, that is not a "start simple, escalate later" choice, it
+# is the ceiling. Verified against upstream's README and source: this server
+# has zero built-in authentication — no bearer/API-key/header check of any
+# kind, only network-level --allowed-hosts/--allowed-origins controls. The
+# app-level-token pattern mcp-grafana-lifeos uses (MCP_GRAFANA_SERVER_TOKEN,
+# checked by the app itself) has no equivalent here. Real caller-auth for
+# this server means an Envoy Gateway SecurityPolicy (apiKeyAuth/JWT/OIDC) in
+# front of the HTTPRoute — auth-ladder step 3, not step 2 — which is a new
+# resource kind for this repo (envoy-gateway v1.9.0 supports it). Deliberately
+# not added here; this is the seam for whoever wants to spend that effort.
+#
+# Bigger exposure than its siblings for the same reason: this isn't a
+# read-only query against one backend, it's a real browser that can navigate
+# anywhere the pod's network reaches — any LAN host, any internal Service.
+# Accepted for now on the same "whole LAN plus every pod" trust basis
+# docs/mcp-onboarding.md already documents for this namespace; revisit via
+# the SecurityPolicy seam above before anything less trusted gets access to
+# this endpoint.
+#
+# That "navigate anywhere the pod's network reaches" half is addressed
+# separately in networkpolicy.yaml: egress is blocked to the LAN and to the
+# cluster's own pod/service CIDRs, so the SSRF/internal-recon path a security
+# review flagged is closed even though the auth question above is still
+# deliberately open. Two different axes — who can call this server (open) vs
+# what it can reach once called (now restricted) — see that file for detail.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app mcp-playwright
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        # Load is low and --isolated means no on-disk state to pin a client
+        # to a specific pod, but a single Chromium instance serves one
+        # profile at a time (upstream: "single persistent profile cannot
+        # serve multiple simultaneous connections without --isolated" — we
+        # already pass --isolated, which gives each session its own in-memory
+        # context, but this is still unverified at >1 replica). Keep at 1
+        # until that's actually tested.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              # Official image. The Dockerfile's ENTRYPOINT already hardcodes
+              # ["node", "/app/cli.js", "--headless", "--browser", "chromium",
+              # "--no-sandbox"], so args below only ever *append* to that —
+              # no command: override needed, and those three flags are never
+              # repeated here.
+              repository: mcr.microsoft.com/playwright/mcp
+              tag: v0.0.79
+            args:
+              # The contract: HTTP on 3000, MCP at /mcp (upstream's default
+              # path, not configurable — confirmed in source and README).
+              - --host
+              - 0.0.0.0
+              - --port
+              # Plain string, deliberately not the &port anchor used below:
+              # this list is Container.args ([]string), while
+              # containerPort/service/probe/route ports are the integer-typed
+              # fields the anchor feeds — sharing one YAML node across both
+              # would force one of them to the wrong type in the rendered
+              # manifest.
+              - "3000"
+              # In-memory profile, nothing written to disk across sessions or
+              # restarts — deliberate choice over a PVC-backed --user-data-dir
+              # so this stays stateless and compatible with
+              # readOnlyRootFilesystem below. Every session starts logged out;
+              # there is no persisted cookie/login state.
+              - --isolated
+              # Beyond the default core browser tools (navigate/click/type/
+              # snapshot): pdf adds browser_pdf_save, vision adds
+              # coordinate/screenshot-based interaction in place of the
+              # accessibility-tree snapshot. Both widen the tool surface a
+              # caller gets — deliberate choice, not the conservative default.
+              - --caps
+              - vision,pdf
+              # Must be writable — see the home-dir emptyDir mount below.
+              # Upstream default output location is undocumented; pointed
+              # explicitly rather than assumed.
+              - --output-dir
+              - /home/node/output
+            env:
+              TZ: ${TIMEZONE}
+            # Not inferable from env (port is set via args, not PORT), so
+            # declared explicitly — same reasoning as mcp-grafana-lifeos:
+            # KubeLinter's liveness-port/readiness-port checks want the
+            # container to declare the port its probes reference.
+            ports:
+              - name: http
+                containerPort: &port 3000
+                protocol: TCP
+            probes:
+              # TCP: upstream documents no health path, and /mcp is POST-only
+              # (a bare GET 406s). Swap to httpGet if a real health path
+              # ever surfaces upstream.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              # Labelled guess, not a measurement — no pod has run yet. Set
+              # well above the Go/Python MCP servers in this namespace
+              # (64–512Mi) because this one carries an actual Chromium
+              # process, not an HTTP client. Limit leaves headroom over the
+              # 1Gi /dev/shm reservation below plus Node+Chromium heap.
+              # Revisit against
+              # max_over_time(container_memory_working_set_bytes{...}[14d])
+              # once this has served real traffic.
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                memory: 2Gi
+
+    defaultPodOptions:
+      # Never calls the Kubernetes API — no ServiceAccount token needed.
+      automountServiceAccountToken: false
+      securityContext:
+        # Base image is node:22-bookworm-slim with USER node, so the image
+        # already refuses to run as root — runAsNonRoot enforces that without
+        # needing the exact number. Deliberately NOT pinning runAsUser/
+        # runAsGroup/fsGroup: this repo's own convention (see mcp-kubernetes)
+        # is never to guess a container's UID, and this session has no
+        # cluster or docker-daemon access to read it off a running pod.
+        # TODO: after first deploy, pin it:
+        #   kubectl -n mcp exec deploy/mcp-playwright -- id
+        # then add runAsUser/runAsGroup/fsGroup here (expect 1000/1000 per
+        # the official Node image's own convention, but confirm — don't copy
+        # this number in without checking).
+        runAsNonRoot: true
+
+    persistence:
+      # $HOME (the image's own WORKDIR) and the --output-dir above both need
+      # to be writable for readOnlyRootFilesystem to hold — Chromium's own
+      # cache/config dirs land under $HOME even in --isolated mode, and
+      # PLAYWRIGHT_BROWSERS_PATH=/ms-playwright (baked into the image) stays
+      # read-only since browsers are pre-installed there, not fetched at
+      # runtime. No fsGroup needed: kubelet already creates emptyDir mounts
+      # writable regardless of the container's UID (same reasoning as
+      # mcp-kubernetes's /tmp mount).
+      home:
+        type: emptyDir
+        globalMounts:
+          - path: /home/node
+
+      # Belt-and-suspenders alongside the $HOME mount above: Chromium and
+      # Node both fall back to the OS temp dir (/tmp) for some scratch
+      # writes (crash dumps, singleton lock files) regardless of $HOME.
+      # Unqualified name, so app-template mounts it at /tmp — same
+      # auto-mount convention mcp-kubernetes relies on for the same path.
+      tmp:
+        type: emptyDir
+
+      # Chromium's shared-memory needs routinely exceed the ~64Mi most
+      # container runtimes give /dev/shm by default, which crashes renderer
+      # processes under real use. Same emptyDir/shm pattern already used for
+      # kubernetes/apps/default/freecad, another app-template app running a
+      # browser-based renderer that hit the same default /dev/shm ceiling.
+      # 1Gi is a guess, not a measurement; it counts against the memory
+      # limit above since it's RAM-backed.
+      shm:
+        type: emptyDir
+        medium: Memory
+        sizeLimit: 1Gi
+        globalMounts:
+          - path: /dev/shm
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        # Single-label hostname: the wildcard cert is ["${SECRET_DOMAIN}",
+        # "*.${SECRET_DOMAIN}"] and does not cover a second label, so
+        # mcp-playwright.mcp.${SECRET_DOMAIN} would fail TLS in every client.
+        hostnames: ["mcp-playwright.${SECRET_DOMAIN}"]
+        parentRefs:
+          # envoy-internal, not envoy-external — see the security posture
+          # note at the top of this file. This endpoint does not get a path
+          # to public exposure without an auth layer in front of it first.
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          # Path-scoped so only the MCP endpoint is reachable through the
+          # gateway, same as every sibling server.
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: *port

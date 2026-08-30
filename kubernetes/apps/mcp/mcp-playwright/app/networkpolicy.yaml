@@ -1,0 +1,56 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/networking.k8s.io/networkpolicy_v1.json
+#
+# Egress-only restriction, addressing a different axis than the auth
+# question in helmrelease.yaml: that file's security-posture comment covers
+# WHO can call this server (answer: unauthenticated, whole LAN plus every
+# pod, deliberately). This policy covers WHAT the server can reach once
+# called — without it, this server's Chromium instance can navigate to any
+# host/port the pod's network reaches, turning it into an open internal
+# SSRF/recon tool against the LAN and every other in-cluster Service.
+# Ingress stays untouched (not in policyTypes below), same phase-1 posture
+# as every sibling MCP server in this namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-playwright
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-playwright
+  policyTypes:
+    - Egress
+  egress:
+    # Carved out explicitly: this is a call to CoreDNS's ClusterIP
+    # (10.43.0.10, k8sAppLabelOverride: kube-dns per
+    # kubernetes/apps/kube-system/coredns/app/helmrelease.yaml), which lives
+    # inside the service CIDR the ipBlock rule below excludes. Without this,
+    # the pod can't resolve any hostname at all, including the sites it's
+    # meant to browse.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Everything else on the public internet is fair game — that's the
+    # tool's actual purpose — except the ranges that would let it pivot into
+    # the LAN or other in-cluster services. All three confirmed live against
+    # the running cluster rather than assumed from Talos/Kubernetes
+    # defaults, which this cluster does not use:
+    #   192.168.25.0/24  home LAN (node subnet)
+    #   10.42.0.0/16      pod CIDR   (kubectl get nodes -o jsonpath='{.spec.podCIDR}')
+    #   10.43.0.0/16      service CIDR (kube-apiserver --service-cluster-ip-range)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 192.168.25.0/24
+              - 10.42.0.0/16
+              - 10.43.0.0/16

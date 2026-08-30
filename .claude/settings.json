@@ -1,6 +1,7 @@
 {
   "enabledMcpjsonServers": [
-    "kubernetes"
+    "kubernetes",
+    "playwright"
   ],
   "permissions": {
     "allow": [
