@@ -1,0 +1,12 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: keda
+
+components:
+  - ../../components/sops
+
+resources:
+  - ./namespace.yaml
+  - ./keda-core/ks.yaml
+  - ./keda-http-add-on/ks.yaml

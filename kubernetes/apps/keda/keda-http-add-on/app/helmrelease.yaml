@@ -1,0 +1,79 @@
+---
+# yaml-language-server: $schema=https://lds-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: keda-http-add-on
+spec:
+  interval: 1h
+  chart:
+    spec:
+      # Upstream chart name is "keda-add-ons-http" (not "http-add-on"); the release is
+      # named after this app directory instead. Safe: the interceptor's Service names
+      # are hardcoded in the chart, not release-name-prefixed, so the proxy Service is
+      # keda-add-ons-http-interceptor-proxy either way.
+      chart: keda-add-ons-http
+      # renovate: registryUrl=https://kedacore.github.io/charts
+      version: "0.15.0"
+      sourceRef:
+        kind: HelmRepository
+        name: keda-http-add-on
+        namespace: keda
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Chart defaults are sized for a busy multi-tenant cluster: scaler runs 3 replicas,
+    # the interceptor's own ScaledObject runs min 3 / max 50, and every component
+    # requests 250m CPU — ~1750m of CPU requests to idle. This cluster has ~13.75 CPU
+    # allocatable total with two nodes already >74% requested, and the whole point here
+    # is to *reclaim* capacity from three small apps. Scaled down accordingly.
+    #
+    # UNMEASURED — informed starting guesses. No Thanos history exists for these pods.
+    # Revisit against a 14d working-set peak; see docs/ephemeral-apps-keda.md.
+    operator:
+      replicas: 1
+      # Empty string = watch all namespaces (pilot apps live in `default`).
+      watchNamespace: ""
+      resources:
+        limits:
+          cpu: null
+          memory: 128Mi
+        requests:
+          cpu: 10m
+          memory: 32Mi
+
+    scaler:
+      # 1, not the chart's 3: this is a homelab with a handful of HTTPScaledObjects.
+      replicas: 1
+      resources:
+        limits:
+          cpu: null
+          memory: 128Mi
+        requests:
+          cpu: 10m
+          memory: 32Mi
+
+    interceptor:
+      replicas:
+        # min 2, not 1: the interceptor is the shared data path for every ephemeral
+        # app, so a single replica makes any eviction or node drain a full outage for
+        # all of them. The chart's PDB defaults to minAvailable: 0, which does not
+        # protect a single replica either.
+        min: 2
+        max: 4
+      # How long the interceptor waits for a scaled-from-zero backend to become ready.
+      # The chart leaves this unset, which disables the wait entirely — that would fail
+      # every cold request. Per-app spec.timeouts.conditionWait overrides this.
+      readinessTimeout: 5m
+      resources:
+        limits:
+          cpu: null
+          memory: 128Mi
+        requests:
+          cpu: 25m
+          memory: 32Mi

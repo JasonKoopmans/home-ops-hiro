@@ -1,0 +1,57 @@
+---
+# yaml-language-server: $schema=https://lds-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: keda-core
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: keda
+      # renovate: registryUrl=https://kedacore.github.io/charts
+      version: "2.20.2"
+      sourceRef:
+        kind: HelmRepository
+        name: keda-core
+        namespace: keda
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: 3
+  values:
+    # Chart defaults request 100m CPU and cap 1 CPU / 1000Mi on each of the three
+    # components. This cluster is CPU-scarce (13.75 CPU allocatable total, two nodes
+    # already >74% requested), and all three are idle-loop controllers. Per repo
+    # convention: keep a memory limit, drop the CPU limit (`cpu: null` removes the
+    # chart's default rather than merging over it), keep a small CPU request.
+    #
+    # UNMEASURED — these are informed starting guesses, not tuned values. There is no
+    # Thanos history for a controller that did not exist before this commit. Revisit
+    # once ~14d of container_memory_working_set_bytes exists; see
+    # docs/ephemeral-apps-keda.md.
+    resources:
+      operator:
+        limits:
+          cpu: null
+          memory: 512Mi
+        requests:
+          cpu: 25m
+          memory: 100Mi
+      metricServer:
+        limits:
+          cpu: null
+          memory: 512Mi
+        requests:
+          cpu: 25m
+          memory: 100Mi
+      webhooks:
+        limits:
+          cpu: null
+          memory: 128Mi
+        requests:
+          cpu: 10m
+          memory: 32Mi

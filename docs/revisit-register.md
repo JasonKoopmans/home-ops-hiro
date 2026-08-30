@@ -38,6 +38,9 @@ checkable, not aspirational — "once 14d of data exists" rather than "later".
 | 7 | `prometheusrule-recording-annotator.yaml` keeps a weaker failed-Job expression on a premise that is now false | Tracked in [#502](https://github.com/JasonKoopmans/home-ops-hiro/issues/502) — upgrade to the last-success-age shape | `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-recording-annotator.yaml` |
 | 8 | Longhorn `prometheus` volume left `ignored`/unpatched; 30Gi→15Gi resize never done | Next Longhorn maintenance window | [runbook-longhorn-volume-trim.md](runbook-longhorn-volume-trim.md) |
 | 9 | Cilium BGP peering never established — all LB Services actually served by L2announcement | Decision tracked in issue #498 | `kubernetes/apps/kube-system/cilium/` |
+| 10 | KEDA core + HTTP add-on resource values are unmeasured guesses (chart defaults cut from ~2050m to ~130m CPU requested) | ~14d of `container_memory_working_set_bytes` exists for the `keda` namespace | `kubernetes/apps/keda/*/app/helmrelease.yaml`; [ephemeral-apps-keda.md](ephemeral-apps-keda.md) |
+| 11 | freecad scale-to-zero assumes `scalingMetric.concurrency` holds a KasmVNC GUI session "active" — plausible mechanism, unproven | First real multi-minute freecad session left deliberately idle; if it scales down mid-use, fall back to `replicas.min: 1` | [ephemeral-apps-keda.md](ephemeral-apps-keda.md) |
+| 12 | openreel rebuilds itself (`git clone` + `pnpm build`) on every pod start, making it a poor scale-to-zero candidate | Before wiring openreel — pick: drop from pilot, long `conditionWait`, or repackage to GHCR | `kubernetes/apps/default/openreel/app/helmrelease.yaml`; [ephemeral-apps-keda.md](ephemeral-apps-keda.md) |
 
 ## Closed
 
