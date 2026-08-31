@@ -250,6 +250,76 @@ There is no down-migration story, and destructive changes (`DROP COLUMN`, a
 rewrite that loses data) are not safe to express here. Do those by hand, having
 taken a backup, then reconcile the file to match.
 
+### Reshaping a view that has already shipped
+
+`CREATE OR REPLACE VIEW` can only **append** columns. Renaming one, changing a
+type, or inserting a column ahead of an existing one all make Postgres reject the
+whole statement — and with `ON_ERROR_STOP` + `--single-transaction`, rejecting one
+statement means *nothing in the file applies*, on every run, until someone reads
+the log. This has now caused three separate multi-day outages of the whole apply
+(#506's `units`→`unit` rename, the unguarded `DROP VIEW` in #529, and the
+`core.todoist_completed_tasks` reshape that kept `core.goals` from ever existing
+despite having been committed in #513).
+
+So: **if a change reorders, renames, retypes or removes a column on a view that is
+already deployed, it needs a guarded one-time statement immediately above the
+`CREATE OR REPLACE` it repairs.** Guard with psql's `\gset` / `\if` against
+`information_schema` — never a PL/pgSQL `DO` block, which Flux's postBuild
+substitution mangles by rewriting `$$` to `$`. Two shapes, both in schema.yaml:
+
+- **A rename, nothing else** — `ALTER VIEW ... RENAME COLUMN`, guarded on the old
+  column name still being present. See `core.health_metrics`.
+- **A reorder or a wholesale reshape** — `DROP VIEW ... CASCADE`, guarded on the
+  column-order invariant that the reshape breaks (`ordinal_position = N AND
+  column_name = '...'`), so that a *future* reshape hitting the same position
+  re-fires the guard instead of needing a new one. See
+  `core.todoist_completed_tasks` (#544). Prefer this over probing for the
+  presence of some column only the new shape has: that also works, but it is a
+  one-shot marker that goes permanently true and guards nothing afterwards.
+
+  `CASCADE` is safe here only because every dependent view is `CREATE OR
+  REPLACE`d further down the same file and therefore rebuilt inside the same
+  transaction; check `pg_depend` first and confirm that's still true — for
+  `core.todoist_completed_tasks` the dependents are `mart.daily_task_completions`,
+  `mart.task_completions`, and `mart.daily_overview` via the first, and the
+  `GRANT`s at the bottom of the file re-cover the rebuilt views. It also means
+  anything hand-created on top of the view in CloudBeaver is dropped without
+  warning — `core` and `mart` are Git-owned, so that is the deal, but it is why
+  the drop must be guarded rather than unconditional. An unguarded one rebuilds
+  the whole mart layer every hour.
+
+Both forms become a permanent no-op once they have run once, including on a
+database that has never seen the view at all.
+
+**The symptom to recognise:** `KubeJobFailed` on `lifeos/warehouse-schema` firing
+every hour, and some object committed weeks ago simply not existing in the
+database. The failing statement is named in the job's log, but the pod is deleted
+almost immediately after `backoffLimit` is exhausted — so grab the log while it
+runs:
+
+```sh
+kubectl -n lifeos create job --from=cronjob/warehouse-schema warehouse-schema-diag
+kubectl -n lifeos logs -f -l job-name=warehouse-schema-diag
+```
+
+To validate a fix before pushing it, run the rendered `schema.sql` — and
+`load-goals.sql` after it, with the `\copy` pointed at stdin — against the live
+database wrapped in `BEGIN;` / `ROLLBACK;`. It exercises the real deployed shape,
+including the guard, and changes nothing:
+
+```sh
+PW=$(kubectl -n lifeos get secret warehouse-credentials -o jsonpath='{.data.writer-password}' | base64 -d)
+{ echo 'BEGIN;'; cat schema.sql; echo 'ROLLBACK;'; } |
+  kubectl exec -i -n database postgres-1 -c postgres -- \
+    env PGPASSWORD="$PW" psql -h postgres-rw.database.svc.cluster.local \
+      -U lifeos_writer -d lifeos --set ON_ERROR_STOP=1 -f -
+```
+
+Run it as `lifeos_writer`, not as the `postgres` superuser — the `GRANT` and
+`ALTER DEFAULT PRIVILEGES` block at the bottom of the file depends on the writer
+owning what it just created, and a superuser run would paper over an ownership
+problem.
+
 ---
 
 ## Naming and casing

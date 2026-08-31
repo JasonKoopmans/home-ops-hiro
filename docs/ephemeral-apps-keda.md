@@ -223,6 +223,37 @@ That Longhorn result is worth keeping: the RWO-volume problem that disqualified 
 does not apply here, because KEDA only changes the replica count and never touches the
 PVC.
 
+### The alert that a scaled-down app trips
+
+Detaching the PVC is invisible to KEDA and to the app — but not to monitoring. Longhorn
+reports `longhorn_volume_robustness{state="unknown"} = 1` for **any detached volume**, and
+`LonghornVolumeUnhealthy` was written as `{state="healthy"} == 0`, which reads "not
+healthy" and therefore matches `unknown` too. audacity scaled to zero on 2026-08-30 and
+fired a permanent `critical` alert 10 minutes later, for a volume with three intact
+replicas and nothing wrong with it.
+
+The fix, in `prometheusrule-storage-and-hosts.yaml`, is to alert on the states that mean
+replica loss rather than on the absence of health:
+
+```promql
+max by (pvc, pvc_namespace) (longhorn_volume_robustness{state=~"degraded|faulted"}) == 1
+```
+
+**The general rule this is an instance of: under scale-to-zero, an alert may not treat
+"the workload is not running" as evidence of a fault.** Prefer a predicate over the
+fault itself (`degraded|faulted`) to a predicate over the absence of the healthy state
+(`healthy == 0`) — the second one silently includes every benign not-running state.
+
+Resist the obvious alternative of excluding the scale-to-zero apps by name. An allowlist
+goes stale the first time an app is wired to KEDA or unwired from it, has to be edited in
+a second repo location every time this rollout advances, and — worse — would mute a *real*
+degradation on exactly the apps it names. Keying on the fault covers every present and
+future ephemeral app with no list at all.
+
+Nothing else in the alert set needed changing: the stock `Kube*ReplicasMismatch` rules
+compare desired against actual, and KEDA moves *desired* to zero, so a scaled-down
+Deployment is not a mismatch.
+
 ### Prerequisite: the app must have a real readiness probe
 
 audacity shipped without one. A container with no readiness probe is Ready the instant its
