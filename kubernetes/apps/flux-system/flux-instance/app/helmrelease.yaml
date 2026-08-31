@@ -59,9 +59,10 @@ spec:
               kind: Deployment
               name: (kustomize-controller|helm-controller|source-controller)
           - # Right-size CPU requests. Controllers idle at 1-3m but the
-            # flux-operator defaults reserve 50-100m each; only the CPU
-            # request is lowered (no CPU limit is set, so bursting during
-            # reconciliation is unaffected).
+            # flux-operator defaults reserve 50-100m each. The request is what
+            # schedules the pod and what sets its CPU shares under contention,
+            # so this is the number that matters; see the CPU *limit* removal
+            # immediately below for why there is nothing capping the burst.
             patch: |
               apiVersion: apps/v1
               kind: Deployment
@@ -75,6 +76,52 @@ spec:
                         resources:
                           requests:
                             cpu: 25m
+            target:
+              kind: Deployment
+              name: (kustomize-controller|helm-controller|source-controller|notification-controller)
+          - # Remove the CPU limit the flux-operator manifests set (cpu: 1 on
+            # every controller). Repo convention is memory limits yes, CPU
+            # limits no: a memory limit contains a leak before it destabilizes
+            # the node, while a CPU limit only buys CFS throttling. The memory
+            # limit above is deliberately kept.
+            #
+            # This is not theoretical here. kustomize-controller throttled 26.5%
+            # in a 5m window on 2026-08-31 while using 0.047 cores at peak
+            # against its 1-core limit — under 5% of it. Throttling at that
+            # utilization is a parallelism artifact, not a load problem: the
+            # controller runs with --concurrent=20 (10 from the patch above,
+            # then 20 from the kustomize-controller-specific one below; the
+            # flag is passed twice and the last wins) and Go sets GOMAXPROCS from
+            # the node's CPU count, so a reconcile burst fans across several
+            # threads and briefly wants more than one core-equivalent inside a
+            # single 100ms CFS period. It gets clamped, every time, however
+            # idle the cluster is.
+            #
+            # Nothing is queueing today — workqueue_depth has a 24h max of 0 and
+            # queue-duration p99 is 0s, so this is headroom rather than a live
+            # incident. But the effect scales with fan-out width, not with load,
+            # so it grows with the app count and gets *worse* on a larger node
+            # (higher GOMAXPROCS, same 1-core quota). CPU is compressible and
+            # the requests above still set the shares, so removing the ceiling
+            # cannot starve anything else on the node.
+            #
+            # `cpu: null` rather than a JSON-patch `remove` op deliberately: a
+            # remove against a missing path is a hard error, so it would break
+            # reconciliation the day upstream stops setting this default. A
+            # strategic-merge null is a no-op in that case.
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: all
+              spec:
+                template:
+                  spec:
+                    containers:
+                      - name: manager
+                        resources:
+                          limits:
+                            cpu: null
             target:
               kind: Deployment
               name: (kustomize-controller|helm-controller|source-controller|notification-controller)
