@@ -392,18 +392,36 @@ data:
         year        int     NOT NULL
     );
 
+    -- quarter and week_number were added after dim_date first shipped.
+    -- ADD COLUMN IF NOT EXISTS is idempotent on its own (unlike the rename
+    -- above), so no information_schema guard is needed — but the backfill
+    -- UPDATE and the NOT NULL below still have to be safe to reissue every
+    -- run, since the INSERT below only reaches new rows.
+    ALTER TABLE core.dim_date ADD COLUMN IF NOT EXISTS quarter     int;
+    ALTER TABLE core.dim_date ADD COLUMN IF NOT EXISTS week_number int;
+    UPDATE core.dim_date SET quarter = EXTRACT(quarter FROM date)::int WHERE quarter IS NULL;
+    -- EXTRACT(week FROM date) is the ISO 8601 week number, consistent with
+    -- iso_dow above — week 1 is the week containing the year's first
+    -- Thursday, so late-December/early-January dates can carry the
+    -- adjacent year's week number.
+    UPDATE core.dim_date SET week_number = EXTRACT(week FROM date)::int WHERE week_number IS NULL;
+    ALTER TABLE core.dim_date ALTER COLUMN quarter     SET NOT NULL;
+    ALTER TABLE core.dim_date ALTER COLUMN week_number SET NOT NULL;
+
     -- Extends the spine on every run. ON CONFLICT DO NOTHING makes it
     -- idempotent, and the +30 days of headroom mean "today" always exists even
     -- between hourly runs — a dashboard opened at 00:05 would otherwise find
     -- the current day missing from the spine.
-    INSERT INTO core.dim_date (date, iso_dow, dow_name, is_weekend, week_start, month_start, year)
+    INSERT INTO core.dim_date (date, iso_dow, dow_name, is_weekend, week_start, month_start, year, quarter, week_number)
     SELECT d::date,
            EXTRACT(isodow FROM d)::int,
            to_char(d, 'Dy'),
            EXTRACT(isodow FROM d)::int >= 6,
            date_trunc('week',  d)::date,
            date_trunc('month', d)::date,
-           EXTRACT(year FROM d)::int
+           EXTRACT(year FROM d)::int,
+           EXTRACT(quarter FROM d)::int,
+           EXTRACT(week FROM d)::int
     FROM generate_series(date '2020-01-01', current_date + 30, interval '1 day') AS d
     ON CONFLICT (date) DO NOTHING;
 
