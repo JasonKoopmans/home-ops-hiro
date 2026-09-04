@@ -659,6 +659,10 @@ check_infra_namespaces() {
         slow_window_seconds="$(duration_to_seconds "${RESTART_SLOW_WINDOW}")"
         local infra_pod_issue_count=0
 
+        local slow_window_seconds
+        slow_window_seconds="$(duration_to_seconds "${RESTART_SLOW_WINDOW}")"
+        local infra_pod_issue_count=0
+
         if [[ -n "${pod_issues}" ]]; then
             while IFS=$'\t' read -r pod container ready restarts; do
                 if [[ "${ready}" != "false" ]]; then
