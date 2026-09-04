@@ -640,19 +640,37 @@ check_infra_namespaces() {
         local pod_issues
         pod_issues="$(kubectl -n "${ns}" get pods -o json | jq -r --argjson threshold "${RESTART_THRESHOLD}" '
             .items[] as $pod
+            | select($pod.status.phase != "Succeeded")
             | ($pod.status.containerStatuses // [])[]?
             | select((.ready == false) or ((.restartCount // 0) >= $threshold))
             | "\($pod.metadata.name)\t\(.name)\t\(.ready)\t\(.restartCount // 0)"
         ' | head -n 5)"
 
+        local slow_window_seconds
+        slow_window_seconds="$(duration_to_seconds "${RESTART_SLOW_WINDOW}")"
+        local infra_pod_issue_count=0
+
         if [[ -n "${pod_issues}" ]]; then
             while IFS=$'\t' read -r pod container ready restarts; do
+                if [[ "${ready}" != "false" ]]; then
+                    # Ready, but lifetime restartCount tripped the threshold: a stale count
+                    # left over from a past, since-recovered restart isn't actionable — only
+                    # surface it if a restart actually happened within the slow window.
+                    local recent_events
+                    recent_events="$(count_restart_events_in_window "${ns}" "${pod}" "${slow_window_seconds}")"
+                    (( recent_events == 0 )) && continue
+                fi
+
+                infra_pod_issue_count=$((infra_pod_issue_count + 1))
                 issue "Infra pod container needs attention" "namespace=${ns}" "pod=${pod}" "container=${container}" "ready=${ready}" "restarts=${restarts}"
                 if [[ "${SHOW_LOGS}" == "true" ]]; then
                     echo "---- logs: ${ns}/${pod} (${container}) ----"
                     kubectl -n "${ns}" logs "${pod}" -c "${container}" --since="${LOG_SINCE}" --tail="${LOG_TAIL}" 2>/dev/null | tail -n "${LOG_TAIL}" || true
                 fi
             done <<<"${pod_issues}"
+        fi
+
+        if (( infra_pod_issue_count > 0 )); then
             if [[ "${SHOW_LOGS}" != "true" ]]; then
                 log info "Log snippets omitted" "namespace=${ns}" "hint=rerun with --show-logs"
             fi
