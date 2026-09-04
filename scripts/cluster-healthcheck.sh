@@ -637,6 +637,9 @@ check_infra_namespaces() {
             kubectl -n "${ns}" get events --field-selector type=Warning --sort-by=.lastTimestamp | tail -n 8 || true
         fi
 
+        # No `head` cap here: the recency filter below still has to drop stale
+        # restart-count candidates, and capping before that filter runs risks
+        # discarding real issues in favor of ones that turn out to be noise.
         local pod_issues
         pod_issues="$(kubectl -n "${ns}" get pods -o json | jq -r --argjson threshold "${RESTART_THRESHOLD}" '
             .items[] as $pod
@@ -644,11 +647,13 @@ check_infra_namespaces() {
             | ($pod.status.containerStatuses // [])[]?
             | select((.ready == false) or ((.restartCount // 0) >= $threshold))
             | "\($pod.metadata.name)\t\(.name)\t\(.ready)\t\(.restartCount // 0)"
-        ' | head -n 5)"
+        ')"
 
         local slow_window_seconds
         slow_window_seconds="$(duration_to_seconds "${RESTART_SLOW_WINDOW}")"
         local infra_pod_issue_count=0
+        local log_snippets_shown=0
+        local -r max_log_snippets=5
 
         if [[ -n "${pod_issues}" ]]; then
             while IFS=$'\t' read -r pod container ready restarts; do
@@ -663,9 +668,10 @@ check_infra_namespaces() {
 
                 infra_pod_issue_count=$((infra_pod_issue_count + 1))
                 issue "Infra pod container needs attention" "namespace=${ns}" "pod=${pod}" "container=${container}" "ready=${ready}" "restarts=${restarts}"
-                if [[ "${SHOW_LOGS}" == "true" ]]; then
+                if [[ "${SHOW_LOGS}" == "true" && "${log_snippets_shown}" -lt "${max_log_snippets}" ]]; then
                     echo "---- logs: ${ns}/${pod} (${container}) ----"
                     kubectl -n "${ns}" logs "${pod}" -c "${container}" --since="${LOG_SINCE}" --tail="${LOG_TAIL}" 2>/dev/null | tail -n "${LOG_TAIL}" || true
+                    log_snippets_shown=$((log_snippets_shown + 1))
                 fi
             done <<<"${pod_issues}"
         fi
