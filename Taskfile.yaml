@@ -306,6 +306,93 @@ tasks:
       - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
       - { msg: "Missing longhorn evict script", sh: "test -f {{.SCRIPTS_DIR}}/longhorn-replica-evict.sh" }
 
+  # Pairs with talos:upgrade-node / talos:upgrade-k8s (.taskfiles/talos):
+  # run this first so a rolling reboot/upgrade doesn't page Telegram, then
+  # run the upgrade. Not composed together automatically — the silence needs
+  # a human-chosen matcher/comment/duration the upgrade task doesn't have.
+  alerts:silence:
+    desc: Create an Alertmanager silence for infra alerts during a maintenance window
+    summary: |
+      Args:
+        matcher:    alertname regex to silence (required), e.g.
+                    "KubeNodeNotReady|KubeNodeUnreachable|etcdNoLeader"
+        comment:    reason for the silence (required)
+        duration:   how long to silence for — <N>m / <N>h / <N>d (optional, default: 2h)
+        label:      extra exact-match "name=value" matcher, ANDed with matcher
+                    (optional) — e.g. label=node=hiro-cmp-01 to scope a rolling
+                    per-node operation to just the node currently under
+                    maintenance, instead of silencing cluster-wide for the
+                    whole window.
+        created_by: attribution recorded on the silence (optional, default: git user.email)
+        yes:        set to "true" to skip the confirmation prompt (optional)
+
+      Talks directly to kube-prometheus-stack's Alertmanager Service — not
+      Grafana's own built-in Alertmanager, which nothing in this cluster
+      routes infra alerts through. See scripts/alertmanager-silence.sh for
+      why. Prints the silence id; use alerts:silence:expire to end it early,
+      otherwise it lapses on its own at startsAt+duration.
+
+      Example (scoped to the one node being rebooted):
+        task alerts:silence \
+          matcher="KubeNodeNotReady|KubeNodeUnreachable|etcdNoLeader" \
+          label="node=hiro-cmp-01" \
+          duration=30m comment="Rolling Talos + k8s upgrade, hiro-cmp-01"
+    # matcher/comment/label/created_by are free text and go through env, not
+    # cmd interpolation: Task renders cmd into a string a shell then parses,
+    # and double quotes there don't stop command substitution — an
+    # interpolated `comment=$(...)` or a backtick would execute on the
+    # operator's machine. As env vars the values are looked up by the shell
+    # as plain data and never re-parsed. See lifeos:dashboard:export for the
+    # same pattern.
+    env:
+      SILENCE_MATCHER: "{{.matcher}}"
+      SILENCE_COMMENT: "{{.comment}}"
+      SILENCE_DURATION: '{{.duration | default "2h"}}'
+      SILENCE_LABEL: '{{.label | default ""}}'
+      SILENCE_CREATED_BY: '{{.created_by | default ""}}'
+    cmd: >-
+      bash {{.SCRIPTS_DIR}}/alertmanager-silence.sh
+      --matcher "$SILENCE_MATCHER"
+      --comment "$SILENCE_COMMENT"
+      --duration "$SILENCE_DURATION"
+      --label "$SILENCE_LABEL"
+      --created-by "$SILENCE_CREATED_BY"
+      {{if eq .yes "true"}}--yes{{end}}
+    requires:
+      vars: ["matcher", "comment"]
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing alertmanager-silence script", sh: "test -f {{.SCRIPTS_DIR}}/alertmanager-silence.sh" }
+      - { msg: "jq not found", sh: "which jq" }
+
+  alerts:silence:list:
+    desc: List current Alertmanager silences (any state)
+    cmd: bash {{.SCRIPTS_DIR}}/alertmanager-silence.sh --list
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing alertmanager-silence script", sh: "test -f {{.SCRIPTS_DIR}}/alertmanager-silence.sh" }
+      - { msg: "jq not found", sh: "which jq" }
+
+  alerts:silence:expire:
+    desc: Expire (end early) an Alertmanager silence by id
+    summary: |
+      Args:
+        id:  silence id to expire (required) — see `task alerts:silence:list`
+        yes: set to "true" to skip the confirmation prompt (optional)
+    # id goes through env, not cmd interpolation — see alerts:silence above.
+    env:
+      SILENCE_ID: "{{.id}}"
+    cmd: >-
+      bash {{.SCRIPTS_DIR}}/alertmanager-silence.sh
+      --expire "$SILENCE_ID"
+      {{if eq .yes "true"}}--yes{{end}}
+    requires:
+      vars: ["id"]
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing alertmanager-silence script", sh: "test -f {{.SCRIPTS_DIR}}/alertmanager-silence.sh" }
+      - { msg: "jq not found", sh: "which jq" }
+
   # Pre-flight gate for higher-risk operations: fail fast if core controllers,
   # workloads, storage, jobs, or key infra namespaces show unhealthy signals.
   cluster:health:

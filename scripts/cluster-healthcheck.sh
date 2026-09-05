@@ -655,6 +655,10 @@ check_infra_namespaces() {
         local log_snippets_shown=0
         local -r max_log_snippets=5
 
+        local slow_window_seconds
+        slow_window_seconds="$(duration_to_seconds "${RESTART_SLOW_WINDOW}")"
+        local infra_pod_issue_count=0
+
         if [[ -n "${pod_issues}" ]]; then
             while IFS=$'\t' read -r pod container ready restarts; do
                 if [[ "${ready}" != "false" ]]; then
