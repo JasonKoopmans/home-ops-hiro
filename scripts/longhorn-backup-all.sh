@@ -141,8 +141,7 @@ fi
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
-RUN_ID="$(date +%s)"
-
+RUN_ID="$(date +%s)-$$-$RANDOM"
 # Runs in its own backgrounded subshell -- `set +e` so one failing kubectl call
 # can't abort the subshell before it writes its .status marker (bash background
 # jobs inherit the parent's shell options, including errexit).
