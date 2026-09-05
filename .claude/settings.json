@@ -3,7 +3,8 @@
     "kubernetes",
     "grafana-monitoring",
     "grafana-lifeos",
-    "playwright"
+    "playwright",
+    "proxmox"
   ],
   "permissions": {
     "allow": [
