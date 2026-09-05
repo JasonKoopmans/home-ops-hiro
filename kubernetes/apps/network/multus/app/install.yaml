@@ -113,7 +113,7 @@ data:
   daemon-config.json: |
     {
         "chrootDir": "/hostroot",
-        "cniVersion": "0.3.1",
+        "cniVersion": "1.0.0",
       "logLevel": "warn",
         "logToStderr": true,
         "cniConfigDir": "/host/etc/cni/net.d",

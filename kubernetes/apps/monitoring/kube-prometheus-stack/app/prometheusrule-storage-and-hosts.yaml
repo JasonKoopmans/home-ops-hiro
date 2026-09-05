@@ -28,14 +28,34 @@ spec:
             summary: Longhorn node is not ready
             description: Longhorn node {{ $$labels.node }} has reported not ready for more than 10 minutes.
 
+        # longhorn_volume_robustness is one-hot: Longhorn emits a series per
+        # state (healthy / degraded / faulted / unknown) and sets exactly one of
+        # them to 1. This alert used to read `{state="healthy"} == 0`, i.e. "not
+        # healthy" — which also matches `unknown`, and `unknown` is what Longhorn
+        # reports for any *detached* volume. That is the normal, correct state
+        # for an app that is deliberately not running: every KEDA scale-to-zero
+        # app (audacity today; freecad and others behind it, see
+        # docs/ephemeral-apps-keda.md) detaches its volume when it scales down
+        # and fires a permanent critical alert 10m later.
+        #
+        # Alerting on the two states that actually mean replica loss fixes that
+        # for every such app at once, with no allowlist of "expected down" apps
+        # to maintain — a list that would go stale the first time an app is wired
+        # to KEDA or unwired from it, and that would also mute a real fault on a
+        # scaled-down app. Degraded/faulted are reported whether the volume is
+        # attached or not, so nothing is lost by ignoring `unknown`: a volume
+        # that should be attached and isn't shows up as its workload failing
+        # (KubeDeploymentReplicasMismatch / KubePodNotReady), not as a storage
+        # alert. Still critical, and still the one alert that must never be
+        # inhibited during a Longhorn outage — see alertmanagerconfig.yaml.
         - alert: LonghornVolumeUnhealthy
-          expr: max by (pvc, pvc_namespace) (longhorn_volume_robustness{state="healthy"}) == 0
+          expr: max by (pvc, pvc_namespace) (longhorn_volume_robustness{state=~"degraded|faulted"}) == 1
           for: 10m
           labels:
             severity: critical
           annotations:
             summary: Longhorn volume is unhealthy
-            description: Longhorn volume {{ $$labels.pvc }} in namespace {{ $$labels.pvc_namespace }} is not healthy.
+            description: Longhorn volume {{ $$labels.pvc }} in namespace {{ $$labels.pvc_namespace }} has lost replicas (degraded or faulted).
 
         - alert: LonghornVolumeUsageHigh
           expr: 100 * max by (pvc, pvc_namespace) (longhorn_volume_actual_size_bytes) / clamp_min(max by (pvc, pvc_namespace) (longhorn_volume_capacity_bytes), 1) > 85

@@ -243,18 +243,44 @@ data:
     FROM raw.health_metrics
     ORDER BY source, natural_key, ingested_at DESC;
 
-    -- No DROP VIEW before this CREATE OR REPLACE — there was one, and it broke
-    -- every hourly run from 2026-08-29 22:17 onward: once mart.daily_overview,
-    -- mart.daily_task_completions, and mart.task_completions exist and depend
-    -- on this view, an unconditional DROP fails with "cannot drop view ...
-    -- because other objects depend on it", ON_ERROR_STOP takes down the whole
-    -- single-transaction script (including core.goals and everything else
-    -- below it — nothing in this file applied, every run, until this line was
-    -- found and removed), and the next run hits the exact same error forever.
-    -- CREATE OR REPLACE VIEW alone is enough for any change that doesn't
-    -- reorder or remove a column; if one ever does, use the guarded
-    -- information_schema pattern above (see core.health_metrics) instead of a
-    -- bare DROP.
+    -- This view has broken the warehouse-schema CronJob's every hourly run
+    -- since 2026-08-29 22:17, in two different ways, each masking the next:
+    --
+    -- 1) An unconditional `DROP VIEW IF EXISTS core.todoist_completed_tasks;`
+    --    used to sit here (from 80c0920). Once mart.daily_overview,
+    --    mart.daily_task_completions, and mart.task_completions exist and
+    --    depend on this view, that DROP fails: "cannot drop view ... because
+    --    other objects depend on it". ON_ERROR_STOP took down the whole
+    --    single-transaction script on every run — including core.goals and
+    --    everything below it, so none of #513 ever actually applied despite
+    --    merging.
+    -- 2) Removing the DROP (thinking CREATE OR REPLACE alone would do)
+    --    surfaced the reason that DROP existed in the first place: the *live*
+    --    view's column order doesn't match this SELECT list — completed_on
+    --    and ingested_at are swapped relative to whatever shape is currently
+    --    live. CREATE OR REPLACE VIEW can add columns but can never reorder
+    --    them ("cannot change name of view column"), so it fails exactly the
+    --    same way the bare DROP did.
+    --
+    -- Fix is the guarded pattern already used above for core.health_metrics'
+    -- units→unit rename: detect the OLD column order via information_schema,
+    -- and only then DROP ... CASCADE (which also drops the three mart views
+    -- that depend on this one — all three have their own CREATE OR REPLACE
+    -- later in this same file, so CASCADE plus "keep going" recreates them
+    -- fresh in the same transaction). Once this has run on a database with
+    -- the new order, the check is false forever and this becomes a permanent
+    -- no-op, same as the units→unit guard.
+    SELECT CASE WHEN count(*) = 1 THEN 'true' ELSE 'false' END AS todoist_completed_tasks_shape_ok
+    FROM information_schema.columns
+    WHERE table_schema = 'core'
+      AND table_name = 'todoist_completed_tasks'
+      AND ordinal_position = 4
+      AND column_name = 'ingested_at' \gset
+    \if :todoist_completed_tasks_shape_ok
+    \else
+        DROP VIEW IF EXISTS core.todoist_completed_tasks CASCADE;
+    \endif
+
     CREATE OR REPLACE VIEW core.todoist_completed_tasks AS
     WITH src AS (
     SELECT
@@ -366,18 +392,36 @@ data:
         year        int     NOT NULL
     );
 
+    -- quarter and week_number were added after dim_date first shipped.
+    -- ADD COLUMN IF NOT EXISTS is idempotent on its own (unlike the rename
+    -- above), so no information_schema guard is needed — but the backfill
+    -- UPDATE and the NOT NULL below still have to be safe to reissue every
+    -- run, since the INSERT below only reaches new rows.
+    ALTER TABLE core.dim_date ADD COLUMN IF NOT EXISTS quarter     int;
+    ALTER TABLE core.dim_date ADD COLUMN IF NOT EXISTS week_number int;
+    UPDATE core.dim_date SET quarter = EXTRACT(quarter FROM date)::int WHERE quarter IS NULL;
+    -- EXTRACT(week FROM date) is the ISO 8601 week number, consistent with
+    -- iso_dow above — week 1 is the week containing the year's first
+    -- Thursday, so late-December/early-January dates can carry the
+    -- adjacent year's week number.
+    UPDATE core.dim_date SET week_number = EXTRACT(week FROM date)::int WHERE week_number IS NULL;
+    ALTER TABLE core.dim_date ALTER COLUMN quarter     SET NOT NULL;
+    ALTER TABLE core.dim_date ALTER COLUMN week_number SET NOT NULL;
+
     -- Extends the spine on every run. ON CONFLICT DO NOTHING makes it
     -- idempotent, and the +30 days of headroom mean "today" always exists even
     -- between hourly runs — a dashboard opened at 00:05 would otherwise find
     -- the current day missing from the spine.
-    INSERT INTO core.dim_date (date, iso_dow, dow_name, is_weekend, week_start, month_start, year)
+    INSERT INTO core.dim_date (date, iso_dow, dow_name, is_weekend, week_start, month_start, year, quarter, week_number)
     SELECT d::date,
            EXTRACT(isodow FROM d)::int,
            to_char(d, 'Dy'),
            EXTRACT(isodow FROM d)::int >= 6,
            date_trunc('week',  d)::date,
            date_trunc('month', d)::date,
-           EXTRACT(year FROM d)::int
+           EXTRACT(year FROM d)::int,
+           EXTRACT(quarter FROM d)::int,
+           EXTRACT(week FROM d)::int
     FROM generate_series(date '2020-01-01', current_date + 30, interval '1 day') AS d
     ON CONFLICT (date) DO NOTHING;
 

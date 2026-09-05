@@ -223,6 +223,37 @@ That Longhorn result is worth keeping: the RWO-volume problem that disqualified 
 does not apply here, because KEDA only changes the replica count and never touches the
 PVC.
 
+### The alert that a scaled-down app trips
+
+Detaching the PVC is invisible to KEDA and to the app — but not to monitoring. Longhorn
+reports `longhorn_volume_robustness{state="unknown"} = 1` for **any detached volume**, and
+`LonghornVolumeUnhealthy` was written as `{state="healthy"} == 0`, which reads "not
+healthy" and therefore matches `unknown` too. audacity scaled to zero on 2026-08-30 and
+fired a permanent `critical` alert 10 minutes later, for a volume with three intact
+replicas and nothing wrong with it.
+
+The fix, in `prometheusrule-storage-and-hosts.yaml`, is to alert on the states that mean
+replica loss rather than on the absence of health:
+
+```promql
+max by (pvc, pvc_namespace) (longhorn_volume_robustness{state=~"degraded|faulted"}) == 1
+```
+
+**The general rule this is an instance of: under scale-to-zero, an alert may not treat
+"the workload is not running" as evidence of a fault.** Prefer a predicate over the
+fault itself (`degraded|faulted`) to a predicate over the absence of the healthy state
+(`healthy == 0`) — the second one silently includes every benign not-running state.
+
+Resist the obvious alternative of excluding the scale-to-zero apps by name. An allowlist
+goes stale the first time an app is wired to KEDA or unwired from it, has to be edited in
+a second repo location every time this rollout advances, and — worse — would mute a *real*
+degradation on exactly the apps it names. Keying on the fault covers every present and
+future ephemeral app with no list at all.
+
+Nothing else in the alert set needed changing: the stock `Kube*ReplicasMismatch` rules
+compare desired against actual, and KEDA moves *desired* to zero, so a scaled-down
+Deployment is not a mismatch.
+
 ### Prerequisite: the app must have a real readiness probe
 
 audacity shipped without one. A container with no readiness probe is Ready the instant its
@@ -246,26 +277,48 @@ Successfully pulled image "lscr.io/linuxserver/audacity@sha256:ea751b7f..."
 in 15m50.514s. Image size: 1120762877 bytes.
 ```
 
-The image was cached only on `hiro-cmp-03` and `-04`, where it had been running. KEDA
-scheduled the wake onto `hiro-cmp-05`, which had no layers — roughly 1.1 MB/s from lscr.io.
-
-This is structural rather than bad luck. At 0 replicas the pod can be scheduled to **any**
-node; only nodes that have run it hold layers; and an app sitting at 0 most of the time is
-exactly what kubelet image garbage collection evicts first. So even a warm node degrades
-over time.
+KEDA scheduled the wake onto `hiro-cmp-05` and the pull ran at roughly 1.1 MB/s straight
+from lscr.io.
 
 **Raising `conditionWait` does not fix this** — it only makes the browser hang longer. The
 timeouts here deliberately cover real app boot (10m, ~2x the measured 4m11s) and not a cold
 pull; failing and letting the retry land after the pull finishes beats a 20-minute hang.
 
-The real fix is a **LAN registry pull-through cache** (Talos `registries.mirrors`), which
-would speed every image pull in the cluster rather than just these three apps. Interim
-options are pinning these apps to nodes that already hold the image, or accepting a slow
-first request after a cold placement. To see which nodes cache an image:
+#### Do not propose adding a registry mirror — this cluster already has one
+
+[Spegel](https://spegel.dev) has run as a peer-to-peer mirror in
+`kubernetes/apps/kube-system/spegel/` since cluster inception (chart 0.7.4, 5/5 healthy),
+and the Talos prerequisite `discard_unpacked_layers = false` is already in
+`talos/patches/global/machine-files.yaml`, rendered into every node config. Spegel is
+working: a 30-40% mirror hit rate with hundreds of hits across
+docker.io/quay.io/ghcr.io/gcr.io/registry.k8s.io on every node.
+
+Retention is also fine. containerd is 2.2.6 on all five nodes, so the patch's
+`[plugins."io.containerd.cri.v1.images"]` key is the correct containerd-2.x plugin name,
+and `hiro-cmp-03`, `-04` **and** `-05` all serve the audacity manifest *and* the individual
+layers cmp-05 was pulling. So the blobs were retained, servable, and containerd was
+configured to ask for them — and the pull still went to the internet. Why is an open
+question about **cmp-05 east-west networking**, not about images or Spegel's config.
+
+#### The probe trap — read this before diagnosing Spegel
+
+Spegel's registry API keys on the **`?ns=<registry>` query parameter**, the way containerd
+actually calls a mirror. A `Host:` header does **not** work and returns a misleading `404`
+rather than an error. An earlier version of this document concluded "containerd kept the
+unpacked snapshot but discarded the compressed blobs" purely from that artifact. It was
+wrong, and the wrong version was committed here — hence this warning.
 
 ```bash
-kubectl get node <node> -o jsonpath='{.status.images[*].names}' | tr ' ' '\n' | grep <image>
+kubectl -n kube-system port-forward pod/<spegel-pod> 5000:5000
+curl -sI "http://127.0.0.1:5000/v2/<repo>/manifests/sha256:<digest>?ns=<registry>"
 ```
+
+Allow ~6s after starting the port-forward; a premature curl returns HTTP `000`, which is a
+connection failure and not a 404.
+
+Note also that `kubectl get node <node> -o jsonpath='{.status.images[*].names}'` answers a
+*different* question — whether the node lists the image, not whether Spegel can serve its
+blobs. Those two answers can differ, which is the whole trap.
 
 ### Timeout knobs, for reference
 
