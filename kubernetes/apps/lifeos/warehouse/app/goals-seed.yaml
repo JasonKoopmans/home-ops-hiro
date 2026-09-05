@@ -30,10 +30,10 @@ data:
     MoveCaloriesPerDay,threshold,MoveCalories,,,2020-01-01,"Daily Apple Move ring target",950,kcal
     ExerciseMinutesPerDay,threshold,ExerciseMinutes,,,2020-01-01,"Daily Apple Exercise ring target, adjust to your real goal",30,minutes
     StandMinutesPerDay,threshold,StandMinutes,,,2020-01-01,"Daily Apple Stand ring target, adjust to your real goal",90,minutes
-    NextTodosCompletedPerWeek,threshold,NextTodosCompleted,,,2020-01-01,"Complete your next todos for the week",5,items
-    NextTodosCompletedPerMonth,threshold,NextTodosCompleted,,,2020-01-01,"Complete your next todos for the month",25,items
-    NextTodoMinutesCompletedPerWeek,threshold,NextTodoMinutes,,,2020-01-01,"Complete your next todos for the week",60,minutes
-    NextTodoMinutesCompletedPerMonth,threshold,NextTodoMinutes,,,2020-01-01,"Complete your next todos for the month",300,minutes
+    NextTodosCompletedPerWeek,threshold,NextTodosCompletedTrailing7d,,,2020-01-01,"Complete your next todos for the week",5,items
+    NextTodosCompletedPerMonth,threshold,NextTodosCompletedTrailing30d,,,2020-01-01,"Complete your next todos for the month",25,items
+    NextTodoMinutesCompletedPerWeek,threshold,NextTodoMinutesTrailing7d,,,2020-01-01,"Complete your next todos for the week",60,minutes
+    NextTodoMinutesCompletedPerMonth,threshold,NextTodoMinutesTrailing30d,,,2020-01-01,"Complete your next todos for the month",300,minutes
     MoveCaloriesPerDayHitPerWeek,frequency,,MoveCaloriesPerDay,7,2020-01-01,"Hit the Move ring target at least 5 of 7 days this week",5,days
     ExerciseMinutesPerDayHitPerWeek,frequency,,ExerciseMinutesPerDay,7,2020-01-01,"Hit the Exercise ring target at least 5 of 7 days this week",5,days
     StandMinutesPerDayHitPerWeek,frequency,,StandMinutesPerDay,7,2020-01-01,"Hit the Stand ring target at least 5 of 7 days this week",5,days

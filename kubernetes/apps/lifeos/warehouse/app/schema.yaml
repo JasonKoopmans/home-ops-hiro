@@ -596,6 +596,27 @@ data:
     WHERE d.date BETWEEN current_date - (365 * 3) AND current_date
     GROUP BY d.date;
 
+    -- Same spine-join shape as daily_task_completions above, scoped to tasks
+    -- carrying core.todoist_completed_tasks.indicator_next (the 'next' label)
+    -- — the feed for the NextTodos*/NextTodoMinutes* goals below.
+    -- coalesce(sum(...), 0) rather than bare sum(): sum() over zero matching
+    -- rows is NULL, and a NULL day would poison the trailing-window sums in
+    -- daily_metric_values below (sum() skips NULLs, silently under-counting
+    -- the window instead of correctly counting that day as zero).
+    -- time_minutes is itself NULL for a next-task with no Time.* label, and
+    -- stays NULL-and-dropped here deliberately: an unlabeled task should
+    -- count toward TasksCompletedNext but contribute nothing to
+    -- MinutesCompletedNext rather than block the whole day's sum.
+    CREATE OR REPLACE VIEW mart.daily_todoist_next AS
+    SELECT d.date                                   AS "Date",
+           count(t.task_key)                        AS "TasksCompletedNext",
+           coalesce(sum(t.time_minutes), 0)::numeric AS "MinutesCompletedNext"
+    FROM core.dim_date d
+    LEFT JOIN core.todoist_completed_tasks t
+        ON t.completed_on = d.date AND t.indicator_next
+    WHERE d.date BETWEEN current_date - (365 * 3) AND current_date
+    GROUP BY d.date;
+
     -- Completions resolved to project names. LEFT JOIN on the lookup so a task
     -- in a project we have not ingested yet still counts, labelled rather than
     -- dropped — silently losing rows to a missing dimension row is the classic
@@ -627,6 +648,22 @@ data:
     -- condition instead of a FILTER/CASE per metric — add a metric here (and
     -- a matching source_metric value in goals.csv) rather than editing
     -- goal_progress when the next goal-able metric shows up.
+    -- The four NextTodos*/NextTodoMinutes* branches below are trailing-window
+    -- sums, not single-day values like the branches above them — the goals
+    -- that use them ('...PerWeek' / '...PerMonth', see goals-seed.yaml) are
+    -- inherently period totals, and core.goals' threshold shape only ever
+    -- compares one day's value against a target. Windowing here, at the
+    -- series level, is what lets goal_progress stay untouched: each day's
+    -- "value" for e.g. NextTodosCompletedTrailing7d already IS the trailing
+    -- 7-day count, so the existing single-day threshold comparison is
+    -- correct without knowing anything about windows.
+    --
+    -- ROWS BETWEEN N-1 PRECEDING AND CURRENT ROW gives a true trailing
+    -- N-calendar-day sum (not N *matched* rows) only because
+    -- mart.daily_todoist_next is built off the core.dim_date spine and so
+    -- has exactly one row per calendar day with no gaps — a window frame
+    -- counted in rows is only equivalent to one counted in days when the
+    -- underlying rows are already gapless and date-ordered.
     CREATE OR REPLACE VIEW mart.daily_metric_values AS
     SELECT "Date" AS date, 'MoveCalories'::text AS source_metric, "MoveCalories" AS value FROM mart.daily_overview
     UNION ALL
@@ -634,7 +671,23 @@ data:
     UNION ALL
     SELECT "Date", 'StandMinutes', "StandMinutes" FROM mart.daily_overview
     UNION ALL
-    SELECT "Date", 'TasksCompleted', "TasksCompleted"::numeric FROM mart.daily_overview;
+    SELECT "Date", 'TasksCompleted', "TasksCompleted"::numeric FROM mart.daily_overview
+    UNION ALL
+    SELECT "Date", 'NextTodosCompletedTrailing7d',
+           (sum("TasksCompletedNext") OVER (ORDER BY "Date" ROWS BETWEEN 6 PRECEDING AND CURRENT ROW))::numeric
+    FROM mart.daily_todoist_next
+    UNION ALL
+    SELECT "Date", 'NextTodosCompletedTrailing30d',
+           (sum("TasksCompletedNext") OVER (ORDER BY "Date" ROWS BETWEEN 29 PRECEDING AND CURRENT ROW))::numeric
+    FROM mart.daily_todoist_next
+    UNION ALL
+    SELECT "Date", 'NextTodoMinutesTrailing7d',
+           sum("MinutesCompletedNext") OVER (ORDER BY "Date" ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)
+    FROM mart.daily_todoist_next
+    UNION ALL
+    SELECT "Date", 'NextTodoMinutesTrailing30d',
+           sum("MinutesCompletedNext") OVER (ORDER BY "Date" ROWS BETWEEN 29 PRECEDING AND CURRENT ROW)
+    FROM mart.daily_todoist_next;
 
     -- Gauge/goal-line feed. One row per (day, goal), both goal_type shapes
     -- unioned into one shape dashboards can filter on "GoalType".
