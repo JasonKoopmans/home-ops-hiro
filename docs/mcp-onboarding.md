@@ -178,22 +178,35 @@ interactively, a hang anywhere non-interactive. Adding a server to `.mcp.json`
 therefore means adding its name there too; that second step is deliberate, so a
 new endpoint is an explicit decision rather than an inherited one.
 
-**`grafana-lifeos` is the first entry here needing auth-ladder step 2.**
+**Two entries need auth-ladder step 2: `grafana-lifeos` and `proxmox`.**
 Claude Code expands `${VAR}` in `.mcp.json` string values (including
 `headers`) from the process environment at session start — the file commits
-the *reference*, never the token. Export the real value before launching
+the *reference*, never the token. Export the real values before launching
 `claude`, e.g. in `~/.zshrc`:
 
 ```sh
-export MCP_GRAFANA_LIFEOS_TOKEN="<value from
+export MCP_GRAFANA_LIFEOS_TOKEN="<MCP_GRAFANA_SERVER_TOKEN from
   kubernetes/apps/mcp/mcp-grafana-lifeos/app/secret-auth-token.sops.yaml>"
+export MCP_PROXMOX_TOKEN="<MCP_API_KEY from
+  kubernetes/apps/mcp/mcp-proxmox/app/secret.sops.yaml>"
 ```
 
 Claude Code does not read repo `.env` files for this — it has to be a real
-exported variable in the shell that starts `claude`. No such step exists yet
-for n8n/Hermes wiring to this same server; each carries the header its own
-way when that's set up (n8n: a credential object on the MCP node; Hermes:
-`hermes mcp add ... --header`), not via this env var.
+exported variable in the shell that starts `claude`. `.devcontainer/devcontainer.json`
+forwards both through `remoteEnv`, so a devcontainer inherits whatever the host
+shell exported and nothing more.
+
+An unset variable does not fail loudly: the header is sent with the literal
+text unexpanded and the server answers `401`, which reads like a bad token
+rather than a missing export. Check with `echo ${MCP_PROXMOX_TOKEN:-UNSET}`
+before debugging anything else.
+
+**`proxmox` is pre-approved in `enabledMcpjsonServers`, which deserves a
+sentence of its own.** That setting approves *connecting* to the server, not
+calling its tools — there are no `mcp__` entries in `permissions.allow`, so
+every one of its 47 tools still prompts per call, `delete_vm` included. If that
+ever changes, adding `mcp__proxmox__*` to the allow-list would hand every
+session in this repo silent VM deletion; don't.
 
 This is redundant with the `Bash(kubectl get:*)` allow-list **only when the local
 kubeconfig exists**. It does not in a fresh clone or a git worktree — the paths
@@ -219,6 +232,35 @@ environments where local `kubectl` cannot.
 
 Restart Desktop after editing, and remove any failed custom connector from the
 UI or it keeps erroring alongside the working one.
+
+**For a server needing step-2 auth, use `--header-file` rather than `--header`.**
+Desktop is a GUI app: it is launched by launchd, not by your shell, so it does
+not inherit anything exported in `~/.zshrc` — the `${VAR}` expansion that works
+for Claude Code is unavailable here. The alternatives are the token in plaintext
+inside `claude_desktop_config.json`, or a file you can lock down:
+
+```json
+{
+  "mcpServers": {
+    "proxmox": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp-proxmox.koopmans.co/mcp",
+               "--header-file", "/Users/<you>/.config/mcp/proxmox-headers.txt"]
+    }
+  }
+}
+```
+
+The file takes `Name: Value` lines and ignores blanks and `#` comments:
+
+```
+# Source of truth: kubernetes/apps/mcp/mcp-proxmox/app/secret.sops.yaml (MCP_API_KEY)
+Authorization: Bearer <token>
+```
+
+Keep it outside the repo at mode `600`. `--header` also exists and expands
+`${VAR}` from the environment, but that environment is launchd's, so it is the
+wrong tool here.
 
 The reason is a third DNS position, distinct from the two in the table above:
 **a custom connector is fetched by Anthropic's servers, not by the Mac.** These
@@ -263,7 +305,13 @@ kubectl -n default exec deploy/hermes-ai-agent -c app -- hermes mcp test kuberne
 
 `hermes mcp` also has `list`, `remove` and `serve` (the last exposes Hermes
 itself as an MCP server — not used here). `--url` takes an HTTP endpoint;
-`--command`/`--args` is the stdio path. Hermes already ran one HTTP MCP server
+`--command`/`--args` is the stdio path.
+
+**There is no `--header` flag** — an earlier version of this document claimed
+one. Authentication is `--auth {oauth,header}`, and `header` takes no value on
+the command line: like the tool-enable step it is answered interactively, so it
+needs the same `printf ... | kubectl exec -i` treatment. Confirmed against the
+running pod's `hermes mcp add --help`. Hermes already ran one HTTP MCP server
 before this (`obsidian` at `http://obsidian:27124/mcp`), so the pattern was
 proven rather than assumed.
 
@@ -561,4 +609,5 @@ kubectl auth can-i --list --as=system:serviceaccount:mcp:mcp-kubernetes | grep l
 | `mcp/mcp-grafana-lifeos` | native-http | **step 2** (`MCP_GRAFANA_SERVER_TOKEN` bearer) | `grafana/mcp-grafana` against the LifeOS Grafana. `--disable-write`, Viewer-role service account token. Jumped straight to step 2 — its "LifeOS Warehouse" datasource is `access: proxy` Postgres, so a query tool reads that DB with Grafana's own stored credentials; that's a materially bigger exposure than "read some dashboards" |
 | `mcp/mcp-grafana-monitoring` | native-http | none (phase 1) | Same image against the kube-prometheus-stack Grafana. Upstream connects to one Grafana per process — two deployments, not one with two URLs |
 | `mcp/mcp-playwright` | native-http | none — **ceiling, not phase 1** | `@playwright/mcp` official image. Zero built-in auth upstream (verified against source/README), so there is no app-level-token step 2 for this server; real caller-auth needs an Envoy `SecurityPolicy` (step 3). `--isolated` (no persisted profile/PVC), `--caps vision,pdf` beyond the core toolset, chromium only (the only browser the Docker image bundles). A full browser, not a read-only query against one backend — bigger exposure than its siblings; revisit before anything less trusted reaches this endpoint. Egress-restricted via `networkpolicy.yaml` (blocks the LAN and the cluster's own pod/service CIDRs) so it can't be used to pivot into internal services even while unauthenticated — a separate axis from the still-open auth question |
+| `mcp/mcp-proxmox` | native-http | **step 2** (`MCP_API_KEY` bearer) | `RekklesNA/ProxmoxMCP-Plus` against the five-node Proxmox cluster. **The only server here that can destroy infrastructure** — 47 tools, no read-only mode, including `delete_vm`, `restore_backup` and `execute_vm_command`, and the guests include this cluster's own five VMs. Shipped with a full-privilege API token by explicit decision, so the credential is the boundary: a `PVEAuditor` token makes every mutating tool 403 with no manifest change. `COMMAND_POLICY_MODE=deny_all` gates command execution separately. DNS-rebinding protection stays **on** — its allow-list takes a comma list, unlike `mcp-kubernetes` |
 | `default/obsidian` | — | none | Existing app exposing `/mcp` at `obsidian-mcp.${SECRET_DOMAIN}` |
