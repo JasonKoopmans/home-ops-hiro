@@ -27,8 +27,7 @@ metadata:
 data:
   goals.csv: |
     metric,goal_type,source_metric,base_metric,window_days,effective_date,goal_text,value,unit
-    MoveCaloriesPerDay,threshold,MoveCalories,,,2026-01-01,"SAMPLE - daily Apple Move ring target, adjust to your real goal",500,kcal
-    MoveCaloriesPerDay,threshold,MoveCalories,,,2026-09-05,"Daily Apple Move ring target",950,kcal
+    MoveCaloriesPerDay,threshold,MoveCalories,,,2026-01-01,"Daily Apple Move ring target",950,kcal
     ExerciseMinutesPerDay,threshold,ExerciseMinutes,,,2026-01-01,"SAMPLE - daily Apple Exercise ring target, adjust to your real goal",30,minutes
     StandMinutesPerDay,threshold,StandMinutes,,,2026-01-01,"SAMPLE - daily Apple Stand ring target, adjust to your real goal",720,minutes
     MoveCaloriesPerDayHitPerWeek,frequency,,MoveCaloriesPerDay,7,2026-01-01,"SAMPLE - hit the Move ring target at least 5 of 7 days this week",5,days
