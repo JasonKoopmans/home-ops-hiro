@@ -14,3 +14,4 @@ resources:
   - ./mcp-playwright/ks.yaml
   - ./mcp-postgres/ks.yaml
   - ./mcp-prometheus/ks.yaml
+  - ./mcp-proxmox/ks.yaml

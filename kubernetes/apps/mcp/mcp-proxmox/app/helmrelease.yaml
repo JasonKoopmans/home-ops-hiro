@@ -1,0 +1,174 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# BLAST RADIUS — read before changing the token or the route.
+#
+# This server exposes 47 tools and has no read-only mode. Among them:
+# delete_vm, delete_container, delete_snapshot, delete_backup, stop_vm,
+# reset_vm, rollback_snapshot, restore_backup and execute_vm_command. It is
+# pointed at a five-node Proxmox cluster (vm01-vm05) whose guests include the
+# five VMs that ARE this Kubernetes cluster, so `delete_vm` against the wrong
+# VMID destroys a cluster node.
+#
+# The tool list is not the security boundary — the Proxmox API token is, the
+# same way the ClusterRole is what actually bounds mcp-kubernetes. This app is
+# deployed with a FULL-PRIVILEGE token by explicit decision (2026-08-15), so
+# every one of those tools works. Confirmed against the live API: the token has
+# privilege separation off and holds every role on `/`, including VM.Allocate,
+# Sys.PowerMgmt and VM.GuestAgent.Unrestricted. Two consequences:
+#   * Any client that can reach this endpoint with the bearer token can delete
+#     VMs. That includes n8n workflows and Hermes, which routinely read
+#     untrusted input — the ordinary prompt-injection path from "summarise this
+#     log" to a tool call.
+#   * Narrowing later is a Proxmox-side change, not a manifest change: swap the
+#     token for one holding only PVEAuditor and every mutating tool starts
+#     returning 403 without touching this file.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app mcp-proxmox
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        annotations:
+          # Restart on token/API-key rotation — both live in the Secret below.
+          reloader.stakater.com/auto: "true"
+        # The server keeps a SQLite job store (see PROXMOX_JOBS_SQLITE_PATH) in
+        # a pod-local emptyDir, so a second replica would not share job state.
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/rekklesna/proxmoxmcp-plus
+              # 0.5.14 is the newest published tag and is byte-identical to
+              # :latest. Note the registry publishes BOTH `0.5.14` and
+              # `v0.5.14`; the unprefixed form is used here.
+              tag: 0.5.14
+            env:
+              # Selects the Streamable HTTP server. The image's default mode is
+              # the OpenAPI bridge on 8811, which is a different surface
+              # entirely — omitting this does not give you MCP.
+              PROXMOX_MCP_MODE: mcp-http
+              MCP_TRANSPORT: STREAMABLE_HTTP
+              MCP_HOST: 0.0.0.0
+              MCP_PORT: &port 3000
+              # Addressed by IP on purpose. The Proxmox host is vm01, which
+              # resolves only on the LAN — it is NXDOMAIN from 1.1.1.1, and
+              # in-cluster CoreDNS forwards to public resolvers, so a pod here
+              # cannot resolve the name. The IP is in the certificate's SAN
+              # list, so TLS hostname verification still passes.
+              PROXMOX_HOST: 192.168.1.11
+              PROXMOX_PORT: "8006"
+              # Not negotiable: the image refuses to start with verify_ssl
+              # false unless dev_mode is on. Proxmox presents its own cluster
+              # CA rather than a public one, hence the CA bundle below.
+              PROXMOX_VERIFY_SSL: "true"
+              # requests honours this natively and proxmoxer does not disable
+              # trust_env, so pointing it at the PVE cluster CA is what makes
+              # verification succeed against the self-signed certificate.
+              REQUESTS_CA_BUNDLE: /certs/pve-root-ca.pem
+              # The job store must land on the writable emptyDir; its default
+              # is relative to the app directory and fails immediately under
+              # readOnlyRootFilesystem with "unable to open database file".
+              PROXMOX_JOBS_SQLITE_PATH: /tmp/proxmox-jobs.sqlite3
+              # Unlike mcp-kubernetes, this allow-list takes a comma-separated
+              # list, so rebinding protection stays ON and still covers both
+              # the gateway hostname and in-cluster Service DNS. Verified: both
+              # names return 200, anything else 421. Note the entries are bare
+              # hostnames — a `host:*` form rejects everything, including the
+              # hosts it names.
+              MCP_DNS_REBINDING_PROTECTION: "true"
+              MCP_ALLOWED_HOSTS: mcp-proxmox.${SECRET_DOMAIN},mcp-proxmox.mcp.svc.cluster.local
+              # Upstream's own default, set explicitly so it is visible. Gates
+              # execute_vm_command — arbitrary command execution inside guests —
+              # independently of the API token's privileges. Relaxing this is a
+              # separate, deliberate decision from the token scope; if you do,
+              # COMMAND_POLICY_APPROVAL_TOKEN is the intended companion.
+              COMMAND_POLICY_MODE: deny_all
+              TZ: ${TIMEZONE}
+            envFrom:
+              - secretRef:
+                  name: mcp-proxmox-secret
+            probes:
+              # TCP, as with the other MCP apps: /mcp is POST-only and now also
+              # requires a bearer token, so an httpGet probe would need the
+              # credential just to report health.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                # Measured at ~62Mi serving requests.
+                memory: 96Mi
+              limits:
+                memory: 384Mi
+
+    defaultPodOptions:
+      # Talks to the Proxmox API over HTTPS, never to the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        # Read off the image before deploying:
+        #   docker run --rm --entrypoint sh ghcr.io/rekklesna/proxmoxmcp-plus:0.5.14 -c id
+        #   uid=1000(proxmoxmcp) gid=1000(proxmoxmcp)
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+
+    persistence:
+      # Required, unlike mcp-prometheus: the SQLite job store needs a writable
+      # path or the process exits at startup.
+      tmp:
+        type: emptyDir
+      certs:
+        type: configMap
+        name: mcp-proxmox-ca
+        globalMounts:
+          - path: /certs
+            readOnly: true
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        # envoy-internal, and staying there. Unlike the other two MCP apps this
+        # one is not read-only, so the "internal means the whole LAN" caveat
+        # that is acceptable for them is doing real work here — the bearer
+        # token below is what actually gates it.
+        hostnames: ["mcp-proxmox.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: *port

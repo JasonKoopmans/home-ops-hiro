@@ -1,0 +1,52 @@
+---
+# Proxmox's cluster CA — the public half, which is why this is a ConfigMap and
+# not the SOPS Secret. Fetched 2026-08-15 from the API rather than by SSH:
+#
+#   GET /api2/json/nodes/vm01/certificates/info  ->  filename pve-root-ca.pem
+#
+# and verified to sign the certificate vm01:8006 actually presents
+# (`openssl verify -CAfile` => OK). Expires 2035-10-14.
+#
+# It is needed because the image refuses to start with TLS verification
+# disabled and Proxmox signs its own certificates. If Proxmox regenerates them
+# (`pvecm updatecerts -f`), refresh this file the same way.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-proxmox-ca
+data:
+  pve-root-ca.pem: |
+    -----BEGIN CERTIFICATE-----
+    MIIFzTCCA7WgAwIBAgIUAi5/yfyktXv4MWBiyQMNGfgWUEAwDQYJKoZIhvcNAQEL
+    BQAwdjEkMCIGA1UEAwwbUHJveG1veCBWaXJ0dWFsIEVudmlyb25tZW50MS0wKwYD
+    VQQLDCQ3ODI4Yjc1NS1mYmMyLTQ3MzEtOGVkMy04MzkzYzRmYjBlODExHzAdBgNV
+    BAoMFlBWRSBDbHVzdGVyIE1hbmFnZXIgQ0EwHhcNMjUxMDE2MjEwMDE1WhcNMzUx
+    MDE0MjEwMDE1WjB2MSQwIgYDVQQDDBtQcm94bW94IFZpcnR1YWwgRW52aXJvbm1l
+    bnQxLTArBgNVBAsMJDc4MjhiNzU1LWZiYzItNDczMS04ZWQzLTgzOTNjNGZiMGU4
+    MTEfMB0GA1UECgwWUFZFIENsdXN0ZXIgTWFuYWdlciBDQTCCAiIwDQYJKoZIhvcN
+    AQEBBQADggIPADCCAgoCggIBAMivHTRm1OMb6qvkMGug0+GK370haP5oUC8sR+iB
+    CF/Zar57tIkVBO2OV8FoWEdt5rXuyP6S490ZeasUT3JN/XnXAISJIYum89oMVIfZ
+    uiYm/wu/NyVrx4BwiKn9W98zzfq4DC7x1qnzzZe9PmRvADuYPZVeefrNMxf1gEn1
+    pedHpMO1PJXdV5viNIJ4IRz4CH3Uxrcnv6ePvLsB3dFqw4soVVxHdiNSaTveeDHm
+    7eGRmO5VvRJUMnbmXu0ok50giyaZ6KwxfdR/8PeF+GD1IBr0xqBzyoOxhvIOAt24
+    PiARebi1UZLi2BhD+3jtRVZviLReoYrI3tsC5mfiH6butAxcnzIniymjDEXQCrHE
+    8dFnaDX311YXkQnqYcKs6q8SrVlva0NMvKYjz9/MGumpnhwalE+20c/TN4sqGhUY
+    RbgGIMBryJddKeG/UaKyYqHYFlPVafbuyZ4n32ufdwQIJdRi4P78Ql9o9S10Nikh
+    TrHATx10azc3VhMH6f+FzAbilkJr0SqjZ0t8ncKhxDxBHEi7hCSgqvsQIUwBrSF5
+    z6ILiN6PNGK3/zRs4K9tkb0k4qdtGNvGk3DgC0L6kTnxmxhNqy4Pk4IbeoFFE1S4
+    jO/Vqjz9kfDu1kt9jv+0PaOlnhafhDbqFNuEpD1llQWsS7vNTOGn4BQMCugJpEvM
+    N7MHAgMBAAGjUzBRMB0GA1UdDgQWBBTNBwSNYFGQCmxBUORVR91u/r58MzAfBgNV
+    HSMEGDAWgBTNBwSNYFGQCmxBUORVR91u/r58MzAPBgNVHRMBAf8EBTADAQH/MA0G
+    CSqGSIb3DQEBCwUAA4ICAQBfunnbJH7xZbVFYgBy8DRUE6SaAm1mGEQdAenTW+xB
+    c89wpZbm76U4+HjZsSdx8cdg488VlqafM5RmU3CN4XtJ+vlD66F87r6imtXDDR4q
+    mtYORH0K5PuEcjDHjKJQFu/0dhGKQH5NXkJL5Qq1rNHjfBiXAulV+R2cdFlcaI2Z
+    6RFUPuju76DfCaHrbiR6X0pLEcwimHU5uVgFmY5RetdRFM875eMiRZ1SqXeigCue
+    m8hlISVWb9ERaz59G7GGt4l7UFStO7OPGt/+0gAKDuzRuefIvuKzV1ArTbnFyoB2
+    0RA/KIBs6s7r1sI/wuQqOHqH9C3XJN5F03tbSnNiT2trBrFUq6lRdGflyZ9BlxBU
+    HBCAfuF/0iAcR3aIcvSRl+PCNDAdhL8GWyUwHFGG35yLedJHQqBjsM0FJGwacMsb
+    Gy650xNpDtPbxH7O7EUX0jxdd54Udf6uHfMZla1cEf5aLG7KGlthIk4inMXjyoNt
+    0ezB95CkeK60VF4KmAa9erDUUTXo+Fnpbd3gm7FZFiF6W/MGR0vrhGJZic58vxhB
+    CetmQDJEK/CjAbD6lDVorhw6/NpBFIr+tWSpXW/cqcUyGhs5/ZuS6o5lAj5qvWLA
+    Z84Zrjz4OR3bofCHwqRY2NJV9ccj/iAY/89j44YuC7gb/Db5oVCGs1S0fSn/V8W5
+    tQ==
+    -----END CERTIFICATE-----
