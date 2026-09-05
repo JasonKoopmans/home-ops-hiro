@@ -25,7 +25,7 @@ spec:
           app:
             image:
               repository: lscr.io/linuxserver/audacity
-              tag: latest@sha256:4d80ecf6fa70785d304400f28b7e08699a00421454bdfbbd8e582bb8180ca0c7
+              tag: latest@sha256:d0e1d7cb655e69ddb33433c8a560e14a5a4779903ba5c4522b65d5e70f1d837c
             env:
               TZ: ${TIMEZONE}
               PUID: "1001"
