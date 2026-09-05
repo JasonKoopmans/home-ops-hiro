@@ -453,12 +453,15 @@ data:
     -- below resolves, for every day, whichever row has the latest
     -- effective_date <= that day.
     --
-    -- No direction column (>=  vs <=) on purpose — comparison direction is
-    -- left to the dashboard. That is also why mart.goal_progress below stops
-    -- at "here is the actual value and here is the goal value" for frequency
-    -- rows rather than a computed hit-count: counting hits needs direction,
-    -- which does not exist here. Add a direction column first if a materialized
-    -- hit-count view is ever wanted.
+    -- polarity ('higher_is_better' / 'lower_is_better') says which way is
+    -- good, for Grafana coloring and trend signals — it is NOT the >= vs <=
+    -- comparison direction a materialized hit-count would need.
+    -- mart.goal_progress below still stops at "here is the actual value and
+    -- here is the goal value" for frequency rows rather than a computed
+    -- hit-count: counting hits needs a numeric comparison operator, which
+    -- polarity's two-value vocabulary doesn't encode. Add a real
+    -- comparison-direction column first if a materialized hit-count view is
+    -- ever wanted.
     -- value > 0 for every goal shape currently in scope (a calorie/minute/
     -- hit-count target of zero or negative is a fat-fingered CSV edit, not a
     -- real goal) — catches that at load time instead of on a Grafana panel.
@@ -481,6 +484,26 @@ data:
                 AND base_metric IS NOT NULL AND window_days IS NOT NULL AND window_days > 0)
         )
     );
+
+    -- polarity was added after core.goals first shipped, same idempotent
+    -- add-then-backfill-then-NOT-NULL shape as dim_date's quarter/week_number
+    -- above. Needed here too even though load-goals.sql truncates+reloads
+    -- this table every run: that reload is a *separate* transaction that
+    -- runs after this one, so a bare ALTER ... SET NOT NULL here would fail
+    -- against the still-old rows left by the *previous* hourly run.
+    --
+    -- No CHECK constraint: ALTER TABLE has no ADD CONSTRAINT IF NOT EXISTS,
+    -- and this file can't use a DO block to guard one (see the dollar-quoting
+    -- note at the top). The two allowed values are enforced in
+    -- load-goals.sql instead, the same way it already refuses an empty
+    -- goals.csv.
+    --
+    -- Every goal in goals.csv today is 'higher_is_better', so that is the
+    -- backfill default; a metric where less is better sets
+    -- 'lower_is_better' explicitly in its own CSV row.
+    ALTER TABLE core.goals ADD COLUMN IF NOT EXISTS polarity text;
+    UPDATE core.goals SET polarity = 'higher_is_better' WHERE polarity IS NULL;
+    ALTER TABLE core.goals ALTER COLUMN polarity SET NOT NULL;
 
     -- Data is loaded by load-goals.sql, run as its own psql invocation by
     -- cronjob-schema.yaml — deliberately NOT in this file's transaction. A
@@ -505,11 +528,12 @@ data:
            g.window_days,
            g.goal_text,
            g.value,
-           g.unit
+           g.unit,
+           g.polarity
     FROM core.dim_date dd
     CROSS JOIN (SELECT DISTINCT metric FROM core.goals) gm
     JOIN LATERAL (
-        SELECT goal_type, source_metric, base_metric, window_days, goal_text, value, unit
+        SELECT goal_type, source_metric, base_metric, window_days, goal_text, value, unit, polarity
         FROM core.goals g
         WHERE g.metric = gm.metric AND g.effective_date <= dd.date
         ORDER BY g.effective_date DESC
@@ -689,6 +713,50 @@ data:
            sum("MinutesCompletedNext") OVER (ORDER BY "Date" ROWS BETWEEN 29 PRECEDING AND CURRENT ROW)
     FROM mart.daily_todoist_next;
 
+    -- Multi-window trailing averages for metrics worth watching as a trend
+    -- rather than day-to-day, alongside the raw daily value. Wide, not long
+    -- like daily_metric_values above: Grafana's Postgres time-series query
+    -- turns every numeric column into its own line from one query, so raw +
+    -- 3 averages plot together with no Grafana-side transform. One UNION
+    -- ALL branch per metric — copy Move's when the next one is ready.
+    --
+    -- avg(coalesce(value, 0)) rather than bare avg(): matches the
+    -- trailing-sum precedent above (mart.daily_todoist_next) — a day with no
+    -- observation counts as zero and drags the average down, rather than
+    -- being skipped and quietly shrinking the window's denominator. Only
+    -- safe because mart.daily_overview is already a gapless dim_date spine,
+    -- the same precondition the ROWS BETWEEN trick above depends on.
+    --
+    -- Known gap, deliberately not fixed yet: this 0-fills across the
+    -- *entire* 3-year mart.daily_overview window, not just gaps since a
+    -- metric started being tracked. Move's real history happens to fill
+    -- that whole window, so it is invisible here — but the next metric
+    -- added with a shorter history would have its pre-tracking days wrongly
+    -- 0-filled, dragging its early trend lines toward zero. Bound that
+    -- branch to its own MIN(date) when such a metric is added, not before.
+    --
+    -- Polarity comes from core.goals by latest effective_date per
+    -- source_metric, not day-resolved like core.goals_by_date above —
+    -- polarity is not the kind of thing that changes over time, so full
+    -- effective-dating is more machinery than the column needs.
+    CREATE OR REPLACE VIEW mart.metric_trends AS
+    SELECT o."Date"                                                     AS "Date",
+           'MoveCalories'::text                                         AS "Metric",
+           o."MoveCalories"                                             AS "Value",
+           avg(coalesce(o."MoveCalories", 0)) OVER (ORDER BY o."Date"
+               ROWS BETWEEN 29  PRECEDING AND CURRENT ROW)               AS "Avg30d",
+           avg(coalesce(o."MoveCalories", 0)) OVER (ORDER BY o."Date"
+               ROWS BETWEEN 89  PRECEDING AND CURRENT ROW)               AS "Avg90d",
+           avg(coalesce(o."MoveCalories", 0)) OVER (ORDER BY o."Date"
+               ROWS BETWEEN 364 PRECEDING AND CURRENT ROW)               AS "Avg365d",
+           g.polarity                                                   AS "Polarity"
+    FROM mart.daily_overview o
+    LEFT JOIN LATERAL (
+        SELECT polarity FROM core.goals
+        WHERE source_metric = 'MoveCalories'
+        ORDER BY effective_date DESC LIMIT 1
+    ) g ON true;
+
     -- Gauge/goal-line feed. One row per (day, goal), both goal_type shapes
     -- unioned into one shape dashboards can filter on "GoalType".
     --
@@ -713,7 +781,8 @@ data:
            mv.value                AS "ActualValue",
            NULL::int               AS "WindowDays",
            NULL::text              AS "BaseGoal",
-           NULL::numeric           AS "BaseGoalValue"
+           NULL::numeric           AS "BaseGoalValue",
+           gd.polarity              AS "Polarity"
     FROM core.goals_by_date gd
     LEFT JOIN mart.daily_metric_values mv
         ON mv.source_metric = gd.source_metric AND mv.date = gd.date
@@ -728,7 +797,8 @@ data:
            mv.value                AS "ActualValue",
            gd.window_days          AS "WindowDays",
            gd.base_metric          AS "BaseGoal",
-           base.value              AS "BaseGoalValue"
+           base.value              AS "BaseGoalValue",
+           gd.polarity              AS "Polarity"
     FROM core.goals_by_date gd
     LEFT JOIN core.goals_by_date base
         ON base.metric = gd.base_metric AND base.date = gd.date
@@ -831,7 +901,7 @@ data:
     -- postBuild substitution rewrites `$$` to `$` and would mangle one.
     CREATE TEMP TABLE goals_staging (LIKE core.goals INCLUDING DEFAULTS);
 
-    \copy goals_staging (metric, goal_type, source_metric, base_metric, window_days, effective_date, goal_text, value, unit) FROM '/seed/goals.csv' WITH (FORMAT csv, HEADER true)
+    \copy goals_staging (metric, goal_type, source_metric, base_metric, window_days, effective_date, goal_text, value, unit, polarity) FROM '/seed/goals.csv' WITH (FORMAT csv, HEADER true)
 
     -- goals.csv is the single source of truth for core.goals, so an empty
     -- load is (almost certainly) a mistake — a blanked file, a bad merge, a
@@ -846,6 +916,29 @@ data:
         \quit 1
     \endif
 
+    -- core.goals has no CHECK on polarity (see the ALTER comment in
+    -- schema.sql for why: ALTER TABLE has no ADD CONSTRAINT IF NOT EXISTS,
+    -- and this file can't guard one with a DO block either), so the two
+    -- allowed values are enforced here instead, same refuse-before-TRUNCATE
+    -- pattern as has_rows above. Checked against trim(polarity), matching
+    -- what actually reaches the INSERT below, so a value that would load
+    -- fine (incidental whitespace) doesn't fail this check that runs before
+    -- it. A genuinely blank field never reaches here at all: goals_staging
+    -- is `LIKE core.goals`, which always copies core.goals' NOT NULL on
+    -- polarity regardless of INCLUDING/EXCLUDING — \copy itself already
+    -- rejects a blank field with its own error. This check exists for the
+    -- other failure: a non-blank value that isn't one of the two allowed
+    -- strings. "IS NOT NULL AND ... IN (...)" rather than a bare IN as
+    -- defense in depth: `NULL IN (...)` is NULL, not false, and bool_and()
+    -- silently ignores NULL inputs, which would let a NULL slip past.
+    SELECT bool_and(trim(polarity) IS NOT NULL AND trim(polarity) IN ('higher_is_better', 'lower_is_better')) AS polarity_ok
+    FROM goals_staging \gset
+    \if :polarity_ok
+    \else
+        \warn 'load-goals.sql: goals.csv has a row with an invalid polarity (must be higher_is_better or lower_is_better)'
+        \quit 1
+    \endif
+
     TRUNCATE core.goals;
 
     -- trim() on the text join keys (metric/source_metric/base_metric/unit),
@@ -857,7 +950,7 @@ data:
     -- blank gauge. nullif(..., '') turns a trimmed-to-empty optional field
     -- back into NULL so the goals_shape_by_type CHECK still sees NULL rather
     -- than '' for the column that doesn't apply to a row's goal_type.
-    INSERT INTO core.goals (metric, goal_type, source_metric, base_metric, window_days, effective_date, goal_text, value, unit)
+    INSERT INTO core.goals (metric, goal_type, source_metric, base_metric, window_days, effective_date, goal_text, value, unit, polarity)
     SELECT trim(metric),
            goal_type,
            nullif(trim(source_metric), ''),
@@ -866,5 +959,6 @@ data:
            effective_date,
            trim(goal_text),
            value,
-           nullif(trim(unit), '')
+           nullif(trim(unit), ''),
+           trim(polarity)
     FROM goals_staging;
