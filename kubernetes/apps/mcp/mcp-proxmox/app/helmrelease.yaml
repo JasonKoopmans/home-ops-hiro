@@ -5,14 +5,17 @@
 #
 # This server exposes 47 tools and has no read-only mode. Among them:
 # delete_vm, delete_container, delete_snapshot, delete_backup, stop_vm,
-# reset_vm, rollback_snapshot, restore_backup and execute_vm_command. The
-# Proxmox host it points at runs the four VMs that ARE this Kubernetes
-# cluster, so `delete_vm` against the wrong VMID destroys a cluster node.
+# reset_vm, rollback_snapshot, restore_backup and execute_vm_command. It is
+# pointed at a five-node Proxmox cluster (vm01-vm05) whose guests include the
+# five VMs that ARE this Kubernetes cluster, so `delete_vm` against the wrong
+# VMID destroys a cluster node.
 #
 # The tool list is not the security boundary — the Proxmox API token is, the
 # same way the ClusterRole is what actually bounds mcp-kubernetes. This app is
 # deployed with a FULL-PRIVILEGE token by explicit decision (2026-08-15), so
-# every one of those tools works. Two consequences:
+# every one of those tools works. Confirmed against the live API: the token has
+# privilege separation off and holds every role on `/`, including VM.Allocate,
+# Sys.PowerMgmt and VM.GuestAgent.Unrestricted. Two consequences:
 #   * Any client that can reach this endpoint with the bearer token can delete
 #     VMs. That includes n8n workflows and Hermes, which routinely read
 #     untrusted input — the ordinary prompt-injection path from "summarise this
