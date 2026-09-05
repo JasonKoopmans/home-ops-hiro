@@ -185,7 +185,7 @@ the *reference*, never the token. Export the real values before launching
 `claude`, e.g. in `~/.zshrc`:
 
 ```sh
-export MCP_GRAFANA_LIFEOS_TOKEN="<value from
+export MCP_GRAFANA_LIFEOS_TOKEN="<MCP_GRAFANA_SERVER_TOKEN from
   kubernetes/apps/mcp/mcp-grafana-lifeos/app/secret-auth-token.sops.yaml>"
 export MCP_PROXMOX_TOKEN="<MCP_API_KEY from
   kubernetes/apps/mcp/mcp-proxmox/app/secret.sops.yaml>"
