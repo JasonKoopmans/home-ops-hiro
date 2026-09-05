@@ -764,7 +764,9 @@ data:
            g.source_metric
     FROM core.goals g
     WHERE g.goal_type = 'threshold'
-      AND g.source_metric NOT IN ('MoveCalories', 'ExerciseMinutes', 'StandMinutes', 'TasksCompleted');
+      AND g.source_metric NOT IN ('MoveCalories', 'ExerciseMinutes', 'StandMinutes', 'TasksCompleted',
+                                   'NextTodosCompletedTrailing7d', 'NextTodosCompletedTrailing30d',
+                                   'NextTodoMinutesTrailing7d', 'NextTodoMinutesTrailing30d');
 
     -- ---------------------------------------------------------------------
     -- Grants
