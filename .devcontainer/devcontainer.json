@@ -26,6 +26,7 @@
 	],
 
 	"remoteEnv": {
-		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}"
+		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
+		"MCP_GRAFANA_LIFEOS_TOKEN": "${localEnv:MCP_GRAFANA_LIFEOS_TOKEN}"
 	}
 }
