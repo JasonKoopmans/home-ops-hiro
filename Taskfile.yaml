@@ -306,6 +306,43 @@ tasks:
       - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
       - { msg: "Missing longhorn evict script", sh: "test -f {{.SCRIPTS_DIR}}/longhorn-replica-evict.sh" }
 
+  # Pairs with talos:upgrade-node / talos:upgrade-k8s and Longhorn's own chart
+  # bumps: run this first so the S3 backup is minutes old, not up to 24h stale
+  # (longhorn-default-backup-job only runs at 2:45 AM), then proceed with the
+  # upgrade.
+  longhorn:backup-all:
+    desc: Trigger an on-demand Longhorn backup for a recurring-job group (default group) and wait for completion
+    summary: |
+      Args:
+        group:       recurring-job group(s) to target, space-separated (optional,
+                     default: "default" -- the group with a daily S3 backup job;
+                     matches whichever volumes normally get backed up)
+        volume:      extra explicit Longhorn volume name(s) to include, space-separated (optional)
+        all_volumes: set to "true" to target every Longhorn volume, ignoring group
+                     policy entirely -- this also backs up scratch/tsdb/snapshot-only
+                     volumes the storage classes deliberately exclude from S3 backup
+                     (optional)
+        concurrency: max backups in flight at once (optional, default 2, matches
+                     longhorn-default-backup-job's own concurrency)
+        timeout:     seconds to wait per volume's snapshot+backup pipeline (optional, default 1800)
+        yes:         set to "true" to skip the confirmation prompt (optional)
+
+      Creates a Snapshot then a Backup custom resource per target volume (the same
+      kubectl-native mechanism Longhorn's own recurring backup job uses), waits for
+      each to reach Completed, and reports pass/fail per volume. Additive only --
+      never deletes or modifies an existing volume/snapshot/backup.
+    cmd: >-
+      bash {{.SCRIPTS_DIR}}/longhorn-backup-all.sh
+      --group "{{.group | default "default"}}"
+      {{if .volume}}--volume "{{.volume}}"{{end}}
+      {{if eq .all_volumes "true"}}--all-volumes{{end}}
+      --concurrency {{.concurrency | default "2"}}
+      --timeout {{.timeout | default "1800"}}
+      {{if eq .yes "true"}}--yes{{end}}
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing longhorn-backup-all script", sh: "test -f {{.SCRIPTS_DIR}}/longhorn-backup-all.sh" }
+
   # Pairs with talos:upgrade-node / talos:upgrade-k8s (.taskfiles/talos):
   # run this first so a rolling reboot/upgrade doesn't page Telegram, then
   # run the upgrade. Not composed together automatically — the silence needs
