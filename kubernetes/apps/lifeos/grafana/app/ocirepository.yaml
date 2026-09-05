@@ -10,7 +10,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    tag: 12.11.2
+    tag: 13.2.1
   # The standalone Grafana chart moved out of grafana/helm-charts on
   # 2026-01-30; grafana-community is where it is maintained now. This is a
   # different chart from the one embedded in kube-prometheus-stack — the two
