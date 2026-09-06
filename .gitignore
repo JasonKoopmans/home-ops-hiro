@@ -5,7 +5,6 @@
 # Plaintext staging copies made while filling a *.sops.yaml by hand. These have
 # escaped into the working tree before; they are never meant to be committed.
 *.tmp.yaml
-*.sops.tmp.yaml
 /age.key
 /cloudflare-tunnel.json
 /github-deploy.key
