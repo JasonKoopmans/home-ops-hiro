@@ -1,0 +1,288 @@
+{
+  "uid": "lifeos-habit-history",
+  "title": "Habit History",
+  "tags": [
+    "lifeos"
+  ],
+  "editable": true,
+  "schemaVersion": 39,
+  "graphTooltip": 0,
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "refresh": "5m",
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "barchart",
+      "title": "Move — Daily kcal vs Goal",
+      "description": "Daily Move kcal (mart.goal_progress, Goal='MoveCaloriesPerDay'). Bars turn green at/above the 950 kcal goal, red below it. Dashed line marks the goal itself. Timeframe follows the dashboard time picker.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "lifeos-warehouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "lifeos-warehouse"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT d.date::timestamp AS \"time\",\n       gp.\"ActualValue\" AS \"value\"\nFROM core.dim_date d\nLEFT JOIN mart.goal_progress gp\n  ON gp.\"Date\" = d.date AND gp.\"Goal\" = 'MoveCaloriesPerDay'\nWHERE d.date BETWEEN $__timeFrom()::date AND $__timeTo()::date\nORDER BY d.date;\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 950
+              }
+            ]
+          },
+          "noValue": ""
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "xTickLabelRotation": -45,
+        "showValue": "never",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "barchart",
+      "title": "Move — Goal Hits per Week",
+      "description": "Count of days each week that hit the 950 kcal Move goal (mart.goal_progress, Goal='MoveCaloriesPerDay'), against core.goals' MoveCaloriesPerDayHitPerWeek target (5 of 7 days). Green at/above 5, red below. Timeframe follows the dashboard time picker.",
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "lifeos-warehouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "lifeos-warehouse"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "WITH days AS (\n  SELECT d.date, d.week_start\n  FROM core.dim_date d\n  WHERE d.date BETWEEN $__timeFrom()::date AND $__timeTo()::date\n),\nstatus AS (\n  SELECT days.date, days.week_start,\n         CASE WHEN gp.\"ActualValue\" >= gp.\"GoalValue\" THEN 1 ELSE 0 END AS met\n  FROM days\n  LEFT JOIN mart.goal_progress gp\n    ON gp.\"Date\" = days.date AND gp.\"Goal\" = 'MoveCaloriesPerDay'\n)\nSELECT week_start::timestamp AS \"time\", SUM(met)::numeric AS \"value\"\nFROM status\nGROUP BY week_start\nORDER BY week_start;\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 7,
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 5
+              }
+            ]
+          },
+          "noValue": ""
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "xTickLabelRotation": -45,
+        "showValue": "always",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Move — Goal Hits (Last 30 Days)",
+      "description": "Count of days in the fixed trailing 30 days that hit the 950 kcal Move goal (mart.goal_progress, Goal='MoveCaloriesPerDay'). Fixed 30-day window by design, independent of the dashboard time picker.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "lifeos-warehouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "lifeos-warehouse"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"value\"\nFROM core.dim_date d\nJOIN mart.goal_progress gp\n  ON gp.\"Date\" = d.date AND gp.\"Goal\" = 'MoveCaloriesPerDay'\nWHERE d.date BETWEEN current_date - 29 AND current_date\n  AND gp.\"ActualValue\" >= gp.\"GoalValue\";\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "barchart",
+      "title": "Move — Goal Hits per Month",
+      "description": "Count of days each month that hit the 950 kcal Move goal (mart.goal_progress, Goal='MoveCaloriesPerDay'). Threshold at 22 is a derived approximation (5/7 of a ~30-day month) -- core.goals has no MoveCaloriesPerDayHitPerMonth goal to reference directly. Timeframe follows the dashboard time picker -- widen it (e.g. 6mo/1yr) to see more than one bar. X-axis is an explicit YYYY-MM text label (not a timestamp) -- the previous version handed Grafana a raw timestamp for irregular-width monthly buckets and it mislabeled every bar one month early.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "lifeos-warehouse"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "lifeos-warehouse"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH days AS (\n  SELECT d.date, d.month_start\n  FROM core.dim_date d\n  WHERE d.date BETWEEN $__timeFrom()::date AND $__timeTo()::date\n),\nstatus AS (\n  SELECT days.date, days.month_start,\n         CASE WHEN gp.\"ActualValue\" >= gp.\"GoalValue\" THEN 1 ELSE 0 END AS met\n  FROM days\n  LEFT JOIN mart.goal_progress gp\n    ON gp.\"Date\" = days.date AND gp.\"Goal\" = 'MoveCaloriesPerDay'\n)\nSELECT to_char(month_start, 'YYYY-MM') AS \"Month\", SUM(met)::numeric AS \"Hits\"\nFROM status\nGROUP BY month_start\nORDER BY month_start;\n"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 31,
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 22
+              }
+            ]
+          },
+          "noValue": ""
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "xTickLabelRotation": -45,
+        "showValue": "always",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    }
+  ]
+}
