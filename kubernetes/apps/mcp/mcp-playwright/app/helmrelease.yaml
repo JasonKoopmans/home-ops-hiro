@@ -64,7 +64,7 @@ spec:
               # no command: override needed, and those three flags are never
               # repeated here.
               repository: mcr.microsoft.com/playwright/mcp
-              tag: v0.0.79
+              tag: v0.0.80
             args:
               # The contract: HTTP on 3000, MCP at /mcp (upstream's default
               # path, not configurable — confirmed in source and README).
