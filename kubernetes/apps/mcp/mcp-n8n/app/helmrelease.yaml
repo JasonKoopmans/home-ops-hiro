@@ -1,0 +1,160 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# czlonkowski/n8n-mcp — lets a client read, author and validate n8n workflows.
+#
+# TWO TIERS, gated by whether N8N_API_KEY is present:
+#   * without it — 7 tools, a bundled node/template reference that never touches
+#     the n8n instance at all.
+#   * with it — 28 tools, adding create/update/delete of real workflows,
+#     credentials, folders, datatables and executions.
+#
+# This deploys the second tier minus its destructive operations (see the policy
+# below). Upstream's own README opens with "NEVER edit your production workflows
+# directly with AI — export backups first", and that warning lands harder here
+# than it does upstream: n8n's workflows live only in the SQLite DB on its PVC,
+# with no copy in Git, so a bad edit has no `git revert`. The PVC is on the
+# backed-up `longhorn` class, making recovery a Longhorn restore to the last
+# recurring backup rather than something reconcilable.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app mcp-n8n
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        annotations:
+          # Restart on rotation of either the bearer token or the n8n API key.
+          reloader.stakater.com/auto: "true"
+        replicas: 1
+        strategy: Recreate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/czlonkowski/n8n-mcp
+              tag: 2.82.1
+            env:
+              # Without MCP_MODE the image starts in stdio mode and nothing ever
+              # listens. The cluster contract, port 3000 on /mcp, is honoured by
+              # MCP_PORT; the path is fixed upstream and already matches.
+              MCP_MODE: http
+              HOST: 0.0.0.0
+              MCP_PORT: &port 3000
+              # Plain http on port 443 is correct and not a typo. n8n sets
+              # N8N_PROTOCOL=https but no N8N_SSL_KEY/N8N_SSL_CERT, so that
+              # variable only shapes the URLs n8n generates — it serves cleartext
+              # on 443. The n8n servicemonitor scrapes it with `scheme: http`
+              # for the same reason.
+              N8N_API_URL: http://n8n.default.svc.cluster.local:443
+              # Upstream telemetry is ON by default and, per their PRIVACY.md,
+              # feeds "datasets and machine learning models for workflow
+              # generation". These are personal workflows; opt out. Also stops
+              # the container trying to mkdir $HOME/.n8n-mcp, which fails under
+              # readOnlyRootFilesystem.
+              N8N_MCP_TELEMETRY_DISABLED: "true"
+              # Required, not a preference. The image's SSRF guard defaults to
+              # `strict`, which refuses every private IP — and n8n is only
+              # reachable at a ClusterIP in 10.43.0.0/16, so in strict mode
+              # n8n_list_workflows fails with "SSRF protection: Private IP
+              # addresses not allowed". `moderate` only relaxes localhost, not
+              # private ranges, so `permissive` is the sole working value.
+              # The protection is not simply discarded: networkpolicy.yaml
+              # re-imposes it at the network layer, where Cilium enforces it
+              # whatever the process asks for, and with a tighter allow-list
+              # than the image's check had (DNS and n8n only).
+              WEBHOOK_SECURITY_MODE: permissive
+              # --- Tool policy: read and author, but do not destroy ---------
+              # Deliberate middle tier. Whole tools first: n8n_delete_workflow
+              # does nothing but delete, and n8n_manage_credentials reaches the
+              # stored credentials (Telegram bot token, SMTP, and the rest).
+              DISABLED_TOOLS: n8n_delete_workflow,n8n_manage_credentials
+              # Then the deletes buried inside multi-operation tools, which
+              # DISABLED_TOOLS alone is too blunt for — dropping
+              # n8n_manage_folders entirely would also lose folder listing.
+              # Syntax is `tool:op,op` joined by `;`, operations lowercased.
+              # Verified against 2.82.1: each of these disappears from the
+              # tool's `action` enum, and only these.
+              DISABLED_TOOL_OPERATIONS: >-
+                n8n_executions:delete;n8n_manage_folders:delete;n8n_manage_datatable:deletetable,deleterows,deletecolumn;n8n_manage_agents:delete
+              # Left enabled on purpose, and worth knowing about:
+              #   n8n_update_full_workflow / n8n_autofix_workflow can overwrite
+              #     an existing workflow — that is the point of the tier, but it
+              #     is the operation with the least pleasant undo.
+              #   n8n_test_workflow actually executes a workflow, so it can send
+              #     a real Telegram message or write to Obsidian.
+              TZ: ${TIMEZONE}
+            envFrom:
+              - secretRef:
+                  name: mcp-n8n-secret
+            probes:
+              # TCP: /mcp is POST-only and requires the bearer token, so an
+              # httpGet probe would need the credential just to report health.
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  initialDelaySeconds: 15
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                # Measured at ~64Mi serving requests.
+                memory: 96Mi
+              limits:
+                memory: 384Mi
+
+    defaultPodOptions:
+      # Talks to the n8n API over HTTP; never to the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        # Read off the image before deploying:
+        #   docker run --rm --entrypoint sh ghcr.io/czlonkowski/n8n-mcp:2.82.1 -c id
+        #   uid=34242(nodejs) gid=34242(nodejs)
+        runAsNonRoot: true
+        runAsUser: 34242
+        runAsGroup: 34242
+        fsGroup: 34242
+        fsGroupChangePolicy: OnRootMismatch
+
+    # No persistence block. Verified this image serves requests under
+    # `docker run --read-only` with no tmpfs at all — the node database it
+    # queries is baked into the image, and the only write it attempted was the
+    # telemetry config now disabled above.
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        # Single-label hostname: the wildcard cert is ["${SECRET_DOMAIN}",
+        # "*.${SECRET_DOMAIN}"] and does not cover a second label.
+        hostnames: ["mcp-n8n.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: *port
