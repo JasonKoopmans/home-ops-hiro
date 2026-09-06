@@ -118,6 +118,14 @@ repo already does — there are 20+ instances and no exceptions.
 
 ### n8n
 
+Two different things share this name. **This section is n8n as an MCP *client*** —
+its workflows calling our servers. The reverse direction, a server exposing n8n
+itself so Claude can author workflows, is `mcp/mcp-n8n` in the catalog.
+
+As of 2026-09-06 nothing here is actually wired: the n8n database contains zero
+`mcpClientTool` / `mcpClient` / `mcpTrigger` nodes, so the click-path below is
+documented but has never been walked.
+
 No repo change — n8n's node config lives in its PVC, so this is a click-path.
 Verified against the running 2.33.3 image; re-check after a major bump.
 
@@ -610,4 +618,5 @@ kubectl auth can-i --list --as=system:serviceaccount:mcp:mcp-kubernetes | grep l
 | `mcp/mcp-grafana-monitoring` | native-http | none (phase 1) | Same image against the kube-prometheus-stack Grafana. Upstream connects to one Grafana per process — two deployments, not one with two URLs |
 | `mcp/mcp-playwright` | native-http | none — **ceiling, not phase 1** | `@playwright/mcp` official image. Zero built-in auth upstream (verified against source/README), so there is no app-level-token step 2 for this server; real caller-auth needs an Envoy `SecurityPolicy` (step 3). `--isolated` (no persisted profile/PVC), `--caps vision,pdf` beyond the core toolset, chromium only (the only browser the Docker image bundles). A full browser, not a read-only query against one backend — bigger exposure than its siblings; revisit before anything less trusted reaches this endpoint. Egress-restricted via `networkpolicy.yaml` (blocks the LAN and the cluster's own pod/service CIDRs) so it can't be used to pivot into internal services even while unauthenticated — a separate axis from the still-open auth question |
 | `mcp/mcp-proxmox` | native-http | **step 2** (`MCP_API_KEY` bearer) | `RekklesNA/ProxmoxMCP-Plus` against the five-node Proxmox cluster. **The only server here that can destroy infrastructure** — 47 tools, no read-only mode, including `delete_vm`, `restore_backup` and `execute_vm_command`, and the guests include this cluster's own five VMs. Shipped with a full-privilege API token by explicit decision, so the credential is the boundary: a `PVEAuditor` token makes every mutating tool 403 with no manifest change. `COMMAND_POLICY_MODE=deny_all` gates command execution separately. DNS-rebinding protection stays **on** — its allow-list takes a comma list, unlike `mcp-kubernetes` |
+| `mcp/mcp-n8n` | native-http | **step 2** (`AUTH_TOKEN` bearer) | `czlonkowski/n8n-mcp`. Two tiers gated by `N8N_API_KEY`: without it, 7 read-only reference tools that never touch the instance; with it, 28 that act on real workflows. Ships in a middle tier — `DISABLED_TOOLS` drops `n8n_delete_workflow` and `n8n_manage_credentials`, and `DISABLED_TOOL_OPERATIONS` strips the `delete` operations buried inside `n8n_executions`, `n8n_manage_folders`, `n8n_manage_datatable` and `n8n_manage_agents`. **n8n's workflows exist only on its PVC, with no copy in Git**, so an unwanted edit has no `git revert` — recovery is a Longhorn restore. Telemetry is on by default upstream and feeds their ML training; disabled here |
 | `default/obsidian` | — | none | Existing app exposing `/mcp` at `obsidian-mcp.${SECRET_DOMAIN}` |

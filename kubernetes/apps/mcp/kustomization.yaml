@@ -11,6 +11,7 @@ resources:
   - ./mcp-grafana-lifeos/ks.yaml
   - ./mcp-grafana-monitoring/ks.yaml
   - ./mcp-kubernetes/ks.yaml
+  - ./mcp-n8n/ks.yaml
   - ./mcp-playwright/ks.yaml
   - ./mcp-postgres/ks.yaml
   - ./mcp-prometheus/ks.yaml
