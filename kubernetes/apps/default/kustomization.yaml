@@ -31,3 +31,4 @@ resources:
   - ./recording-annotator/ks.yaml
   - ./freshrss/ks.yaml
   - ./gotenberg/ks.yaml
+  - ./metube/ks.yaml
