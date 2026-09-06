@@ -57,6 +57,17 @@ spec:
               # the container trying to mkdir $HOME/.n8n-mcp, which fails under
               # readOnlyRootFilesystem.
               N8N_MCP_TELEMETRY_DISABLED: "true"
+              # Required, not a preference. The image's SSRF guard defaults to
+              # `strict`, which refuses every private IP — and n8n is only
+              # reachable at a ClusterIP in 10.43.0.0/16, so in strict mode
+              # n8n_list_workflows fails with "SSRF protection: Private IP
+              # addresses not allowed". `moderate` only relaxes localhost, not
+              # private ranges, so `permissive` is the sole working value.
+              # The protection is not simply discarded: networkpolicy.yaml
+              # re-imposes it at the network layer, where Cilium enforces it
+              # whatever the process asks for, and with a tighter allow-list
+              # than the image's check had (DNS and n8n only).
+              WEBHOOK_SECURITY_MODE: permissive
               # --- Tool policy: read and author, but do not destroy ---------
               # Deliberate middle tier. Whole tools first: n8n_delete_workflow
               # does nothing but delete, and n8n_manage_credentials reaches the

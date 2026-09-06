@@ -1,0 +1,56 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/networking.k8s.io/networkpolicy_v1.json
+#
+# This policy exists because the HelmRelease has to set
+# WEBHOOK_SECURITY_MODE=permissive, which switches off the image's own SSRF
+# guard. That guard is not optional-but-nice here: in `strict` (its default)
+# every private IP is refused, and n8n is only reachable at a ClusterIP in
+# 10.43.0.0/16, so the app cannot talk to n8n at all — `n8n_list_workflows`
+# returns "SSRF protection: Private IP addresses not allowed".
+#
+# Turning it off application-side and re-imposing it here is the better trade:
+# Cilium enforces this regardless of what the process decides to request, and
+# the allow-list is narrower than the image's own check ever was — DNS and n8n,
+# nothing else. Note that means no internet egress at all; this server has no
+# reason to reach one.
+#
+# Ingress is deliberately untouched (absent from policyTypes), matching every
+# sibling in this namespace. Who may CALL this server is the AUTH_TOKEN's job.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-n8n
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-n8n
+  policyTypes:
+    - Egress
+  egress:
+    # CoreDNS, needed to resolve n8n.default.svc.cluster.local at all.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # n8n itself. Labels taken from the live Service's own selector
+    # (kubectl -n default get svc n8n -o yaml) rather than guessed. Port 443
+    # is cleartext HTTP — see the N8N_API_URL comment in helmrelease.yaml.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: n8n
+              app.kubernetes.io/instance: n8n
+      ports:
+        - port: 443
+          protocol: TCP
