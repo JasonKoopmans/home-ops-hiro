@@ -21,6 +21,13 @@
 # `mc mirror` works, including multipart uploads, because the client sends the checksum the batch handler omits.
 # Verified end to end: a 26MiB object landed with X-Amz-Object-Lock-Mode COMPLIANCE and a retain-until date.
 #
+# That verification only exercised the multipart path, though. Smaller objects go through a single-part
+# PutObject, and mc's own Object-Lock auto-detection (which is supposed to set md5=true automatically for a
+# locked target) does not reliably cover that path against this bucket/mc version — it hits the same
+# "Content-MD5 OR x-amz-checksum- HTTP header is required for Put Object requests with Object Lock parameters"
+# error that killed `mc batch replicate` above, on whichever object in the batch happens to be small. `--md5`
+# below forces the checksum on every upload regardless of size, closing that gap for both paths.
+#
 # The trade-off versus server-side replication is RPO: this is hourly rather than continuous.
 #
 # --remove is deliberately ABSENT and must stay absent. It would propagate source deletions to the replica,
@@ -85,7 +92,10 @@ spec:
                   mc alias set dst "$AWS_S3_ENDPOINT" "$BACKUP_ACCESS_KEY" "$BACKUP_SECRET_KEY" --api S3v4
 
                   echo "mirroring $SOURCE_BUCKET -> $BACKUP_BUCKET"
-                  mc mirror --quiet src/"$SOURCE_BUCKET" dst/"$BACKUP_BUCKET"
+                  # --md5: force Content-MD5 on every PUT, not just multipart ones. The destination bucket has
+                  # Object Lock enabled, which S3 requires a checksum for; mc's automatic detection of this
+                  # doesn't reliably cover the single-part upload path (see header comment above).
+                  mc mirror --quiet --md5 src/"$SOURCE_BUCKET" dst/"$BACKUP_BUCKET"
                   echo "mirror complete"
               env:
                 - name: MINIO_ENDPOINT
