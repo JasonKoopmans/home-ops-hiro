@@ -13,7 +13,6 @@ spec:
     remediation:
       retries: -1
   upgrade:
-    cleanupOnFail: true
     remediation:
       retries: 3
   values:
@@ -83,7 +82,12 @@ spec:
 
             :8082 {
               root * /downloads
-              file_server browse
+              # MeTube keeps its queue/history state (and, if ever configured,
+              # cookies) under STATE_DIR, which defaults to /downloads/.metube —
+              # hide it so this listing only ever exposes downloaded media.
+              file_server browse {
+                hide .metube
+              }
             }
 
     service:

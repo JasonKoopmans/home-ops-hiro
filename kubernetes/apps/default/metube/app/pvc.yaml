@@ -8,4 +8,4 @@ spec:
   resources:
     requests:
       storage: 20Gi
-  storageClassName: longhorn-1-no-backup
+  storageClassName: longhorn-scratch
