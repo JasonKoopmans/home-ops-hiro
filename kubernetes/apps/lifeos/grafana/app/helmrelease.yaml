@@ -42,30 +42,39 @@ spec:
     # the handful of datasource plugins compiled into core — azure-monitor,
     # cloudwatch, graphite, alertmanager, testdata — survive); postgres,
     # mysql, prometheus, loki, etc. are stripped out entirely. Pin the
-    # standard (non-distroless) tag, whose image still ships those plugins —
-    # just not pre-loaded (see `plugins:`/`shadowBundledPlugins` below).
+    # standard (non-distroless) tag, whose image ships those plugins in
+    # /usr/share/grafana/data/plugins-bundled.
     image:
       tag: 13.2.1
 
-    # Grafana 13 externalized postgres (and most other non-trivial datasource
-    # backends) out of the core binary into read-only tarballs under
-    # /usr/share/grafana/data/plugins-bundled in the image — present, but not
-    # copied into the plugin search path ($GF_PATHS_PLUGINS) until something
-    # asks for them. That's what pinning the non-distroless tag above did not
-    # fix by itself: the tarball exists in the image again, but the LifeOS
-    # Warehouse datasource (type: postgres) still 404s every query with
-    # "plugin.notRegistered" because nothing ever installed it.
-    # `plugins:` is this chart's declarative install list — it renders into
-    # GF_PLUGINS_PREINSTALL_SYNC, which Grafana resolves at startup, using the
-    # copy already bundled in the image for a plugin id/version match (no
-    # grafana.com egress needed here). `shadowBundledPlugins` must be on
-    # alongside it: without it, the plugins-bundled directory is mounted
-    # read-only from the image and the install step fails trying to write
-    # into it; with it, that path is shadowed by an emptyDir so the installed
-    # plugin lands in the normal writable /var/lib/grafana/plugins instead.
-    shadowBundledPlugins: true
-    plugins:
-      - grafana-postgresql-datasource
+    # STILL BROKEN even on the non-distroless image — see PR #598 discussion.
+    # Grafana 13.2.1 hardcodes grafana-postgresql-datasource into its default
+    # preinstall list (pkg/setting/setting_plugins.go, defaultPreinstallPlugins)
+    # and that list is active with zero values changes here, so Grafana already
+    # retries installing it, unprompted, every time this pod starts. It still
+    # never registers, with no error anywhere (grafana logs, /api/plugins/errors
+    # all clean) — confirmed live on 2026-09-12. Other bundled plugins (mysql,
+    # elasticsearch, zipkin, prometheus, tempo, opentsdb, stackdriver,
+    # grafana-pyroscope-datasource) load from the same bundled/ directory on the
+    # same pod without any config, which rules out a permissions or image
+    # problem — something specific to this handful of plugin IDs (postgres,
+    # loki, jaeger, mssql, influxdb all fail the same way) is silently short-
+    # circuiting before either the loader or the installer logs anything.
+    #
+    # A prior pass at fixing this (this comment's previous revision) added
+    # `shadowBundledPlugins: true` + `plugins: [grafana-postgresql-datasource]`
+    # to force an explicit install. Reverted: shadowBundledPlugins replaces the
+    # *entire* plugins-bundled directory with an emptyDir, which would have
+    # broken the 8 plugins above that currently load from it for free. Forcing
+    # the install via `plugins:` also renders to GF_PLUGINS_PREINSTALL_SYNC,
+    # which per Grafana's source (pkg/services/pluginsintegration/
+    # plugininstaller/service.go) always calls the plugin repo/catalog — there
+    # is no local-bundled-copy short-circuit — and a sync-install failure is
+    # fatal to pod startup, unlike the default async attempt's silent no-op.
+    # That also runs against this app's documented design goal (see
+    # docs/lifeos-grafana.md, "Plugins" section): no egress dependency at
+    # Grafana boot. Needs the real root cause before trying again — see PR
+    # #598 for the open question.
 
     # Deployment-level, which is where Reloader looks. `auto` rather than
     # naming grafana-secret explicitly: the pod now pulls from two Secrets
