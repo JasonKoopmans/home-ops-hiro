@@ -1,0 +1,167 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app metube
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: metube
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    controllers:
+      main:
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          # PUID/PGID-remapping entrypoint (same shape as linuxserver-style images
+          # already in this repo, e.g. audacity) needs to start as root to chown
+          # /downloads and drop privileges itself — no restrictive securityContext
+          # here, same as audacity's "app" container.
+          main:
+            image:
+              repository: ghcr.io/alexta69/metube
+              tag: latest@sha256:397778fccf13d83adf9325fe813b260617a082d1772aff6d678c5b9256dd01fb
+            env:
+              TZ: ${TIMEZONE}
+              PUID: "1001"
+              PGID: "1001"
+              UMASK: "022"
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              # Unmeasured guess — no history for this workload yet. yt-dlp's ffmpeg
+              # remux/merge step is the likely spike; revisit against Thanos
+              # container_memory_working_set_bytes once it's run for a couple weeks.
+              limits:
+                memory: 2Gi
+
+          browser:
+            image:
+              repository: docker.io/library/caddy
+              tag: 2.11.4-alpine
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]
+                add: [NET_BIND_SERVICE]
+              readOnlyRootFilesystem: true
+              runAsGroup: 1001
+              runAsNonRoot: true
+              runAsUser: 1001
+
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
+
+    defaultPodOptions:
+      securityContext:
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+        supplementalGroups: [1001]
+
+    configMaps:
+      browser-caddyfile:
+        data:
+          Caddyfile: |-
+            {
+              admin off
+            }
+
+            :8082 {
+              root * /downloads
+              # MeTube keeps its queue/history state (and, if ever configured,
+              # cookies) under STATE_DIR, which defaults to /downloads/.metube —
+              # hide it so this listing only ever exposes downloaded media.
+              file_server browse {
+                hide .metube
+              }
+            }
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: &webPort 8081
+      browser:
+        controller: main
+        ports:
+          http:
+            port: &browserPort 8082
+
+    route:
+      main:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: https://metube.${SECRET_DOMAIN}/favicon.ico
+          gethomepage.dev/title: MeTube
+          gethomepage.dev/description: "Video downloader (YouTube, Facebook, and other yt-dlp sites)"
+          gethomepage.dev/group: "Downloads"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=metube"
+        hostnames: ["metube.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: main
+                port: *webPort
+
+      browser:
+        annotations:
+          gethomepage.dev/enabled: "true"
+          gethomepage.dev/icon: https://metube-files.${SECRET_DOMAIN}/favicon.ico
+          gethomepage.dev/title: MeTube Files
+          gethomepage.dev/description: "Downloaded video listing (JSON on Accept: application/json, for n8n)"
+          gethomepage.dev/group: "Downloads"
+          gethomepage.dev/pod-selector: "app.kubernetes.io/name=metube"
+        hostnames: ["metube-files.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: browser
+                port: *browserPort
+
+    persistence:
+      downloads:
+        existingClaim: metube-downloads
+        advancedMounts:
+          main:
+            main:
+              - path: /downloads
+            browser:
+              - path: /downloads
+                readOnly: true
+
+      browser-caddyfile:
+        type: configMap
+        identifier: browser-caddyfile
+        advancedMounts:
+          main:
+            browser:
+              - path: /etc/caddy
+                readOnly: true
+
+      browser-data:
+        type: emptyDir
+        advancedMounts:
+          main:
+            browser:
+              - path: /data
