@@ -403,6 +403,49 @@ spec:
       log:
         mode: console
 
+    # ---- Image rendering ----------------------------------------------------
+    # Lets a panel be fetched as a plain PNG via
+    # /render/d-solo/<uid>?panelId=<id>&width=...&height=... — e.g. embedding a
+    # live panel as an <img> in another webapp. The chart runs this as its own
+    # Deployment/Service rather than a plugin installed into Grafana's plugin
+    # directory: the postgres-datasource incident (see the `image:` and
+    # preinstall_auto_update comments above) was exactly the failure mode of
+    # installing a plugin onto this image's read-only layer, so a separate
+    # process that Grafana talks to over HTTP (GF_RENDERING_SERVER_URL, wired
+    # automatically below by imageRenderer.enabled) avoids that class of bug
+    # entirely.
+    #
+    # Not sufficient on its own for a header-less <img src> from a *different*
+    # webapp: the render endpoint still requires Grafana auth (session cookie
+    # or a service-account Bearer token), and auth.anonymous is deliberately
+    # off above. The intended consumption path is the other webapp's backend
+    # calling the render URL server-side with a Viewer-role service account
+    # token, then serving/proxying the PNG to its own frontend same-origin —
+    # not a browser-side <img> pointed directly at this instance. Enabling
+    # broad anonymous Viewer access would be the alternative, but that exposes
+    # the whole org, not just one panel, so it's left for a deliberate
+    # follow-up decision rather than bundled in here.
+    imageRenderer:
+      enabled: true
+      # renovate: datasource=docker depName=grafana/grafana-image-renderer
+      image:
+        tag: v5.12.3
+      # Chart default (networkPolicy.limitIngress: true) already restricts
+      # inbound traffic to this instance's own Grafana pod.
+      serviceMonitor:
+        enabled: true
+      # INFORMED GUESS — not measured, nothing has rendered yet. Chromium
+      # under headless rendering is the concern; requests/limits are set
+      # generously for a single-user instance rendering one panel at a time.
+      # Revisit once real render traffic exists.
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          # No CPU limit, per repo convention.
+          memory: 512Mi
+
     # Ingress is Gateway API here — see httproute.yaml.
     ingress:
       enabled: false
