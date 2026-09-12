@@ -37,6 +37,19 @@ spec:
 
     replicas: 1
 
+    # The chart defaults image.tag to "<appVersion>-distroless" as of 13.0.
+    # That image's Dockerfile ships an empty plugins-bundled/ directory (only
+    # the handful of datasource plugins compiled into core — azure-monitor,
+    # cloudwatch, graphite, alertmanager, testdata — survive); postgres,
+    # mysql, prometheus, loki, etc. are stripped out entirely. That silently
+    # broke the LifeOS Warehouse datasource (type: postgres) on the 12.11.2 ->
+    # 13.2.1 chart bump: the datasource still provisions, but Grafana returns
+    # "plugin.notRegistered" for every query and panels can no longer offer it
+    # as a source. Pin the standard (non-distroless) tag to keep the bundled
+    # plugin set this app depends on.
+    image:
+      tag: 13.2.1
+
     # Deployment-level, which is where Reloader looks. `auto` rather than
     # naming grafana-secret explicitly: the pod now pulls from two Secrets
     # (grafana-secret directly, warehouse-credentials via
