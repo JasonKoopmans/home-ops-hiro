@@ -45,12 +45,17 @@ spec:
             summary: RecordingAnnotator reconciliation CronJob has no recent successful run
             description: The recording-annotator-reconciliation CronJob has not recorded a successful Job in over 48 hours against a daily schedule (docs/backup-recovery.md §7).
 
-        # restore-drill deliberately keeps the failed-Job expression. It is monthly and has never once succeeded,
-        # so kube_cronjob_status_last_successful_time does not exist for it at all — a last-success-age rule would
-        # evaluate empty and never fire, silently removing the only coverage this job has (it has no paired
-        # *Stale / *NeverSucceeded app-gauge rules the way the two above do). The `kube_job_created` clause bounds
-        # it by recency instead, so it self-clears 7 days after the failure whether or not the Job object is still
-        # around. 7 days suits a monthly cadence: long enough to be seen, short enough to stop nagging.
+        # Fast signal. Keyed on the failed Job but bounded by recency so it self-clears 7 days after the failure
+        # whether or not the Job object still exists — the latching failure mode that kept a critical firing for a
+        # week in August 2026 (see the header comment above). 7 days suits a monthly cadence: long enough to be
+        # seen, short enough to stop nagging.
+        #
+        # This rule originally stood alone because the drill had never once succeeded, so
+        # kube_cronjob_status_last_successful_time did not exist for it at all and a last-success-age rule would
+        # have evaluated empty and never fired. That premise held only until the drill's first success, on or
+        # around 2026-08-13 — the series exists now, so the staleness rule below closes the gap this one cannot
+        # see: a suspended or deleted CronJob, a scheduler problem, or node pressure preventing Job creation ever
+        # produces a Job to fail in the first place.
         - alert: RecordingAnnotatorRestoreDrillJobFailed
           expr: |
             kube_job_failed{namespace="default", job_name=~"recording-annotator-restore-drill-.*"} > 0
@@ -62,6 +67,62 @@ spec:
           annotations:
             summary: RecordingAnnotator monthly restore drill failed
             description: The recording-annotator-restore-drill CronJob failed — the offsite index backup could NOT be proven restorable this month (docs/backup-recovery.md §7, §9 phase 4). Treat the index backup as unverified until this is fixed and re-run.
+
+        # Slow signal, different failure shape: catches a drill that silently stops running at all — suspended
+        # CronJob, deleted CronJob, scheduler wedged, node pressure preventing the Job from ever being created.
+        # RecordingAnnotatorRestoreDrillJobFailed cannot see any of those, because no Job object is ever produced
+        # to fail. 61 days is ~2x the monthly cadence (mirrors the 2x-interval shape used by
+        # RecordingAnnotatorReconciliationNotSucceeding above), tolerating exactly one missed monthly run.
+        - alert: RecordingAnnotatorRestoreDrillNotSucceeding
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="default", cronjob="recording-annotator-restore-drill"} > 5270400
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator restore drill has no recent successful run
+            description: No successful monthly restore drill in over 61 days. The offsite index backup is unverified — nothing has proven it restorable recently, which is the state this drill exists to prevent.
+
+        # The rule above evaluates *empty*, and therefore never fires, until the drill has succeeded at least
+        # once — precisely the state a freshly created or recreated CronJob is in, and precisely when a broken
+        # drill matters most. Same shape as PostgresRestoreDrillNeverSucceeded.
+        #
+        # The age test uses kube_cronjob_created rather than a long `for:`, deliberately: `for:` state is held in
+        # memory and RESETS on a Prometheus restart, so a `for: 32d` on a server that restarts for config reloads
+        # and upgrades would in practice almost never reach 32 days — the alert would look correct and silently
+        # never fire. Reading the CronJob's own creation timestamp is stateless and survives restarts, so the
+        # short `for:` here only debounces scrape flapping.
+        #
+        # 2764800s (32 days) covers the worst case for a schedule fixed to the 1st of the month: the longest gap
+        # between two consecutive 1st-of-month dates is 31 days (e.g. Jan 1 -> Feb 1), so a CronJob created just
+        # after missing that month's run waits up to 31 days for its first scheduled attempt; the extra day is
+        # buffer for the Job to run and be scraped.
+        - alert: RecordingAnnotatorRestoreDrillNeverSucceeded
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="default", cronjob="recording-annotator-restore-drill"})
+            and on()
+            (time() - max(kube_cronjob_created{namespace="default", cronjob="recording-annotator-restore-drill"}) > 2764800)
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator restore drill has never completed successfully
+            description: No successful run of recording-annotator-restore-drill has ever been recorded, over at least 32 days of a monthly schedule. Expected briefly right after first deploy; if it persists, the offsite index backup has never been proven restorable by automation at all.
+
+        # Closes the hole the three rules above share: all key on series that only exist WHILE the CronJob exists.
+        # Delete the CronJob and `JobFailed` has no Jobs to match, `NotSucceeding` and `NeverSucceeded` both lose
+        # the kube_cronjob_created/last-success series they depend on — so the drill stops running AND every alert
+        # about it not running goes quiet at the same moment. That is the silent-failure shape this whole app
+        # exists to prevent, so it gets its own detector, same as PostgresRestoreDrillCronJobMissing in
+        # prometheusrule-postgres.yaml.
+        - alert: RecordingAnnotatorRestoreDrillCronJobMissing
+          expr: absent(kube_cronjob_created{namespace="default", cronjob="recording-annotator-restore-drill"})
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: RecordingAnnotator restore-drill CronJob does not exist
+            description: The recording-annotator-restore-drill CronJob is absent from the default namespace. No restore drills will run, and the other drill alerts are silent because they key on series this object produces. Either Flux has not reconciled it yet (expected briefly after first deploy), or it was removed. Restore it — an unverified backup is the failure mode this app exists to catch.
 
         # Gauges set on the live app process, scraped via the app's ServiceMonitor (spec section 9) — not from
         # the CronJob trigger containers themselves.
