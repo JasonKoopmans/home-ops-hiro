@@ -37,7 +37,7 @@ spec:
           app:
             image:
               repository: ghcr.io/czlonkowski/n8n-mcp
-              tag: 2.82.1
+              tag: 2.84.4
             env:
               # Without MCP_MODE the image starts in stdio mode and nothing ever
               # listens. The cluster contract, port 3000 on /mcp, is honoured by
