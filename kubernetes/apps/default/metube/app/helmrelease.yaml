@@ -93,6 +93,7 @@ spec:
           http:
             port: &webPort 8081
       browser:
+        controller: main
         ports:
           http:
             port: &browserPort 8082
