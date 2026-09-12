@@ -47,34 +47,24 @@ spec:
     image:
       tag: 13.2.1
 
-    # STILL BROKEN even on the non-distroless image — see PR #598 discussion.
-    # Grafana 13.2.1 hardcodes grafana-postgresql-datasource into its default
-    # preinstall list (pkg/setting/setting_plugins.go, defaultPreinstallPlugins)
-    # and that list is active with zero values changes here, so Grafana already
-    # retries installing it, unprompted, every time this pod starts. It still
-    # never registers, with no error anywhere (grafana logs, /api/plugins/errors
-    # all clean) — confirmed live on 2026-09-12. Other bundled plugins (mysql,
-    # elasticsearch, zipkin, prometheus, tempo, opentsdb, stackdriver,
-    # grafana-pyroscope-datasource) load from the same bundled/ directory on the
-    # same pod without any config, which rules out a permissions or image
-    # problem — something specific to this handful of plugin IDs (postgres,
-    # loki, jaeger, mssql, influxdb all fail the same way) is silently short-
-    # circuiting before either the loader or the installer logs anything.
-    #
-    # A prior pass at fixing this (this comment's previous revision) added
-    # `shadowBundledPlugins: true` + `plugins: [grafana-postgresql-datasource]`
-    # to force an explicit install. Reverted: shadowBundledPlugins replaces the
-    # *entire* plugins-bundled directory with an emptyDir, which would have
-    # broken the 8 plugins above that currently load from it for free. Forcing
-    # the install via `plugins:` also renders to GF_PLUGINS_PREINSTALL_SYNC,
-    # which per Grafana's source (pkg/services/pluginsintegration/
-    # plugininstaller/service.go) always calls the plugin repo/catalog — there
-    # is no local-bundled-copy short-circuit — and a sync-install failure is
-    # fatal to pod startup, unlike the default async attempt's silent no-op.
-    # That also runs against this app's documented design goal (see
-    # docs/lifeos-grafana.md, "Plugins" section): no egress dependency at
-    # Grafana boot. Needs the real root cause before trying again — see PR
-    # #598 for the open question.
+    # Root cause (see PR #598 for the full trail, including two wrong guesses
+    # before this one): Grafana's own plugin loader registers
+    # grafana-postgresql-datasource fine at boot, straight from the read-only
+    # plugins-bundled/ directory in this image. Seconds later, Grafana 13's
+    # background preinstaller — which auto-updates its hardcoded default
+    # plugin set (pkg/setting/setting_plugins.go, defaultPreinstallPlugins;
+    # postgres, mssql, jaeger, loki and influxdb are all in it) whenever
+    # grafana.com has a newer version — finds one, and tries to update in
+    # place. The update has to delete the old files first; plugins-bundled/ is
+    # baked into the image's read-only layer, so the delete fails
+    # ("unlinkat ...: read-only file system"), which kills the plugin process
+    # that was already running. Confirmed verbatim in a clean boot log.
+    # Plugins with no newer catalog version that day (mysql, elasticsearch,
+    # zipkin, prometheus, tempo, opentsdb, stackdriver,
+    # grafana-pyroscope-datasource) never hit this path and keep working —
+    # which is what made this look plugin-specific rather than update-specific.
+    # Auto-update can never succeed here regardless of which plugin it targets
+    # next, so turn it off below rather than fix it per-plugin.
 
     # Deployment-level, which is where Reloader looks. `auto` rather than
     # naming grafana-secret explicitly: the pod now pulls from two Secrets
@@ -396,6 +386,13 @@ spec:
         # place should be added to a `plugins:` list in the values above, or it
         # exists only on the PVC and a rebuild comes up without it.
         plugin_admin_enabled: true
+        # See the `image:` comment above: Grafana's default background
+        # preinstaller auto-updates its bundled plugins by deleting the old
+        # copy first, which always fails against the read-only image layer
+        # bundled plugins ship in — and the failed delete kills the plugin
+        # that was working. Off, so a bundled plugin that loaded fine at boot
+        # stays that way.
+        preinstall_auto_update: false
       dashboards:
         # Raised from Grafana's 5s default. Personal reporting runs on data that
         # changes when a scheduled job writes it or a human edits something —
