@@ -41,14 +41,31 @@ spec:
     # That image's Dockerfile ships an empty plugins-bundled/ directory (only
     # the handful of datasource plugins compiled into core — azure-monitor,
     # cloudwatch, graphite, alertmanager, testdata — survive); postgres,
-    # mysql, prometheus, loki, etc. are stripped out entirely. That silently
-    # broke the LifeOS Warehouse datasource (type: postgres) on the 12.11.2 ->
-    # 13.2.1 chart bump: the datasource still provisions, but Grafana returns
-    # "plugin.notRegistered" for every query and panels can no longer offer it
-    # as a source. Pin the standard (non-distroless) tag to keep the bundled
-    # plugin set this app depends on.
+    # mysql, prometheus, loki, etc. are stripped out entirely. Pin the
+    # standard (non-distroless) tag, whose image still ships those plugins —
+    # just not pre-loaded (see `plugins:`/`shadowBundledPlugins` below).
     image:
       tag: 13.2.1
+
+    # Grafana 13 externalized postgres (and most other non-trivial datasource
+    # backends) out of the core binary into read-only tarballs under
+    # /usr/share/grafana/data/plugins-bundled in the image — present, but not
+    # copied into the plugin search path ($GF_PATHS_PLUGINS) until something
+    # asks for them. That's what pinning the non-distroless tag above did not
+    # fix by itself: the tarball exists in the image again, but the LifeOS
+    # Warehouse datasource (type: postgres) still 404s every query with
+    # "plugin.notRegistered" because nothing ever installed it.
+    # `plugins:` is this chart's declarative install list — it renders into
+    # GF_PLUGINS_PREINSTALL_SYNC, which Grafana resolves at startup, using the
+    # copy already bundled in the image for a plugin id/version match (no
+    # grafana.com egress needed here). `shadowBundledPlugins` must be on
+    # alongside it: without it, the plugins-bundled directory is mounted
+    # read-only from the image and the install step fails trying to write
+    # into it; with it, that path is shadowed by an emptyDir so the installed
+    # plugin lands in the normal writable /var/lib/grafana/plugins instead.
+    shadowBundledPlugins: true
+    plugins:
+      - grafana-postgresql-datasource
 
     # Deployment-level, which is where Reloader looks. `auto` rather than
     # naming grafana-secret explicitly: the pod now pulls from two Secrets
