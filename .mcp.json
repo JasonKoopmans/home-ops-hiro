@@ -29,6 +29,13 @@
       "headers": {
         "Authorization": "Bearer ${MCP_PROXMOX_TOKEN}"
       }
+    },
+    "obsidian": {
+      "type": "http",
+      "url": "https://obsidian-mcp.koopmans.co/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_OBSIDIAN_TOKEN}"
+      }
     }
   }
 }

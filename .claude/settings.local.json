@@ -8,5 +8,8 @@
       "mcp__kubernetes__kubectl_get",
       "mcp__kubernetes__kubectl_logs"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "postgres"
+  ]
 }
