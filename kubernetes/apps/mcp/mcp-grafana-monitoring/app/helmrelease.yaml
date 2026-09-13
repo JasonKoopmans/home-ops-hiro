@@ -45,7 +45,7 @@ spec:
           app:
             image:
               repository: grafana/mcp-grafana
-              tag: 1.3.0
+              tag: 1.4.1
             # The image's ENTRYPOINT hardcodes `--transport sse --address
             # 0.0.0.0:8000` (see upstream Dockerfile) with no CMD, so `args:`
             # alone would just append to that fixed list rather than replace
