@@ -325,6 +325,22 @@ spec:
           secretKeyRef:
             name: alertmanager-telegram-secret
             key: bot-token
+      # Same failure mode already root-caused on lifeos/grafana (#598/#599):
+      # Grafana 13's background preinstaller auto-updates its hardcoded default
+      # plugin set (postgres, mssql, jaeger, loki, influxdb) on every boot
+      # whenever grafana.com has a newer version. The update deletes the old
+      # bundled copy first; plugins-bundled/ is baked into this image's
+      # read-only layer, so the delete fails ("unlinkat ...: read-only file
+      # system") — but only after it already killed the plugin process that
+      # had loaded fine seconds earlier. That's exactly what was happening to
+      # the Loki datasource here (confirmed in the pod's boot log: "Plugin
+      # registered" pluginId=loki, then "plugin process exited", then the
+      # unlinkat error), leaving Explore's Loki panel permanently 404ing with
+      # plugin.notRegistered until the next pod recreate, which reproduces it.
+      # Off, so a bundled plugin that loaded fine at boot stays that way.
+      "grafana.ini":
+        plugins:
+          preinstall_auto_update: false
       persistence:
         enabled: true
         storageClassName: longhorn
