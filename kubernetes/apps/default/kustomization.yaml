@@ -29,6 +29,7 @@ resources:
   - ./freecad/ks.yaml
   - ./audacity/ks.yaml
   - ./recording-annotator/ks.yaml
+  - ./pocket-bridge/ks.yaml
   - ./freshrss/ks.yaml
   - ./gotenberg/ks.yaml
   - ./metube/ks.yaml
