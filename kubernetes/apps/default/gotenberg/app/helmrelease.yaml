@@ -34,7 +34,7 @@ spec:
               # to PDF and never renders HTML, so the Chromium layer is dead weight
               # (smaller image, smaller CVE surface).
               repository: docker.io/gotenberg/gotenberg
-              tag: 8.36.0-libreoffice
+              tag: 8.37.0-libreoffice
             args:
               - gotenberg
               - --api-port=3000
