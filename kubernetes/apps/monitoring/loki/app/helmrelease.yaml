@@ -86,6 +86,11 @@ spec:
           directory: /var/loki/chunks
       limits_config:
         retention_period: 14d
+        # Powers Explore's Logs volume histogram (the bar chart above log
+        # results) and the /loki/api/v1/index/volume endpoint it calls. Off by
+        # chart default, which is why Explore prompted for it instead of just
+        # rendering an empty graph.
+        volume_enabled: true
       compactor:
         retention_enabled: true
         # Keep delete-request markers on the local volume until the S3 cutover
