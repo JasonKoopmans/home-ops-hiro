@@ -55,6 +55,10 @@ spec:
             # and runs as this uid, matching the sibling RecordingAnnotator image.
             runAsUser: 1654
             runAsGroup: 1654
+            # Without this the /tmp emptyDir below is root-owned, so a non-root,
+            # read-only-rootfs container can't actually write to it — same as
+            # RecordingAnnotator's own app controller.
+            fsGroup: 1654
         containers:
           app:
             image:
