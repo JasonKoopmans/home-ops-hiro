@@ -1,0 +1,133 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# Syncs Hey Pocket recordings tagged for processing into RecordingAnnotator (audio) and
+# Obsidian (a note linking to it). See https://github.com/JasonKoopmans/pocket-bridge for
+# the full design (docs/spec.md) — this manifest only covers the deployment side.
+#
+# ONE controller, deliberately. pocket-bridge's own docs/spec.md §6 notes that the
+# app-template chart only appends the controller key to the release name when a release
+# has MORE than one controller — with a single controller named "app" below, the rendered
+# CronJob name is exactly "pocket-bridge", which is what the PrometheusRule (and any
+# `kubectl -n default create job --from=cronjob/pocket-bridge ...`) key off. Adding a
+# second controller here would silently rename this one; re-verify with a rendered build
+# if that ever happens.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app pocket-bridge
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: pocket-bridge
+  interval: 1h
+  values:
+    fullnameOverride: *app
+    controllers:
+      app:
+        type: cronjob
+        cronjob:
+          # Hourly during waking hours only — this polls for a human manually tagging a
+          # recording in the Pocket app (spec.md §3.2: no webhook event exists for a tag
+          # change), so there is nothing to catch overnight and no reason to poll then.
+          schedule: "0 6-21 * * *"
+          timeZone: ${TIMEZONE}
+          # A stuck run must not overlap the next tick — spec.md §4.1 notes the in-process
+          # RunGate only closes the race WITHIN one process; two overlapping Job pods would
+          # still race on the same Obsidian frontmatter check.
+          concurrencyPolicy: Forbid
+          startingDeadlineSeconds: 300
+          activeDeadlineSeconds: 900
+          backoffLimit: 2
+          successfulJobsHistory: 3
+          failedJobsHistory: 3
+          # 16 scheduled attempts/day at this cadence — a day of history is plenty to
+          # diagnose a failure without objects piling up. Same reasoning as the CronJobs
+          # in recording-annotator's own HelmRelease.
+          ttlSecondsAfterFinished: 86400
+        pod:
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: pocket-bridge-pullsecret
+          securityContext:
+            runAsNonRoot: true
+            # Verified in pocket-bridge's own CI (docs/spec.md §9): the container builds
+            # and runs as this uid, matching the sibling RecordingAnnotator image.
+            runAsUser: 1654
+            runAsGroup: 1654
+        containers:
+          app:
+            image:
+              repository: ghcr.io/jasonkoopmans/pocket-bridge
+              tag: "0.2.0"
+            env:
+              # Default per pocket-bridge's README; explicit so a future base-URL change on
+              # Pocket's side is a one-line diff here instead of a silent app-side default.
+              Pocket__BaseUrl: https://public.heypocketai.com/api/v1
+              Pocket__ApiKey:
+                secretKeyRef:
+                  name: pocket-bridge-secret
+                  key: Pocket__ApiKey
+              # Tag name, not id — resolved at runtime, so renaming this tag in the Pocket
+              # app doesn't need a manifest change to match.
+              Pocket__FilterTag: to-process
+              # Pocket's hard cap; explicit because "100" reads as a deliberate choice, not
+              # an arbitrary one, if this ever needs lowering for rate-limit reasons.
+              Pocket__PageSize: "100"
+              # spec.md §9 flagged the scheme/port on 27124 as unverified against this
+              # cluster (the Local REST API plugin can serve HTTPS-with-self-signed-cert
+              # OR plain HTTP there depending on configuration). Settled by probing it
+              # directly from a throwaway pod on 2026-09-13: plain HTTP on 27124 answers
+              # 200; HTTPS on the same port fails the TLS handshake entirely, and 27123 is
+              # not listening. This is the app-side default already, made explicit here so
+              # the next reader doesn't have to re-derive it.
+              Obsidian__BaseUrl: http://obsidian.default.svc.cluster.local:27124
+              Obsidian__ApiToken:
+                secretKeyRef:
+                  name: pocket-bridge-secret
+                  key: Obsidian__ApiToken
+              # Matches the n8n original's target folder in the vault (spec.md §1).
+              Obsidian__NoteFolder: Interactions
+              # In-cluster, unauthenticated by design (spec.md §3.3 — LAN/cluster membership
+              # is the access boundary upstream chose). Default matches this already; explicit
+              # for the same reason as Obsidian__BaseUrl above.
+              Annotator__BaseUrl: http://recording-annotator.default.svc.cluster.local:8080
+              # Browser-reachable host used only for the link embedded in the Obsidian note.
+              Annotator__PublicBaseUrl: https://recordings.${SECRET_DOMAIN}
+              # Cutover step 1 of docs/spec.md §8: verify from logs that the right
+              # recordings are found and already-processed ones are skipped BEFORE any
+              # artifact upload or note write happens. Do not flip to "false" until that's
+              # confirmed, AND the backfill gap in §4 is resolved (existing n8n-authored
+              # notes have no `pocketRecordingId` frontmatter, so a live run would treat
+              # every historically-processed recording as new). See the README/spec for the
+              # full cutover sequence — step 2 raises Sync__MaxRecordingsPerRun to widen
+              # gradually once dry-run output looks right.
+              Sync__DryRun: "true"
+              Sync__MaxRecordingsPerRun: "20"
+            # readOnlyRootFilesystem leaves .NET nowhere to put its diagnostic IPC socket or
+            # DataProtection key ring (degrades to a silent warning, not a failure) — same
+            # rationale as RecordingAnnotator's own app-tmp mount.
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              # No live traffic yet (spec.md §9: "no live call has ever been made to Pocket,
+              # RecordingAnnotator, or Obsidian"), so these are an informed guess, not
+              # measured — audio streams through in 8MiB chunks per spec.md §6 rather than
+              # being buffered, so memory should stay well under this. Revisit against
+              # actual usage once a few weeks of runs exist.
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+
+    persistence:
+      tmp:
+        type: emptyDir
+        sizeLimit: 128Mi
+        advancedMounts:
+          app:
+            app:
+              - path: /tmp

@@ -1,0 +1,48 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pocket-bridge-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: pocket-bridge.rules
+      rules:
+        # Keyed on kube_cronjob_status_last_successful_time, never kube_job_failed — the
+        # CronJob's own docs/spec.md §6 calls this out explicitly: a failed Job object
+        # latches and the alert can never self-clear, which is the exact failure mode that
+        # kept a critical firing for a week on recording-annotator's CronJobs in August 2026
+        # (see prometheusrule-recording-annotator.yaml). This metric survives the Job GC
+        # ttlSecondsAfterFinished performs, so it keeps working even after old Jobs are
+        # pruned.
+        #
+        # Threshold math: the CronJob runs hourly only 06:00-21:00 (spec.md §3.2 — polling
+        # for a human tag, nothing to catch overnight), so the largest NORMAL gap between
+        # successes is the overnight one: ~09:00 from the last 21:00 run to the next 06:00
+        # run, plus up to another hour if that first morning attempt also fails and retries
+        # at 07:00. 18h comfortably clears that normal gap while still catching a truly
+        # stuck job on the same day rather than two days later.
+        - alert: PocketBridgeSyncNotSucceeding
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="default", cronjob="pocket-bridge"} > 64800
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: pocket-bridge sync CronJob has no recent successful run
+            description: The pocket-bridge CronJob has not recorded a successful Job in over 18 hours against an hourly (06:00-21:00) schedule. Tagged Hey Pocket recordings are not making it into RecordingAnnotator/Obsidian. Check the Job logs for Pocket/Obsidian/RecordingAnnotator connectivity or auth errors (exit codes 2-6 in pocket-bridge's README).
+
+        # Separate rule because the one above evaluates empty, and so never fires, until the
+        # CronJob has succeeded at least once — exactly the state a fresh deploy starts in.
+        # `for: 18h` covers a deploy at any time of day surviving one full overnight gap
+        # before paging, matching the threshold reasoning above.
+        - alert: PocketBridgeSyncNeverSucceeded
+          expr: absent(kube_cronjob_status_last_successful_time{namespace="default", cronjob="pocket-bridge"})
+          for: 18h
+          labels:
+            severity: warning
+          annotations:
+            summary: pocket-bridge sync has never completed successfully
+            description: No successful run of the pocket-bridge CronJob has ever been recorded, over at least 18 hours of an hourly (06:00-21:00) schedule. Expected briefly right after the first deploy (Sync__DryRun starts "true" — see helmrelease.yaml); if it persists, check the Job logs and confirm the Pocket/Obsidian secrets were actually filled in and encrypted (pocket-bridge-secret.sops.yaml ships with placeholder values).
