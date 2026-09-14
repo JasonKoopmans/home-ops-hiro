@@ -106,7 +106,7 @@ spec:
               # every historically-processed recording as new). See the README/spec for the
               # full cutover sequence — step 2 raises Sync__MaxRecordingsPerRun to widen
               # gradually once dry-run output looks right.
-              Sync__DryRun: "true"
+              Sync__DryRun: "false"
               Sync__MaxRecordingsPerRun: "20"
             # readOnlyRootFilesystem leaves .NET nowhere to put its diagnostic IPC socket or
             # DataProtection key ring (degrades to a silent warning, not a failure) — same
