@@ -109,7 +109,7 @@ data:
       }
       stage.replace {
         source     = "extracted_level"
-        expression = "^informational?$"
+        expression = "^information(al)?$"
         replace    = "info"
       }
       stage.replace {
