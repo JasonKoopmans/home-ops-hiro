@@ -79,6 +79,55 @@ data:
         selector = "{tmp_container_runtime=\"containerd\"}"
         stage.cri {}
       }
+
+      // Loki's own detected_level heuristic only recognizes a fixed set of
+      // JSON key names (level/severity/lvl) and, once a line parses as JSON
+      // at all, never falls back to scanning the raw text for a level word.
+      // .NET's default console JSON formatter (used by pocket-bridge,
+      // recording-annotator) logs `{"LogLevel":"Information",...}` -- a key
+      // Loki doesn't know -- so every line was landing as detected_level
+      // "unknown" despite carrying a perfectly good level. Extract it
+      // ourselves and hand it to Loki as structured metadata, which Loki
+      // uses verbatim instead of guessing.
+      //
+      // A stage.json parse failure on the many non-JSON pods in the cluster
+      // just leaves extracted_level empty (sets the internal __error__
+      // label, which is never sent to Loki) -- harmless, and
+      // stage.structured_metadata below skips empty values, so this doesn't
+      // add a level to streams that never had one.
+      stage.json {
+        expressions = {
+          extracted_level = "level || Level || LEVEL || severity || Severity || LogLevel || lvl",
+        }
+      }
+      // Normalize casing and spell out the .NET LogLevel names Loki doesn't
+      // already treat as synonyms, so Explore's level filter/colors line up
+      // with logfmt/JSON loggers using the short forms.
+      stage.template {
+        source   = "extracted_level"
+        template = "{{ ToLower .Value }}"
+      }
+      stage.replace {
+        source     = "extracted_level"
+        expression = "^informational?$"
+        replace    = "info"
+      }
+      stage.replace {
+        source     = "extracted_level"
+        expression = "^warning$"
+        replace    = "warn"
+      }
+      stage.replace {
+        source     = "extracted_level"
+        expression = "^critical$"
+        replace    = "fatal"
+      }
+      stage.structured_metadata {
+        values = {
+          level = "extracted_level",
+        }
+      }
+
       // Drop helper labels so streams match the previous schema exactly
       // (filename is added automatically by loki.source.file).
       stage.label_drop {
