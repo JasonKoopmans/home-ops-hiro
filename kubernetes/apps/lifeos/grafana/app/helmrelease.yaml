@@ -430,8 +430,22 @@ spec:
       # renovate: datasource=docker depName=grafana/grafana-image-renderer
       image:
         tag: v5.12.3
-      # Chart default (networkPolicy.limitIngress: true) already restricts
-      # inbound traffic to this instance's own Grafana pod.
+      # Chart default (networkPolicy.limitIngress: true) restricts inbound
+      # traffic to this instance's own Grafana pod only — which also blocks
+      # Prometheus's own scrape from the monitoring namespace, since that's
+      # ingress from a different pod too. Confirmed firing as TargetDown
+      # (2026-09-14): the pod never sees a single /metrics request in its
+      # access log, only /healthz and /render/*. extraIngressSelectors is the
+      # chart's own escape hatch for this — adds a second `from` entry to the
+      # generated NetworkPolicy without opening ingress to the whole cluster.
+      networkPolicy:
+        extraIngressSelectors:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: monitoring
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: prometheus
       serviceMonitor:
         enabled: true
       # INFORMED GUESS — not measured, nothing has rendered yet. Chromium
