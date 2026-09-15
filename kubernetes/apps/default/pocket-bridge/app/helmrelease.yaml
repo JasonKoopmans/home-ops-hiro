@@ -63,7 +63,7 @@ spec:
           app:
             image:
               repository: ghcr.io/jasonkoopmans/pocket-bridge
-              tag: "0.2.0"
+              tag: "0.2.1"
             env:
               # Default per pocket-bridge's README; explicit so a future base-URL change on
               # Pocket's side is a one-line diff here instead of a silent app-side default.
