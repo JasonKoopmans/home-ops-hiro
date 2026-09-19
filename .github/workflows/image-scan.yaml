@@ -27,12 +27,25 @@ jobs:
           cache: false
 
       - name: Render Flux manifests (Helm-inflated)
+        # Retried: rendering pulls every chart from ghcr.io/other OCI registries, and
+        # a single connection reset there (seen 2026-09-15 on #592) fails the whole
+        # run for reasons unrelated to the change under test. A genuine render
+        # error fails identically on every attempt, so it still goes red.
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            -w /workspace \
-            ghcr.io/allenporter/flux-local:v8.0.1 \
-            build all --enable-helm --output-file /workspace/rendered.yaml kubernetes/flux/cluster
+          for attempt in 1 2 3; do
+            rm -f rendered.yaml
+            if docker run --rm \
+              -v "${{ github.workspace }}:/workspace" \
+              -w /workspace \
+              ghcr.io/allenporter/flux-local:v8.0.1 \
+              build all --enable-helm --output-file /workspace/rendered.yaml kubernetes/flux/cluster; then
+              exit 0
+            fi
+            echo "::warning::flux-local render failed (attempt ${attempt}/3)"
+            [ "${attempt}" -lt 3 ] && sleep $((attempt * 20))
+          done
+          echo "::error::flux-local render failed after 3 attempts"
+          exit 1
 
       - name: Sanity-check rendered output
         run: |
