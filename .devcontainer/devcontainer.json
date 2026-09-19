@@ -13,7 +13,8 @@
 	// "forwardPorts": [],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "mise trust && mise install",
+	// groff-base: `aws help` renders man pages and errors with "Could not find executable named groff or mandoc" without it.
+	"postCreateCommand": "apt-get update && apt-get install -y --no-install-recommends groff-base && rm -rf /var/lib/apt/lists/* && mise trust && mise install",
 
 	// Extensions VS Code installs into the container automatically on create/rebuild.
 	// Keep in step with .vscode/extensions.json (recommendations only prompt, they don't install).
