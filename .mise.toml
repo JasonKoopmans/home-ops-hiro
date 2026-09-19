@@ -38,4 +38,4 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 "aqua:open-policy-agent/conftest" = "0.70.0"
 "npm:@anthropic-ai/claude-code" = "2.1.278"
 node = "26.9.0"
-aws = { version = "latest", symlink_bins = "true" }
+"aqua:aws/aws-cli" = { version = "2.36.49", symlink_bins = "true" }
