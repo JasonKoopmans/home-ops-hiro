@@ -7,8 +7,16 @@
       "Bash(kubectl -n storage logs instance-manager-b966ebc86bca0de8f6e2036220c0b35f --since=30m)",
       "mcp__kubernetes__kubectl_get",
       "mcp__kubernetes__kubectl_logs",
-      "Bash(rtk git *)",
-      "Bash(gh pr *)"
+      "Bash(rtk git status:*)",
+      "Bash(rtk git diff:*)",
+      "Bash(rtk git log:*)",
+      "Bash(rtk git show:*)",
+      "Bash(rtk git branch:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh pr status:*)",
+      "Bash(gh pr list:*)"
     ]
   }
 }
