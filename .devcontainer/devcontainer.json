@@ -15,15 +15,39 @@
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"postCreateCommand": "mise trust && mise install",
 
-	// Configure tool-specific properties.
-	// "customizations": {},
+	// Extensions VS Code installs into the container automatically on create/rebuild.
+	// Keep in step with .vscode/extensions.json (recommendations only prompt, they don't install).
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"anthropic.claude-code",
+				"blueglassblock.better-json5",
+				"github.vscode-github-actions",
+				"github.vscode-pull-request-github",
+				"hverlin.mise-vscode",
+				"irongeek.vscode-env",
+				"ms-kubernetes-tools.vscode-kubernetes-tools",
+				"redhat.vscode-yaml",
+				"shipitsmarter.sops-edit",
+				"signageos.signageos-vscode-sops",
+				"task.vscode-task"
+			]
+		}
+	},
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	"remoteUser": "root",
 
 	"mounts": [
-		"source=aws-cli-config,target=/root/.aws,type=volume"
+		"source=aws-cli-config,target=/root/.aws,type=volume",
+		// Survives rebuilds, so extensions installed by hand aren't lost either.
+		"source=vscode-server-extensions,target=/root/.vscode-server/extensions,type=volume"
 	],
+
+	"containerEnv": {
+		// The image has no `less`; the default aws pager fails with "Unable to redirect output to pager".
+		"AWS_PAGER": ""
+	},
 
 	"remoteEnv": {
 		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
