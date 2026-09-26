@@ -4,12 +4,16 @@
     "config:recommended",
     "docker:enableMajor",
     "helpers:pinGitHubActionDigests",
-    ":automergeBranch",
+    ":automergePr",
     ":dependencyDashboard",
     ":disableRateLimiting",
     ":semanticCommits",
   ],
   dependencyDashboard: true,
+  // Automerge goes through a PR + GitHub native auto-merge so the main ruleset's
+  // required "Flux Local Success" check gates every update. Branch automerge
+  // pushed straight to main with no CI.
+  platformAutomerge: true,
   dependencyDashboardTitle: "Renovate Dashboard 🤖",
   schedule: ["on Saturday"],
   rebaseWhen: "conflicted",
@@ -50,18 +54,16 @@
       description: "Auto-merge GitHub Actions",
       matchManagers: ["github-actions"],
       automerge: true,
-      automergeType: "branch",
+      automergeType: "pr",
       matchUpdateTypes: ["minor", "patch", "digest"],
       minimumReleaseAge: "3 days",
-      ignoreTests: true,
     },
     {
       description: "Auto-merge Mise Tools",
       matchManagers: ["mise"],
       automerge: true,
-      automergeType: "branch",
+      automergeType: "pr",
       matchUpdateTypes: ["minor", "patch"],
-      ignoreTests: true,
     },
     {
       matchUpdateTypes: ["major"],
@@ -83,7 +85,7 @@
       description: "Auto-merge minor and patch updates",
       matchUpdateTypes: ["minor", "patch"],
       automerge: true,
-      automergeType: "branch",
+      automergeType: "pr",
     },
     {
       // Longhorn upgrades are one-way: the manager records `current-longhorn-version`
