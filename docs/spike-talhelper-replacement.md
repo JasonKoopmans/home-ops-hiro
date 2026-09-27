@@ -174,9 +174,70 @@ topf is a closer match on every axis that matters here:
    so it needs a scratch VM or a full `reset` first, deliberately scheduled,
    not folded into the day-2 dry run.
 
+## Local testing performed
+
+This isn't a future risk — it's already live. Ran both tools against this
+repo's actual `talos/` directory (main checkout, age key + kubeconfig
+present, sandbox disabled for LAN/registry access; binaries fetched from
+each project's GitHub releases with checksums verified against the
+published `checksums.txt` before running):
+
+- **`talhelper genconfig` fails right now**, against the `talenv.yaml`
+  already committed on `main` (`talosVersion: v1.13.10`,
+  `kubernetesVersion: v1.37.1`):
+
+  ```
+  field: "kubernetesVersion"
+    * version of Kubernetes 1.37.1 is too new to be used with Talos 1.13.10
+  field: "talosVersion"
+    * WARNING: "v1.13.10" might not be compatible with this Talhelper version you're using
+  failed to parse config file: please fix issues with your config file
+  ```
+
+  talhelper 3.1.17's built-in compatibility matrix predates this version
+  pair, and since it's archived, no update will ever accept it. `task
+  talos:generate-config` fails identically today if run against `main`.
+
+- **`topf render` succeeds on the first attempt** against the same
+  `talosVersion`/`kubernetesVersion`, using a hand-translated `topf.yaml` +
+  `all/`/`control-plane/`/`node/<host>/` patch set built from the real
+  `talconfig.yaml` and all six `patches/global/*.yaml` files (only syntax
+  change needed: `$$patch: delete` → `$patch: delete`, talhelper's own
+  variable-escaping convention topf doesn't use). Rendered all 5 node
+  configs to local files.
+- **Schematic hash matches exactly.** topf independently computed
+  `c23d16533980fd972f96a79cc22130404615c16de18f43da4a40d801d4fe8d6a` from
+  the translated `customization.systemExtensions.officialExtensions` list —
+  and `curl https://factory.talos.dev/schematics/<id>` returns **200**,
+  meaning it's already registered: the exact hash the currently-running
+  installer image uses. This is the specific failure mode the `&schematic`
+  comment in `talconfig.yaml` warns about (the `cmp-05` 65-char-ID 404
+  incident), and it reproduces byte-for-byte between the two tools.
+- **Per-node output is otherwise identical.** Diffing `hiro-cmp-01`'s
+  rendered config against `hiro-cmp-02`'s (secret-bearing lines stripped)
+  shows only the two fields that should differ — `hardwareAddr` and the
+  node's IP address. Install disk, network routes/MTU/VIP, Longhorn node
+  labels/annotations, kubelet GC thresholds, sysctls, NTP servers, the
+  `machine.files` CRI override, `cluster.network` (pod/svc subnets, CNI
+  disabled), cert SANs, and the `UserVolumeConfig` Longhorn disk all came
+  through correctly on every node.
+- **Caution for whoever runs this next:** a rendered machine config
+  contains the cluster's decrypted secrets (etcd/k8s CA keys, join token).
+  One verification `grep -A2` incidentally printed the cluster's bootstrap
+  token into this session's tool output while checking `podSubnets`/
+  `certSANs` — low blast radius alone, but treat rendered output as secret
+  material, avoid context-line greps near `token:`/`crt:`/`key:` fields, and
+  don't leave rendered files lying around afterward (all scratch files —
+  rendered configs, the `secrets.yaml` copy, downloaded tarballs — were
+  deleted after this verification).
+
+This was a render-only comparison — no `apply`/`upgrade`/`reset` was run
+against any node, and nothing on the live cluster changed.
+
 ## Revisit trigger
 
-Tracked in [revisit-register.md](revisit-register.md). Re-open this once
-topf's `kubernetesVersion` field and Talos ≥1.14's `UnattendedInstallConfig`
-handling have been confirmed against this cluster's actual Talos version, or
-sooner if a Talos release lands that talhelper 3.1.17 can't express.
+Tracked in [revisit-register.md](revisit-register.md). The local-testing
+section above already confirms topf handles this cluster's current
+`talosVersion`/`kubernetesVersion`; re-open this if a future Talos or
+Kubernetes bump breaks that, or once someone runs the actual migration
+(items 1–6 above) against a scratch node.
