@@ -4,15 +4,15 @@ kind: ConfigMap
 metadata:
   name: tika-ner-config
 data:
-  tika-config.xml: |
-    <?xml version="1.0" encoding="UTF-8"?>
-    <properties>
-      <parsers>
-        <parser class="org.apache.tika.parser.DefaultParser"/>
-        <parser class="org.apache.tika.parser.ner.NamedEntityParser">
-          <mime>text/plain</mime>
-          <mime>text/html</mime>
-          <mime>application/xhtml+xml</mime>
-        </parser>
-      </parsers>
-    </properties>
+  # Order matters: Tika composes parsers per mime-type and the LAST entry wins a
+  # given type. default-parser and named-entity-parser both claim text/plain, so
+  # named-entity-parser must stay after default-parser or NER silently stops
+  # working (server starts fine, /rmeta returns 200, just no ner:* fields).
+  tika-config.json: |
+    {
+      "server": {},
+      "parsers": [
+        { "default-parser": {} },
+        { "named-entity-parser": {} }
+      ]
+    }
