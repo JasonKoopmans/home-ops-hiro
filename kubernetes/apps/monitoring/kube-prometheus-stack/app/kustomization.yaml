@@ -14,6 +14,7 @@ resources:
   - ./grafana-dashboard-homelab-alerts.yaml
   - ./grafana-dashboard-homelab-overview.yaml
   - ./grafana-dashboard-proxmox-compute.yaml
+  - ./grafana-dashboard-aws-cost.yaml
   - ./prometheusrule-n8n.yaml
   - ./prometheusrule-minio.yaml
   - ./prometheusrule-storage-and-hosts.yaml
@@ -29,3 +30,4 @@ resources:
   - ./thanos-objstore-config.sops.yaml
   - ./alertmanagerconfig.yaml
   - ./alertmanager-telegram-secret.sops.yaml
+  - ./aws-cloudwatch-secret.sops.yaml

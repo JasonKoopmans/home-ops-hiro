@@ -1,0 +1,139 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-aws-cost
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  aws-cost-and-s3.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "templating": {
+        "list": [
+          {
+            "name": "bucket",
+            "type": "query",
+            "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+            "query": "dimension_values(us-east-1,AWS/S3,BucketSizeBytes,BucketName)",
+            "refresh": 2,
+            "includeAll": true,
+            "multi": true
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Estimated Monthly Charges (USD)",
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+          "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+              "region": "us-east-1",
+              "namespace": "AWS/Billing",
+              "metricName": "EstimatedCharges",
+              "statistic": "Maximum",
+              "dimensions": {"Currency": "USD"}
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 15},
+                  {"color": "red", "value": 20}
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Estimated Charges Trend (30d)",
+          "gridPos": {"h": 6, "w": 16, "x": 8, "y": 0},
+          "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+              "region": "us-east-1",
+              "namespace": "AWS/Billing",
+              "metricName": "EstimatedCharges",
+              "statistic": "Maximum",
+              "dimensions": {"Currency": "USD"}
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"min": 0, "unit": "currencyUSD", "custom": {"lineWidth": 2, "fillOpacity": 10}},
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "type": "bargauge",
+          "title": "S3 Bucket Size — $bucket",
+          "description": "AWS/S3 BucketSizeBytes only reports per storage-class dimension (no all-classes total). Assumes StandardStorage; buckets using other storage classes will under-report here.",
+          "repeat": "bucket",
+          "gridPos": {"h": 6, "w": 8, "x": 0, "y": 6},
+          "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+              "region": "us-east-1",
+              "namespace": "AWS/S3",
+              "metricName": "BucketSizeBytes",
+              "statistic": "Average",
+              "dimensions": {"BucketName": "$bucket", "StorageType": "StandardStorage"}
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "bytes", "min": 0},
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "S3 Object Count — $bucket",
+          "repeat": "bucket",
+          "gridPos": {"h": 6, "w": 8, "x": 8, "y": 6},
+          "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+              "region": "us-east-1",
+              "namespace": "AWS/S3",
+              "metricName": "NumberOfObjects",
+              "statistic": "Average",
+              "dimensions": {"BucketName": "$bucket", "StorageType": "AllStorageTypes"}
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {"unit": "none", "min": 0},
+            "overrides": []
+          },
+          "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
+        }
+      ],
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": ["aws", "cost", "s3"],
+      "time": {"from": "now-30d", "to": "now"},
+      "title": "AWS Cost & S3 Usage",
+      "version": 1
+    }
