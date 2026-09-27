@@ -50,6 +50,16 @@ Two more references exist but aren't live day-2 tooling:
 - `scripts/bootstrap-apps.sh` only checks that the `talhelper` binary is on
   `PATH` (`check_cli ... talhelper ...`); it doesn't invoke config
   generation itself.
+- `.taskfiles/template/resources/nodes.schema.cue` mentions "the talconfig
+  template" in a comment but is only consumed by the same non-live
+  `template:` scaffolding tasks (`cue vet` in `validate-nodes-config`).
+
+One non-code reference is worth swapping regardless of when migration
+actually lands: `docs/feeds/homelab-feeds.opml` subscribed to talhelper's
+GitHub releases feed for the weekly feed-watch review. An archived repo's
+release feed will never fire again, so that's dead weight — swapped to
+topf's releases feed in this PR so the weekly review starts tracking the
+tool this doc recommends.
 
 Two features in `talos/talconfig.yaml` matter beyond the basic node list:
 
