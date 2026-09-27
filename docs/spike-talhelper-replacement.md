@@ -6,18 +6,50 @@ shipped its last release and the repo is archived — see
 No further fixes land for new Talos machine-config schema changes, so a stale
 talhelper eventually can't express what a newer Talos version needs. This is
 a spike, not a migration: it evaluates the two maintainer-recommended
-successors and recommends one. Nothing in `talos/` or `.taskfiles/talos/`
-changes here.
+successors and recommends one. Nothing in `talos/`, `.taskfiles/talos/`, or
+`.taskfiles/bootstrap/` changes here.
 
 ## What this repo actually depends on
 
-`.taskfiles/talos/Taskfile.yaml` wraps talhelper for five operations:
+`.taskfiles/talos/Taskfile.yaml` wraps talhelper for five day-2 operations:
 
 - `generate-config` → `talhelper genconfig` — renders per-node configs from `talconfig.yaml`
 - `apply-node` → `talhelper gencommand apply ... | bash` — wraps `talosctl apply-config`
 - `upgrade-node` → `talhelper gencommand upgrade ... | bash` — wraps `talosctl upgrade`
 - `upgrade-k8s` → `talhelper gencommand upgrade-k8s ... | bash` — wraps `talosctl upgrade-k8s`
 - `reset` → `talhelper gencommand reset ... | bash` — wraps `talosctl reset`
+
+`.taskfiles/bootstrap/Taskfile.yaml`'s `talos` task is a second, separate
+caller — the from-scratch cluster bootstrap, not a day-2 op:
+
+```yaml
+- '[ -f talsecret.sops.yaml ] || talhelper gensecret | sops ... > talsecret.sops.yaml'
+- talhelper genconfig
+- talhelper gencommand apply --extra-flags="--insecure" | bash
+- until talhelper gencommand bootstrap | bash; do sleep 10; done
+- until talhelper gencommand kubeconfig --extra-flags="{{.ROOT_DIR}} --force" | bash; do sleep 10; done
+```
+
+This is the one that actually generates the secrets bundle in the first
+place (`talhelper gensecret`, only run if `talsecret.sops.yaml` doesn't
+exist yet) and does the insecure first-apply + etcd bootstrap + kubeconfig
+pull against fresh maintenance-mode nodes. Any replacement has to cover this
+path too, not just the five day-2 tasks — this is what stands the cluster
+back up after a full reset or a from-scratch rebuild.
+
+Two more references exist but aren't live day-2 tooling:
+
+- `.taskfiles/template/Taskfile.yaml`'s `validate-talos-config` (`talhelper
+  validate talconfig`) is cluster-template scaffolding from the original
+  `onedr0p/cluster-template` bootstrap, in the same category as
+  `.github/workflows/e2e.yaml` — which is explicitly gated
+  `if: github.repository == 'onedr0p/cluster-template'` and confirmed not to
+  run here (already documented in `.github/copilot-instructions.md`). Root
+  `task validate` calls `scripts/kubeconform.sh` directly and does not go
+  through this template task. Not exercised, not worth migrating.
+- `scripts/bootstrap-apps.sh` only checks that the `talhelper` binary is on
+  `PATH` (`check_cli ... talhelper ...`); it doesn't invoke config
+  generation itself.
 
 Two features in `talos/talconfig.yaml` matter beyond the basic node list:
 
@@ -81,7 +113,24 @@ topf is a closer match on every axis that matters here:
   as the upgrade path (same command `upgrade-k8s` already shells out to) —
   so that task barely changes.
 - Secrets migration is a file rename: `talsecret.sops.yaml` → `secrets.yaml`,
-  same directory, same SOPS encryption, no format conversion.
+  same directory, same SOPS encryption, no format conversion. `topf secrets`
+  also directly replaces `talhelper gensecret`: it generates a bundle when
+  none exists (with a confirmation prompt, skippable via `--confirm=false`
+  the same way `bootstrap:talos` would need in CI), stores it SOPS-encrypted
+  automatically, and prints it to stdout — no separate `sops --encrypt`
+  pipe needed.
+- `topf apply` covers the from-scratch bootstrap path natively and then
+  some: it detects maintenance-mode nodes itself (no `--insecure` flag to
+  remember), has a real `--dry-run` that diffs and exits non-zero on
+  pending changes (closer to what "dry-run" should mean than Task's own
+  `--dry`, which just echoes commands without evaluating them), and
+  `--auto-bootstrap` calls the etcd bootstrap API against the first
+  control-plane node with its own 10-minute retry — replacing the
+  `until talhelper gencommand bootstrap | bash; do sleep 10; done` polling
+  loop. A `topf kubeconfig` command replaces the kubeconfig-fetch line too.
+  `bootstrap/Taskfile.yaml`'s `talos` task — five talhelper-wrapped lines
+  today — collapses to three: `topf secrets --confirm=false`, `topf apply
+  --auto-bootstrap --confirm=false`, `topf kubeconfig > kubeconfig`.
 - Schematic handling preserves the exact property the `&schematic` comment
   in `talconfig.yaml` depends on — a declared extension list, a locally
   computed deterministic hash, and `--submit-to-factory` for anything the
@@ -103,9 +152,17 @@ topf is a closer match on every axis that matters here:
    its own real flags instead of talhelper's `--extra-flags` passthrough —
    worth deciding deliberately (e.g. `--drain-timeout`, `--max-parallel`)
    rather than copying the current defaults blind.
-5. A real dry run against a non-control-plane node (`hiro-cmp-04` is the
+5. `.taskfiles/bootstrap/Taskfile.yaml`'s `talos` task: five talhelper lines
+   collapse to `topf secrets --confirm=false`, `topf apply --auto-bootstrap
+   --confirm=false`, `topf kubeconfig > kubeconfig` — this is the path that
+   creates `talsecret.sops.yaml`/`secrets.yaml` in the first place, so it
+   needs its own from-scratch test, not just a reuse of an existing bundle.
+6. A real dry run against a non-control-plane node (`hiro-cmp-04` is the
    least disruptive target) before trusting it against control-plane nodes
-   or `reset`.
+   or `reset`. The bootstrap path (item 5) can't be dry-run against the live
+   cluster at all — it only exercises against fresh/maintenance-mode nodes,
+   so it needs a scratch VM or a full `reset` first, deliberately scheduled,
+   not folded into the day-2 dry run.
 
 ## Revisit trigger
 
