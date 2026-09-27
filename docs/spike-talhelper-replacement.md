@@ -89,7 +89,7 @@ archival notice.
 | Stars | 165 | 32 |
 | Config model | single `topf.yaml` + layered patch files (`all/`, `<role>/`, `node/<host>/`) — closest analog to talhelper's model | Kustomize-style bases/overlays, own `config.talstomize.dev/v1alpha1` schema |
 | `apply`/`upgrade`/`reset` | native subcommands, talosctl-equivalent flags plus things talhelper never had (drain with PDB fallback, staged upgrades, `--max-parallel`, `--dry-run`) | **no** — `apply`/`diff` only; docs state explicitly it "never runs talosctl upgrade/upgrade-k8s itself" |
-| Secrets | `topf secrets` generates **and** stores the bundle, SOPS-encrypts on write automatically, reads an existing `talsecret.sops.yaml` unmodified (just rename to `secrets.yaml`) | reads an externally-generated `talosctl gen secrets` bundle only — doesn't generate/rotate |
+| Secrets | `topf secrets` generates **and** stores the bundle, SOPS-encrypts on write automatically, reads an existing `talsecret.sops.yaml` unmodified — target name has to stay `*.sops.yaml`-suffixed for this repo's own `.sops.yaml` rule to match (see below), not topf's default `secrets.yaml` | reads an externally-generated `talosctl gen secrets` bundle only — doesn't generate/rotate |
 | Schematic handling | declare `customization.systemExtensions` in a file, ID computed locally as a deterministic hash (same property talhelper has), `--submit-to-factory` registers new ones — direct drop-in for the `&schematic` block | supported, but not evaluated in depth given the gaps above |
 | Migration docs | has a dedicated [`migration-from-talhelper.md`](https://github.com/postfinance/topf/blob/main/docs/migration-from-talhelper.md) with a worked example | none |
 
@@ -125,13 +125,20 @@ topf is a closer match on every axis that matters here:
   docs explicitly recommend keeping `talosctl upgrade-k8s --to <version>`
   as the upgrade path (same command `upgrade-k8s` already shells out to) —
   so that task barely changes.
-- Secrets migration is a file rename: `talsecret.sops.yaml` → `secrets.yaml`,
-  same directory, same SOPS encryption, no format conversion. `topf secrets`
-  also directly replaces `talhelper gensecret`: it generates a bundle when
-  none exists (with a confirmation prompt, skippable via `--confirm=false`
-  the same way `bootstrap:talos` would need in CI), stores it SOPS-encrypted
-  automatically, and prints it to stdout — no separate `sops --encrypt`
-  pipe needed.
+- Secrets migration is a rename, same directory, same SOPS encryption, no
+  format conversion — but **not** to topf's own default filename. This
+  repo's `.sops.yaml` (line 3) matches encryption targets by
+  `path_regex: talos/.*\.sops\.ya?ml` — a bare `secrets.yaml` wouldn't match
+  that rule, so any future re-encryption (rotation, `sops updatekeys`)
+  wouldn't pick up the age key automatically. topf's `secretsPath` field
+  takes any filename, so the fix is `talos/talsecret.sops.yaml` →
+  `talos/secrets.sops.yaml` with `secretsPath: secrets.sops.yaml` set in
+  `topf.yaml`, keeping the `*.sops.yaml` suffix the creation rule expects.
+  `topf secrets` also directly replaces `talhelper gensecret`: it generates
+  a bundle when none exists (with a confirmation prompt, skippable via
+  `--confirm=false` the same way `bootstrap:talos` would need in CI), stores
+  it SOPS-encrypted automatically, and prints it to stdout — no separate
+  `sops --encrypt` pipe needed.
 - `topf apply` covers the from-scratch bootstrap path natively and then
   some: it detects maintenance-mode nodes itself (no `--insecure` flag to
   remember), has a real `--dry-run` that diffs and exits non-zero on
@@ -159,7 +166,13 @@ topf is a closer match on every axis that matters here:
    (`ipAddress`→`ip`, `hostname`→`host`, `controlPlane: true`→`role:
    control-plane`, JSON6902 patches rewritten as strategic-merge with
    `$patch: delete`).
-3. `talos/talsecret.sops.yaml` → `talos/secrets.yaml` (rename only).
+3. `talos/talsecret.sops.yaml` → `talos/secrets.sops.yaml` (rename, kept
+   `*.sops.yaml`-suffixed — see the SOPS creation-rule note above — not
+   topf's default `secrets.yaml`; set `secretsPath: secrets.sops.yaml` in
+   `topf.yaml`). The rename touches every hard-coded reference to the old
+   filename too: `.taskfiles/bootstrap/Taskfile.yaml` (covered by item 5
+   below) and `.github/workflows/e2e.yaml` (not live in this repo, so lower
+   priority, but still references the old name).
 4. `.taskfiles/talos/Taskfile.yaml`: five `talhelper gencommand ... | bash`
    one-liners become `topf apply` / `topf upgrade` / `topf reset`, each with
    its own real flags instead of talhelper's `--extra-flags` passthrough —
@@ -168,7 +181,7 @@ topf is a closer match on every axis that matters here:
 5. `.taskfiles/bootstrap/Taskfile.yaml`'s `talos` task: five talhelper lines
    collapse to `topf secrets --confirm=false`, `topf apply --auto-bootstrap
    --confirm=false`, `topf kubeconfig > kubeconfig` — this is the path that
-   creates `talsecret.sops.yaml`/`secrets.yaml` in the first place, so it
+   creates `talsecret.sops.yaml`/`secrets.sops.yaml` in the first place, so it
    needs its own from-scratch test, not just a reuse of an existing bundle.
 6. A real dry run against a non-control-plane node (`hiro-cmp-04` is the
    least disruptive target) before trusting it against control-plane nodes
