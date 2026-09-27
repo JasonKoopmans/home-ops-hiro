@@ -43,6 +43,7 @@ checkable, not aspirational — "once 14d of data exists" rather than "later".
 | 13 | Scale-to-zero cold start can be a 1 GB image pull (15m50s measured) even though Spegel holds the blobs on three nodes and serves them on demand — suspected cmp-05 east-west networking | Before wiring freecad (larger image, same trap): the cmp-05 investigation lands, or accept a slow first request after a cold placement there | [ephemeral-apps-keda.md](ephemeral-apps-keda.md) §"The real constraint" |
 | 14 | audacity's `conditionWait: 10m` / interceptor `readinessTimeout: 10m` are sized to ~2x one measured app boot (4m11s), n=1 | A handful of real cold starts have been observed; tighten or loosen from the spread | `kubernetes/apps/default/audacity/app/httpscaledobject.yaml` |
 | 12 | openreel rebuilds itself (`git clone` + `pnpm build`) on every pod start, making it a poor scale-to-zero candidate | Before wiring openreel — pick: drop from pilot, long `conditionWait`, or repackage to GHCR | `kubernetes/apps/default/openreel/app/helmrelease.yaml`; [ephemeral-apps-keda.md](ephemeral-apps-keda.md) |
+| 15 | talhelper (pins Talos config generation) is archived upstream, no further fixes | A Talos release lands that current talhelper can't express, or topf reaches a stable release track worth re-checking | [spike-talhelper-replacement.md](spike-talhelper-replacement.md) |
 
 ## Closed
 
