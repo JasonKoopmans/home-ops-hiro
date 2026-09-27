@@ -333,6 +333,12 @@ spec:
           secretKeyRef:
             name: aws-cloudwatch-secret
             key: AWS_SECRET_ACCESS_KEY
+      # envValueFrom above injects aws-cloudwatch-secret as env vars, which a
+      # secret update alone doesn't refresh — this Reloader annotation
+      # restarts the pod on change so a rotated access key actually takes
+      # effect instead of the process keeping the revoked one.
+      podAnnotations:
+        secret.reloader.stakater.com/reload: aws-cloudwatch-secret
       # Same failure mode already root-caused on lifeos/grafana (#598/#599):
       # Grafana 13's background preinstaller auto-updates its hardcoded default
       # plugin set (postgres, mssql, jaeger, loki, influxdb) on every boot
@@ -446,6 +452,16 @@ spec:
                         region: us-east-1
                         dimensions:
                           Currency: USD
+                    - refId: B
+                      relativeTimeRange:
+                        from: 21600
+                        to: 0
+                      datasourceUid: "__expr__"
+                      model:
+                        refId: B
+                        type: reduce
+                        expression: A
+                        reducer: last
                     - refId: C
                       relativeTimeRange:
                         from: 21600
@@ -454,7 +470,7 @@ spec:
                       model:
                         refId: C
                         type: threshold
-                        expression: A
+                        expression: B
                         conditions:
                           - evaluator:
                               type: gt
