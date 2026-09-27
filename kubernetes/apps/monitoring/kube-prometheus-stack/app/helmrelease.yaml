@@ -325,6 +325,14 @@ spec:
           secretKeyRef:
             name: alertmanager-telegram-secret
             key: bot-token
+        GF_AWS_ACCESS_KEY_ID:
+          secretKeyRef:
+            name: aws-cloudwatch-secret
+            key: AWS_ACCESS_KEY_ID
+        GF_AWS_SECRET_ACCESS_KEY:
+          secretKeyRef:
+            name: aws-cloudwatch-secret
+            key: AWS_SECRET_ACCESS_KEY
       # Same failure mode already root-caused on lifeos/grafana (#598/#599):
       # Grafana 13's background preinstaller auto-updates its hardcoded default
       # plugin set (postgres, mssql, jaeger, loki, influxdb) on every boot
@@ -382,6 +390,17 @@ spec:
           url: http://loki.monitoring.svc.cluster.local:3100
           access: proxy
           isDefault: false
+        - name: CloudWatch
+          type: cloudwatch
+          uid: cloudwatch
+          access: proxy
+          isDefault: false
+          jsonData:
+            authType: keys
+            defaultRegion: us-east-1
+          secureJsonData:
+            accessKey: $$GF_AWS_ACCESS_KEY_ID
+            secretKey: $$GF_AWS_SECRET_ACCESS_KEY
       alerting:
         contactpoints.yaml:
           apiVersion: 1
@@ -395,6 +414,60 @@ spec:
                   settings:
                     bottoken: $$GF_TELEGRAM_BOT_TOKEN
                     chatid: "8854064758"
+        # First Grafana-managed alert rule in this repo (everything else is
+        # Alertmanager PrometheusRules). AWS/Billing EstimatedCharges only
+        # exists via CloudWatch, which Alertmanager/Prometheus can't scrape,
+        # so this has to be a Grafana alert rule against the CloudWatch
+        # datasource above, routed straight to the Telegram contact point
+        # by name (bypassing the notification-policy tree, which this repo
+        # has never needed to define since this is the first rule).
+        rules.yaml:
+          apiVersion: 1
+          groups:
+            - orgId: 1
+              name: aws-cost
+              folder: AWS
+              interval: 1h
+              rules:
+                - uid: aws-estimated-charges
+                  title: AWS estimated charges over $20
+                  condition: C
+                  data:
+                    - refId: A
+                      relativeTimeRange:
+                        from: 21600
+                        to: 0
+                      datasourceUid: cloudwatch
+                      model:
+                        refId: A
+                        namespace: AWS/Billing
+                        metricName: EstimatedCharges
+                        statistic: Maximum
+                        region: us-east-1
+                        dimensions:
+                          Currency: USD
+                    - refId: C
+                      relativeTimeRange:
+                        from: 21600
+                        to: 0
+                      datasourceUid: "__expr__"
+                      model:
+                        refId: C
+                        type: threshold
+                        expression: A
+                        conditions:
+                          - evaluator:
+                              type: gt
+                              params: [20]
+                  noDataState: NoData
+                  execErrState: Error
+                  for: 1h
+                  annotations:
+                    summary: "AWS month-to-date estimated charges exceeded $20"
+                  labels:
+                    severity: warning
+                  notification_settings:
+                    receiver: Telegram
 
     prometheus-node-exporter:
       enabled: true
