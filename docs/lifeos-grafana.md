@@ -220,6 +220,71 @@ comes up without it and every dashboard depending on it breaks.
 
 ---
 
+## Sharing a dashboard or panel without login
+
+Three separate mechanisms answer "no-auth" here — pick by what you're actually
+exposing:
+
+| Need | Mechanism | Auth |
+|---|---|---|
+| Someone with the link views one dashboard | **Public dashboards** (built in, Grafana 13.x) | none |
+| Embed a live panel `<img>` in another webapp | `/render/d-solo/...` PNG endpoint | still requires a session cookie or service-account token |
+| Embed a live panel `<iframe>` in another webapp | Public dashboard + `allow_embedding` | none, but needs a `grafana.ini` change not yet made |
+
+### Public dashboards (no code change needed)
+
+1. Open the dashboard → **Share → Share externally** → "Anyone with the link".
+2. Copy the URL: `https://lifeos.${SECRET_DOMAIN}/public-dashboards/<accessToken>`.
+   Anyone who can reach that host (i.e. on the LAN — see below) loads it with
+   no login. Append `?kiosk` for a chrome-free view.
+3. Toggle time-range picker / annotations visibility per share, if wanted.
+4. Revoke from the dashboard's Share menu, or **Dashboards → Shared
+   dashboards** for the full list.
+
+Limits worth knowing before relying on one:
+
+- **Dashboard-level only** — there's no per-panel public link. To expose one
+  panel, put it alone on a small dashboard and share that.
+- **Expression queries aren't supported**, and template variables are mostly
+  unsupported. Check the dashboard actually renders on the public URL before
+  handing out the link.
+- **The share is a database row, on the UI plane described above** — Git can't
+  recreate it, and it survives only via the Longhorn backup like everything
+  else in that plane. Don't treat a public-dashboard link as reproducible from
+  this repo.
+
+### Still LAN-only, on purpose
+
+[`httproute.yaml`](../kubernetes/apps/lifeos/grafana/app/httproute.yaml) attaches
+`lifeos.${SECRET_DOMAIN}` to `envoy-internal` only. "No auth" via public
+dashboards means no auth *for anyone on the home network* — it does not put
+this instance on the public internet. Don't move it to `envoy-external` to
+make a link work off-LAN; that's a deliberate, separate decision this doc
+hasn't made.
+
+`auth.anonymous` in [`helmrelease.yaml`](../kubernetes/apps/lifeos/grafana/app/helmrelease.yaml)
+stays `enabled: false`. Public dashboards are the intended door because they
+scope access to one dashboard; flipping anonymous access on would expose the
+whole org instead.
+
+### Embedding a panel in another webapp
+
+The chart's `imageRenderer` (see the comment above `imageRenderer:` in
+`helmrelease.yaml`) exposes
+`/render/d-solo/<uid>?panelId=<id>&width=...&height=...` for a plain PNG. That
+endpoint is **not** public-dashboard-aware — it still requires Grafana auth.
+The intended path: the *other* webapp's backend calls the render URL
+server-side with a Viewer-role service-account token, then serves/proxies the
+PNG to its own frontend same-origin. Not a browser-side `<img>` pointed
+directly at this instance.
+
+A live `<iframe>` of a public-dashboard URL is blocked by Grafana's default
+`X-Frame-Options`. Fixing that needs `security.allow_embedding: true` added to
+the `grafana.ini` block in `helmrelease.yaml` — not done as of this writing,
+since nothing embeds a LifeOS panel yet.
+
+---
+
 ## What actually protects this data
 
 Worth being precise, because this app's resilience story is weaker than the
