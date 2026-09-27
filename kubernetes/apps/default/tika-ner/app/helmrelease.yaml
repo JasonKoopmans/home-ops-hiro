@@ -48,8 +48,8 @@ spec:
                 cd /work
                 jar cf /tika-extras/opennlp-ner-models.jar org
 
-                wget -O /tika-extras/tika-parser-nlp-package-3.3.0.jar https://repo1.maven.org/maven2/org/apache/tika/tika-parser-nlp-package/3.3.0/tika-parser-nlp-package-3.3.0.jar
-                wget -O /tika-extras/opennlp-tools-2.4.0.jar https://repo1.maven.org/maven2/org/apache/opennlp/opennlp-tools/2.4.0/opennlp-tools-2.4.0.jar
+                wget -O /tika-extras/tika-parser-nlp-module-4.0.0.jar https://repo1.maven.org/maven2/org/apache/tika/tika-parser-nlp-module/4.0.0/tika-parser-nlp-module-4.0.0.jar
+                wget -O /tika-extras/opennlp-tools-2.5.11.jar https://repo1.maven.org/maven2/org/apache/opennlp/opennlp-tools/2.5.11/opennlp-tools-2.5.11.jar
             resources:
               requests:
                 cpu: 50m
@@ -60,10 +60,10 @@ spec:
           app:
             image:
               repository: docker.io/apache/tika
-              tag: 3.3.1.0-full
+              tag: 4.0.0-1-full
             args:
               - -c
-              - /tika-config/tika-config.xml
+              - /tika-config/tika-config.json
             env:
               TZ: ${TIMEZONE}
               JAVA_TOOL_OPTIONS: -Dner.impl.class=org.apache.tika.parser.ner.opennlp.OpenNLPNERecogniser
@@ -90,13 +90,22 @@ spec:
                   periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 6
+              # Exercises a real parse through the parsers.json config (not just /version):
+              # tika-server resolves parsers lazily in a forked per-request process, so a
+              # broken or misordered parsers list still passes a plain httpGet health check
+              # and only fails on an actual request. This proves NER is genuinely wired.
               startup:
                 enabled: true
                 custom: true
                 spec:
-                  httpGet:
-                    path: *healthPath
-                    port: *port
+                  exec:
+                    command:
+                      - sh
+                      - -c
+                      - >-
+                        wget -q -O - --method=PUT --header="Content-Type: text/plain"
+                        --body-data="John Smith works at Apache Software Foundation in Paris."
+                        http://localhost:9998/rmeta/text | grep -q '"ner:PERSON"'
                   periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 90
