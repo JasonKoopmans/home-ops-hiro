@@ -21,6 +21,8 @@
       <outline type="rss" text="Spegel" title="Spegel" xmlUrl="https://github.com/spegel-org/spegel/releases.atom" htmlUrl="https://github.com/spegel-org/spegel/releases"/>
       <outline type="rss" text="Reloader" title="Reloader" xmlUrl="https://github.com/stakater/Reloader/releases.atom" htmlUrl="https://github.com/stakater/Reloader/releases"/>
       <outline type="rss" text="cloudflared" title="cloudflared" xmlUrl="https://github.com/cloudflare/cloudflared/releases.atom" htmlUrl="https://github.com/cloudflare/cloudflared/releases"/>
+      <outline type="rss" text="KEDA" title="KEDA" xmlUrl="https://github.com/kedacore/keda/releases.atom" htmlUrl="https://github.com/kedacore/keda/releases"/>
+      <outline type="rss" text="KEDA HTTP Add-on" title="KEDA HTTP Add-on" xmlUrl="https://github.com/kedacore/http-add-on/releases.atom" htmlUrl="https://github.com/kedacore/http-add-on/releases"/>
     </outline>
     <outline text="2 - Observability &amp; Data" title="2 - Observability &amp; Data">
       <outline type="rss" text="Prometheus" title="Prometheus" xmlUrl="https://github.com/prometheus/prometheus/releases.atom" htmlUrl="https://github.com/prometheus/prometheus/releases"/>
@@ -29,6 +31,7 @@
       <outline type="rss" text="Grafana Alloy" title="Grafana Alloy" xmlUrl="https://github.com/grafana/alloy/releases.atom" htmlUrl="https://github.com/grafana/alloy/releases"/>
       <outline type="rss" text="Thanos" title="Thanos" xmlUrl="https://github.com/thanos-io/thanos/releases.atom" htmlUrl="https://github.com/thanos-io/thanos/releases"/>
       <outline type="rss" text="mariadb-operator" title="mariadb-operator" xmlUrl="https://github.com/mariadb-operator/mariadb-operator/releases.atom" htmlUrl="https://github.com/mariadb-operator/mariadb-operator/releases"/>
+      <outline type="rss" text="CloudNativePG" title="CloudNativePG" xmlUrl="https://github.com/cloudnative-pg/cloudnative-pg/releases.atom" htmlUrl="https://github.com/cloudnative-pg/cloudnative-pg/releases"/>
       <outline type="rss" text="Knative Serving" title="Knative Serving" xmlUrl="https://github.com/knative/serving/releases.atom" htmlUrl="https://github.com/knative/serving/releases"/>
       <outline type="rss" text="Knative Operator" title="Knative Operator" xmlUrl="https://github.com/knative/operator/releases.atom" htmlUrl="https://github.com/knative/operator/releases"/>
     </outline>
@@ -44,8 +47,14 @@
       <outline type="rss" text="Apache Tika" title="Apache Tika" xmlUrl="https://github.com/apache/tika/tags.atom" htmlUrl="https://github.com/apache/tika/tags"/>
       <outline type="rss" text="Minecraft server image (itzg)" title="Minecraft server image (itzg)" xmlUrl="https://github.com/itzg/docker-minecraft-server/releases.atom" htmlUrl="https://github.com/itzg/docker-minecraft-server/releases"/>
       <outline type="rss" text="Obsidian image (linuxserver)" title="Obsidian image (linuxserver)" xmlUrl="https://github.com/linuxserver/docker-obsidian/releases.atom" htmlUrl="https://github.com/linuxserver/docker-obsidian/releases"/>
-      <outline type="rss" text="Filebrowser" title="Filebrowser" xmlUrl="https://github.com/filebrowser/filebrowser/releases.atom" htmlUrl="https://github.com/filebrowser/filebrowser/releases"/>
       <outline type="rss" text="Hermes Agent" title="Hermes Agent" xmlUrl="https://github.com/NousResearch/hermes-agent/releases.atom" htmlUrl="https://github.com/NousResearch/hermes-agent/releases"/>
+      <outline type="rss" text="Audacity image (linuxserver)" title="Audacity image (linuxserver)" xmlUrl="https://github.com/linuxserver/docker-audacity/releases.atom" htmlUrl="https://github.com/linuxserver/docker-audacity/releases"/>
+      <outline type="rss" text="FreeCAD image (linuxserver)" title="FreeCAD image (linuxserver)" xmlUrl="https://github.com/linuxserver/docker-freecad/releases.atom" htmlUrl="https://github.com/linuxserver/docker-freecad/releases"/>
+      <outline type="rss" text="FreshRSS" title="FreshRSS" xmlUrl="https://github.com/FreshRSS/FreshRSS/releases.atom" htmlUrl="https://github.com/FreshRSS/FreshRSS/releases"/>
+      <outline type="rss" text="Gotenberg" title="Gotenberg" xmlUrl="https://github.com/gotenberg/gotenberg/releases.atom" htmlUrl="https://github.com/gotenberg/gotenberg/releases"/>
+      <outline type="rss" text="MeTube" title="MeTube" xmlUrl="https://github.com/alexta69/metube/releases.atom" htmlUrl="https://github.com/alexta69/metube/releases"/>
+      <outline type="rss" text="OpenReel (Augani)" title="OpenReel (Augani)" xmlUrl="https://github.com/Augani/openreel-video/releases.atom" htmlUrl="https://github.com/Augani/openreel-video/releases"/>
+      <outline type="rss" text="CloudBeaver" title="CloudBeaver" xmlUrl="https://github.com/dbeaver/cloudbeaver/tags.atom" htmlUrl="https://github.com/dbeaver/cloudbeaver/tags"/>
     </outline>
     <outline text="4 - Meta / Tooling" title="4 - Meta / Tooling">
       <outline type="rss" text="app-template (bjw-s)" title="app-template (bjw-s)" xmlUrl="https://github.com/bjw-s-labs/helm-charts/releases.atom" htmlUrl="https://github.com/bjw-s-labs/helm-charts/releases"/>
@@ -82,6 +91,15 @@
       <outline type="rss" text="Node.js" title="Node.js" xmlUrl="https://github.com/nodejs/node/releases.atom" htmlUrl="https://github.com/nodejs/node/releases"/>
       <outline type="rss" text="pipx" title="pipx" xmlUrl="https://github.com/pypa/pipx/releases.atom" htmlUrl="https://github.com/pypa/pipx/releases"/>
       <outline type="rss" text="makejinja" title="makejinja" xmlUrl="https://github.com/mirkolenz/makejinja/releases.atom" htmlUrl="https://github.com/mirkolenz/makejinja/releases"/>
+    </outline>
+    <outline text="6 - MCP Servers" title="6 - MCP Servers">
+      <outline type="rss" text="mcp-grafana" title="mcp-grafana" xmlUrl="https://github.com/grafana/mcp-grafana/releases.atom" htmlUrl="https://github.com/grafana/mcp-grafana/releases"/>
+      <outline type="rss" text="Playwright MCP" title="Playwright MCP" xmlUrl="https://github.com/microsoft/playwright-mcp/releases.atom" htmlUrl="https://github.com/microsoft/playwright-mcp/releases"/>
+      <outline type="rss" text="ProxmoxMCP-Plus" title="ProxmoxMCP-Plus" xmlUrl="https://github.com/rekklesna/ProxmoxMCP-Plus/releases.atom" htmlUrl="https://github.com/rekklesna/ProxmoxMCP-Plus/releases"/>
+      <outline type="rss" text="n8n-mcp" title="n8n-mcp" xmlUrl="https://github.com/czlonkowski/n8n-mcp/releases.atom" htmlUrl="https://github.com/czlonkowski/n8n-mcp/releases"/>
+      <outline type="rss" text="postgres-mcp" title="postgres-mcp" xmlUrl="https://github.com/crystaldba/postgres-mcp/releases.atom" htmlUrl="https://github.com/crystaldba/postgres-mcp/releases"/>
+      <outline type="rss" text="prometheus-mcp-server" title="prometheus-mcp-server" xmlUrl="https://github.com/pab1it0/prometheus-mcp-server/releases.atom" htmlUrl="https://github.com/pab1it0/prometheus-mcp-server/releases"/>
+      <outline type="rss" text="mcp-server-kubernetes" title="mcp-server-kubernetes" xmlUrl="https://github.com/Flux159/mcp-server-kubernetes/releases.atom" htmlUrl="https://github.com/Flux159/mcp-server-kubernetes/releases"/>
     </outline>
   </body>
 </opml>
