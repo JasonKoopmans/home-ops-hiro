@@ -1,0 +1,14 @@
+machine:
+  network:
+    interfaces:
+      - deviceSelector:
+          hardwareAddr: "bc:24:11:8e:69:d9"
+        dhcp: false
+        addresses:
+          - "192.168.25.25/24"
+        routes:
+          - network: "0.0.0.0/0"
+            gateway: "192.168.25.1"
+        mtu: 1500
+        vip:
+          ip: "192.168.25.20"

@@ -1,0 +1,31 @@
+clusterName: kubernetes
+clusterEndpoint: https://192.168.25.20:6443
+
+# renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
+kubernetesVersion: v1.37.1
+# renovate: datasource=docker depName=ghcr.io/siderolabs/installer
+talosVersion: v1.13.10
+schematicId: "@schematic.yaml"
+
+# Kept *.sops.yaml-suffixed (not topf's own default secrets.yaml) so it
+# still matches this repo's .sops.yaml creation rule
+# (path_regex: talos/.*\.sops\.ya?ml) — otherwise a future key rotation
+# wouldn't pick up the age key automatically.
+secretsPath: secrets.sops.yaml
+
+nodes:
+  - host: hiro-cmp-01
+    ip: 192.168.25.21
+    role: control-plane
+  - host: hiro-cmp-02
+    ip: 192.168.25.22
+    role: control-plane
+  - host: hiro-cmp-03
+    ip: 192.168.25.23
+    role: control-plane
+  - host: hiro-cmp-04
+    ip: 192.168.25.24
+    role: control-plane
+  - host: hiro-cmp-05
+    ip: 192.168.25.25
+    role: control-plane

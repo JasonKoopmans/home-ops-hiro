@@ -6,62 +6,62 @@ tasks:
   generate-config:
     desc: Generate Talos configuration
     dir: '{{.TALOS_DIR}}'
-    cmd: talhelper genconfig
+    cmd: topf render --confirm=false
     preconditions:
-      - test -f {{.TALOS_DIR}}/talconfig.yaml
+      - test -f {{.TALOS_DIR}}/topf.yaml
       - test -f {{.ROOT_DIR}}/.sops.yaml
       - test -f {{.SOPS_AGE_KEY_FILE}}
-      - which talhelper
+      - which topf
 
   apply-node:
-    desc: Apply Talos config to a node [IP=required]
+    desc: Apply Talos config to a node [HOST=required]
     dir: '{{.TALOS_DIR}}'
-    cmd: talhelper gencommand apply --node {{.IP}} --extra-flags '--mode={{.MODE}}' | bash
+    cmd: topf apply --nodes-filter '^{{.HOST}}$' --mode={{.MODE}}
     vars:
       MODE: '{{.MODE | default "auto"}}'
     requires:
-      vars: [IP]
+      vars: [HOST]
     preconditions:
-      - talosctl --nodes {{.IP}} get machineconfig
       - talosctl config info
       - test -f {{.TALOSCONFIG}}
-      - which talhelper talosctl yq
+      - which topf talosctl yq
 
   # Consider `task alerts:silence` first (repo root Taskfile) so the reboot
   # this triggers doesn't page Telegram via KubeNodeNotReady/Unreachable.
   upgrade-node:
-    desc: Upgrade Talos on a single node [IP=required]
+    desc: Upgrade Talos on a single node [HOST=required]
     dir: '{{.TALOS_DIR}}'
-    cmd: talhelper gencommand upgrade --node {{.IP}} --extra-flags "{{.UPGRADE_FLAGS}}" | bash
-    vars:
-      UPGRADE_FLAGS: '--timeout=10m{{if .DRAIN}} --drain={{.DRAIN}}{{end}}'
+    cmd: topf upgrade --nodes-filter '^{{.HOST}}$'{{if .DRAIN}} --drain={{.DRAIN}}{{end}}
     requires:
-      vars: [IP]
+      vars: [HOST]
     preconditions:
-      - talosctl --nodes {{.IP}} get machineconfig
       - talosctl config info
       - test -f {{.TALOSCONFIG}}
-      - which kubectl talhelper talosctl yq
+      - which kubectl topf talosctl yq
 
   # Consider `task alerts:silence` first (repo root Taskfile) — a k8s upgrade
   # rolls control-plane components and can trip KubeAPIInstanceUnreachable/
   # etcd* alerts.
+  #
+  # topf's own docs recommend `talosctl upgrade-k8s` directly over any
+  # wrapper: it validates version skew/component readiness, which a wrapper
+  # applying the raw config does not.
   upgrade-k8s:
     desc: Upgrade Kubernetes
     dir: '{{.TALOS_DIR}}'
-    cmd: talhelper gencommand upgrade-k8s --extra-flags "--to '{{.KUBERNETES_VERSION}}'" | bash
+    cmd: talosctl upgrade-k8s --to '{{.KUBERNETES_VERSION}}'
     vars:
       KUBERNETES_VERSION:
-        sh: yq '.kubernetesVersion' {{.TALOS_DIR}}/talenv.yaml
+        sh: yq '.kubernetesVersion' {{.TALOS_DIR}}/topf.yaml
     preconditions:
       - talosctl config info
       - test -f {{.TALOSCONFIG}}
-      - which talhelper talosctl yq
+      - which talosctl yq
 
   reset:
     desc: Resets nodes back to maintenance mode
     dir: '{{.TALOS_DIR}}'
     prompt: This will destroy your cluster and reset the nodes back to maintenance mode... continue?
-    cmd: talhelper gencommand reset --extra-flags="--reboot {{- if eq .CLI_FORCE false }} --system-labels-to-wipe STATE --system-labels-to-wipe EPHEMERAL{{ end }} --graceful=false --wait=false" | bash
+    cmd: topf reset --graceful=false{{if eq .CLI_FORCE false}} --full=false{{end}}
     preconditions:
-      - which talhelper
+      - which topf
