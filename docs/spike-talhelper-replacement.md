@@ -52,7 +52,7 @@ Two more references exist but aren't live day-2 tooling:
   generation itself.
 - `.taskfiles/template/resources/nodes.schema.cue` mentions "the talconfig
   template" in a comment but is only consumed by the same non-live
-  `template:` scaffolding tasks (`cue vet` in `validate-nodes-config`).
+  `template:` scaffolding tasks (`cue vet` in `validate-schemas`).
 
 One non-code reference is worth swapping regardless of when migration
 actually lands: `docs/feeds/homelab-feeds.opml` subscribed to talhelper's
@@ -65,7 +65,7 @@ Two features in `talos/talconfig.yaml` matter beyond the basic node list:
 
 1. **Inline Image Factory schematics.** Each node declares
    `customization.systemExtensions.officialExtensions` directly in
-   `talconfig.yaml` (see the `&schematic` anchor, ~line 25); talhelper submits
+   `talconfig.yaml` (see the `&schematic` anchor, ~line 37); talhelper submits
    that to the factory and derives the installer image itself. The comment
    next to it documents why this matters: a hand-copied schematic hash
    previously drifted on `cmp-05` and 404'd against the factory. Any
@@ -84,7 +84,7 @@ archival notice.
 | | [topf](https://github.com/postfinance/topf) | [talstomize](https://github.com/mirceanton/talstomize) |
 |---|---|---|
 | Maintainer | PostFinance | community (mirceanton) |
-| First release | Dec 2025 | Aug 2026 |
+| First release | Feb 2026 (`v0.1.0`; repo created Dec 2025) | Aug 2026 |
 | Latest tag (2026-09-27) | `v0.6.0`, real semver, ~monthly cadence | `v0.1.0-rc.2` — no non-rc release yet |
 | Stars | 165 | 32 |
 | Config model | single `topf.yaml` + layered patch files (`all/`, `<role>/`, `node/<host>/`) — closest analog to talhelper's model | Kustomize-style bases/overlays, own `config.talstomize.dev/v1alpha1` schema |
@@ -115,9 +115,12 @@ topf is a closer match on every axis that matters here:
   upgrade`: proper node drain with a PDB-eviction-failure fallback (talhelper
   just shells out to `talosctl upgrade --drain=<mode>` with no retry logic),
   `--dry-run`, `--max-parallel`, and staged upgrades. This repo's
-  `upgrade-node` task comment already warns about draining interacting with
-  Telegram alerts — topf's drain handling is more defensive than what's
-  there now.
+  `upgrade-node` task carries a comment warning that the *reboot* itself can
+  page Telegram via `KubeNodeNotReady`/`Unreachable` — a different risk than
+  drain/eviction failure. topf's `--stabilization-duration` (gating uncordon
+  on the node actually staying ready post-reboot, not just rebooting) is
+  more deliberate about that specific window than talhelper's bare
+  `talosctl upgrade --drain=<mode>` call.
 - `kubernetesVersion` in `topf.yaml` mirrors `talenv.yaml`'s field, and the
   docs explicitly recommend keeping `talosctl upgrade-k8s --to <version>`
   as the upgrade path (same command `upgrade-k8s` already shells out to) —
