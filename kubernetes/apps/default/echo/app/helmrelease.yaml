@@ -43,7 +43,9 @@ spec:
               requests:
                 cpu: 5m
               limits:
-                memory: 64Mi
+                # 64Mi caused a CrashLoopBackOff (OOM, exit 137) once uptime got long enough
+                # for v42's baseline footprint (TLS + prom-client) to hit the ceiling. Guess, unmeasured.
+                memory: 128Mi
     defaultPodOptions:
       securityContext:
         runAsNonRoot: true
