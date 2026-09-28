@@ -138,6 +138,25 @@ spec:
             sourceLabels: [__name__]
             regex: kubernetes_feature_enabled|workqueue_work_duration_seconds_bucket|workqueue_queue_duration_seconds_bucket
 
+    # Same leak again, this time on kubelet's own job — measured 2026-09-28:
+    # kubernetes_feature_enabled (1,210 series) via the main /metrics endpoint.
+    # Nothing in this repo reads it.
+    kubelet:
+      serviceMonitor:
+        metricRelabelings:
+          - action: drop
+            sourceLabels: [__name__]
+            regex: kubernetes_feature_enabled|workqueue_work_duration_seconds_bucket|workqueue_queue_duration_seconds_bucket
+        # kubelet's per-container probe-result histogram, served on its own
+        # /metrics/probes endpoint — a separate scrape path with its own
+        # relabelings key, not covered by metricRelabelings above. Measured
+        # 2026-09-28: 3,528 series, the single largest metric under job=kubelet.
+        # No PrometheusRule or dashboard in this repo reads it.
+        probesMetricRelabelings:
+          - action: drop
+            sourceLabels: [__name__]
+            regex: prober_probe_duration_seconds_bucket
+
     alertmanager:
       alertmanagerSpec:
         replicas: 1
