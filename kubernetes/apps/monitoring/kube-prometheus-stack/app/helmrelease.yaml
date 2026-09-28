@@ -138,12 +138,22 @@ spec:
             sourceLabels: [__name__]
             regex: kubernetes_feature_enabled|workqueue_work_duration_seconds_bucket|workqueue_queue_duration_seconds_bucket
 
-    # Same leak again, this time on kubelet's own job — measured 2026-09-28:
-    # kubernetes_feature_enabled (1,210 series) via the main /metrics endpoint.
-    # Nothing in this repo reads it.
     kubelet:
       serviceMonitor:
         metricRelabelings:
+          # Chart default (kube-prometheus-stack values.yaml) for this
+          # endpoint is a single-item list, and setting this key at all
+          # replaces it wholesale rather than merging — so it has to be
+          # restated here or it silently disappears from the rendered
+          # ServiceMonitor. Drops the largest bucket boundaries from the
+          # csi_operations/storage_operation_duration histograms.
+          - action: drop
+            sourceLabels: [__name__, le]
+            regex: (csi_operations|storage_operation_duration)_seconds_bucket;(0.25|2.5|15|25|120|600)(\.0)?
+          # Same leak as kubeScheduler/kubeControllerManager above, this time
+          # on kubelet's own job — measured 2026-09-28: kubernetes_feature_enabled
+          # (1,210 series) via this same /metrics endpoint. Nothing in this repo
+          # reads it.
           - action: drop
             sourceLabels: [__name__]
             regex: kubernetes_feature_enabled|workqueue_work_duration_seconds_bucket|workqueue_queue_duration_seconds_bucket
