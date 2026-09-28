@@ -36,6 +36,10 @@ data:
             {
               "refId": "A",
               "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "matchExact": true,
               "region": "us-east-1",
               "namespace": "AWS/Billing",
               "metricName": "EstimatedCharges",
@@ -69,6 +73,10 @@ data:
             {
               "refId": "A",
               "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "matchExact": true,
               "region": "us-east-1",
               "namespace": "AWS/Billing",
               "metricName": "EstimatedCharges",
@@ -93,6 +101,10 @@ data:
             {
               "refId": "A",
               "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "matchExact": true,
               "region": "us-east-1",
               "namespace": "AWS/S3",
               "metricName": "BucketSizeBytes",
@@ -116,6 +128,10 @@ data:
             {
               "refId": "A",
               "datasource": {"type": "cloudwatch", "uid": "cloudwatch"},
+              "queryMode": "Metrics",
+              "metricQueryType": 0,
+              "metricEditorMode": 0,
+              "matchExact": true,
               "region": "us-east-1",
               "namespace": "AWS/S3",
               "metricName": "NumberOfObjects",
