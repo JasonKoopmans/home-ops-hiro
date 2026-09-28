@@ -446,6 +446,10 @@ spec:
                       datasourceUid: cloudwatch
                       model:
                         refId: A
+                        queryMode: Metrics
+                        metricQueryType: 0
+                        metricEditorMode: 0
+                        matchExact: true
                         namespace: AWS/Billing
                         metricName: EstimatedCharges
                         statistic: Maximum
