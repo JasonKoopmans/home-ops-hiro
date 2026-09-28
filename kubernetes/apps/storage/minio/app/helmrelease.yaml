@@ -80,12 +80,14 @@ spec:
       # and minio-bucket-quota-bootstrap Job re-run successfully. Grew the PVC to 120Gi to give more headroom for future compactions
       size: 120Gi
 
+    # Measured 2026-09-28: 7d peak 918Mi against this 1Gi limit (90%).
+    # Bumped to put that peak at ~80% of limit.
     resources:
       requests:
         cpu: 50m
         memory: 256Mi
       limits:
-        memory: 1Gi
+        memory: 1152Mi
 
     metrics:
       serviceMonitor:

@@ -470,9 +470,9 @@ spec:
     serviceMonitor:
       enabled: true
 
-    # INFORMED GUESS — not measured; no dashboards exist yet. Requests match the
-    # repo's 50m floor and the monitoring instance's Grafana, which is a
-    # reasonable analogue. Revisit once there is ~14d of real usage.
+    # Measured 2026-09-28: 7d peak working set was 502Mi against the 512Mi
+    # limit (98%, thin OOM headroom on the one instance whose PVC state isn't
+    # reproducible from Git). Bumped to put that same peak at ~80% of limit.
     resources:
       requests:
         cpu: 50m
@@ -481,7 +481,7 @@ spec:
         # No CPU limit, per repo convention — Grafana is bursty on dashboard
         # load and CFS throttling shows up as UI lag. Memory is the resource
         # worth bounding.
-        memory: 512Mi
+        memory: 624Mi
 
     testFramework:
       enabled: false
