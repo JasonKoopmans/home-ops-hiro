@@ -31,11 +31,13 @@ spec:
     domainFilters: ["${SECRET_DOMAIN}"]
     serviceMonitor:
       enabled: true
+    # Measured 2026-09-28: 7d peak 120Mi against this 128Mi limit (94%).
+    # Bumped to ~1.5x that peak.
     resources:
       requests:
         cpu: 10m
         memory: 64Mi
       limits:
-        memory: 128Mi
+        memory: 192Mi
     podAnnotations:
       secret.reloader.stakater.com/reload: *secret

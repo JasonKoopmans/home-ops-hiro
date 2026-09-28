@@ -87,12 +87,14 @@ spec:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true
               capabilities: { drop: ["ALL"] }
+            # Measured 2026-09-28: 7d peak 219Mi against this 256Mi limit (85%).
+            # Bumped to ~1.5x that peak.
             resources:
               requests:
                 cpu: 10m
                 memory: 64Mi
               limits:
-                memory: 256Mi
+                memory: 336Mi
 
     # Creates the ServiceAccount named `mcp-kubernetes`; rbac.yaml binds it to
     # the built-in `view` role plus a read-only supplement. The mounted token is

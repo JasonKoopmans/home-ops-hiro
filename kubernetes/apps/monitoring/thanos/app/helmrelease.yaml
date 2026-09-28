@@ -173,12 +173,14 @@ spec:
               liveness: *probes
               readiness:
                 enabled: false
+            # Measured 2026-09-28: 7d peak 970Mi against this 1Gi limit (95%).
+            # Bumped to ~1.5x that peak.
             resources:
               requests:
                 cpu: 50m
                 memory: 128Mi
               limits:
-                memory: 1Gi
+                memory: 1472Mi
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:
