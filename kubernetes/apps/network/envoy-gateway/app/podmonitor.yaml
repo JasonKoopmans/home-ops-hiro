@@ -36,7 +36,7 @@ spec:
         # reason).
         - action: drop
           sourceLabels: [__name__]
-          regex: envoy_cluster_upstream_cx_length_ms_bucket|envoy_cluster_upstream_cx_connect_ms_bucket|envoy_cluster_upstream_rq_per_cx_bucket|envoy_listener_connections_accepted_per_socket_event_bucket|envoy_listener_downstream_cx_length_ms_bucket|envoy_http_downstream_cx_length_ms_bucket|envoy_sds_update_duration_bucket|envoy_http_rds_update_duration_bucket
+          regex: (envoy_cluster_upstream_cx_length_ms|envoy_cluster_upstream_cx_connect_ms|envoy_cluster_upstream_rq_per_cx|envoy_listener_connections_accepted_per_socket_event|envoy_listener_downstream_cx_length_ms|envoy_http_downstream_cx_length_ms|envoy_sds_update_duration|envoy_http_rds_update_duration)_(bucket|count|sum)
         # Per-request latency percentile histograms (upstream + downstream) —
         # the one genuinely useful signal in this group ("is the gateway
         # slow"), not pure bookkeeping like the rule above. Dropped anyway
