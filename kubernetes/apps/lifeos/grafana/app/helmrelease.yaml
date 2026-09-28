@@ -472,7 +472,9 @@ spec:
 
     # Measured 2026-09-28: 7d peak working set was 502Mi against the 512Mi
     # limit (98%, thin OOM headroom on the one instance whose PVC state isn't
-    # reproducible from Git). Bumped to put that same peak at ~80% of limit.
+    # reproducible from Git). Bumped to ~1.5x that peak (768Mi) — below this
+    # repo's usual ~2x-peak convention, but still a real multiple over the
+    # measured crest, not a bare-minimum ratio of the limit itself.
     resources:
       requests:
         cpu: 50m
@@ -481,7 +483,7 @@ spec:
         # No CPU limit, per repo convention — Grafana is bursty on dashboard
         # load and CFS throttling shows up as UI lag. Memory is the resource
         # worth bounding.
-        memory: 624Mi
+        memory: 768Mi
 
     testFramework:
       enabled: false

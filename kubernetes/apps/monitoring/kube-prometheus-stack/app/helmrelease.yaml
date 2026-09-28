@@ -253,13 +253,13 @@ spec:
         # be created but silently never scraped.
         probeSelectorNilUsesHelmValues: false
         # Measured 2026-09-28: 7d peak 1926Mi against this 2Gi limit (94%).
-        # Bumped to put that peak at ~80% of limit.
+        # Bumped to ~1.5x that peak.
         resources:
           requests:
             cpu: 100m
             memory: 512Mi
           limits:
-            memory: 2400Mi
+            memory: 2912Mi
         storageSpec:
           volumeClaimTemplate:
             spec:

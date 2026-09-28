@@ -81,13 +81,13 @@ spec:
       size: 120Gi
 
     # Measured 2026-09-28: 7d peak 918Mi against this 1Gi limit (90%).
-    # Bumped to put that peak at ~80% of limit.
+    # Bumped to ~1.5x that peak.
     resources:
       requests:
         cpu: 50m
         memory: 256Mi
       limits:
-        memory: 1152Mi
+        memory: 1408Mi
 
     metrics:
       serviceMonitor:
