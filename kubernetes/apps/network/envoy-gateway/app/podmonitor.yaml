@@ -27,6 +27,25 @@ spec:
         - action: drop
           sourceLabels: [__name__]
           regex: envoy_cluster_update_duration_bucket
+        # Same pattern as above, extended to the rest of the unused Envoy
+        # histograms found 2026-09-28 (~9,060 series total, per-metric counts
+        # measured that day). Pure connection/config bookkeeping — no
+        # dashboard or PrometheusRule in this repo reads any of them, and none
+        # feed a rate/avg either, so _count/_sum are dropped too here (unlike
+        # the rules above, which keep the sum/count pair alive for that
+        # reason).
+        - action: drop
+          sourceLabels: [__name__]
+          regex: (envoy_cluster_upstream_cx_length_ms|envoy_cluster_upstream_cx_connect_ms|envoy_cluster_upstream_rq_per_cx|envoy_listener_connections_accepted_per_socket_event|envoy_listener_downstream_cx_length_ms|envoy_http_downstream_cx_length_ms|envoy_sds_update_duration|envoy_http_rds_update_duration)_(bucket|count|sum)
+        # Per-request latency percentile histograms (upstream + downstream) —
+        # the one genuinely useful signal in this group ("is the gateway
+        # slow"), not pure bookkeeping like the rule above. Dropped anyway
+        # because nothing currently queries it (~4,200 series, measured
+        # 2026-09-28) — but if a latency dashboard is ever built, start by
+        # removing this rule rather than re-deriving it from scratch.
+        - action: drop
+          sourceLabels: [__name__]
+          regex: envoy_cluster_upstream_rq_time_bucket|envoy_cluster_external_upstream_rq_time_bucket|envoy_http_downstream_rq_time_bucket
   selector:
     matchLabels:
       app.kubernetes.io/component: proxy
