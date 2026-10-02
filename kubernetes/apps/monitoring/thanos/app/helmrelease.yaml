@@ -184,6 +184,14 @@ spec:
               - --retention.resolution-raw=7d
               - --retention.resolution-5m=90d
               - --retention.resolution-1h=1y
+            # Declared for podmonitor.yaml: a PodMonitor port only matches a port
+            # the container lists, and there is no compactor Service to go
+            # through instead. Informational for everything else (the probes use
+            # the number, not the name).
+            ports:
+              - name: http
+                containerPort: 10902
+                protocol: TCP
             probes:
               liveness: *probes
               readiness:

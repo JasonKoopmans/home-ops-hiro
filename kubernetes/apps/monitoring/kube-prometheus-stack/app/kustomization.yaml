@@ -24,6 +24,7 @@ resources:
   - ./prometheusrule-recording-annotator.yaml
   - ./prometheusrule-pocket-bridge.yaml
   - ./prometheusrule-postgres.yaml
+  - ./prometheusrule-thanos.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml

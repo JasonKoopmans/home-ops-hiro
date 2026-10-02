@@ -1,0 +1,43 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/monitoring.coreos.com/servicemonitor_v1.json
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: thanos
+spec:
+  # Query and Store Gateway, the two controllers that have a Service. The
+  # compactor has none (see podmonitor.yaml) and the sidecar lives in the
+  # Prometheus pod (scraped by the kube-prometheus-stack chart's own
+  # thanosServiceMonitor). Pinned by service name rather than "everything
+  # labelled thanos" so a Service added for the compactor later does not scrape
+  # it twice.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos
+    matchExpressions:
+      - key: app.kubernetes.io/service
+        operator: In
+        values: [thanos-query, thanos-storegateway]
+  endpoints:
+    - port: http
+      metricRelabelings:
+        # Allowlist, not a denylist. Measured 2026-10-02 against the live pods:
+        # Query exposes 1,704 series and Store Gateway 1,266 (grpc_*, http_*,
+        # go_* and per-operation histograms are most of it); this keeps 4 and 6.
+        # A denylist would also have to track every metric a future Thanos
+        # release adds. The cost of an allowlist is the reverse: a new alert or
+        # dashboard panel has to add its metric here first, and a metric renamed
+        # upstream silently disappears. ThanosMetricsMissing in
+        # prometheusrule-thanos.yaml is the backstop for that second case, and
+        # reads exactly the names kept below.
+        #
+        #   thanos_status                          ThanosQueryEndpointMissing and ThanosMetricsMissing
+        #                                          read Query's copy; the Store Gateway's rides along
+        #   thanos_store_nodes_grpc_connections    which store APIs Query can reach (Query only)
+        #   thanos_blocks_meta_sync_failures_total        } ThanosStoreBlockSyncFailing
+        #   thanos_bucket_store_block_(load|drop)_failures_total }
+        #   thanos_bucket_store_blocks_loaded      no alert reads it: blocks the Store Gateway
+        #                                          currently serves, 0 means empty history
+        - action: keep
+          sourceLabels: [__name__]
+          regex: thanos_status|thanos_store_nodes_grpc_connections|thanos_blocks_meta_sync_failures_total|thanos_bucket_store_block_(load|drop)_failures_total|thanos_bucket_store_blocks_loaded

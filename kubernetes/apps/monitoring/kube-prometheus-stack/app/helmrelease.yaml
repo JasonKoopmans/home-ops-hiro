@@ -216,6 +216,25 @@ spec:
             memory: 256Mi
 
     prometheus:
+      # Metrics of the Thanos sidecar in the Prometheus pod (port 10902), via the
+      # chart's own Service + ServiceMonitor pair. thanosServiceMonitor does
+      # nothing without thanosService, so both are needed. The new headless
+      # Service (kube-prometheus-stack-thanos-discovery) is only a scrape
+      # target: Thanos Query keeps discovering the sidecar's gRPC endpoint
+      # through prometheus-operated, so enabling this changes nothing for it.
+      thanosService:
+        enabled: true
+      thanosServiceMonitor:
+        enabled: true
+        metricRelabelings:
+          # Allowlist: the sidecar exposes 814 series (measured 2026-10-02, mostly
+          # go_* and grpc_*), ThanosSidecarUploadFailing reads two of them. See
+          # monitoring/thanos servicemonitor.yaml for why an allowlist, and for
+          # ThanosMetricsMissing, which covers its weakness. uploads_total is the
+          # healthy counterpart (one block per 2h); no alert reads it.
+          - action: keep
+            sourceLabels: [__name__]
+            regex: thanos_shipper_(upload_failures_total|dir_sync_failures_total|uploads_total)
       prometheusSpec:
         replicas: 1
         # Disable the chart's own podAntiAffinity convenience default (it
