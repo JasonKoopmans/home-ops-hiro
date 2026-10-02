@@ -33,6 +33,17 @@ spec:
               - --grpc-address=0.0.0.0:10901
               # Matches the external_labels Prometheus Operator sets when replicas > 1.
               - --query.replica-label=prometheus_replica
+              # Without this, Query only ever reads raw-resolution blocks (an unset
+              # max_source_resolution means "raw only"), and Grafana's Thanos datasource
+              # never sends one. With raw kept for just 7d (see compactor below), every
+              # dashboard was capped at ~8d of history even though the compactor holds 5m
+              # (90d) and 1h (1y) copies. Auto mode picks max_source_resolution = step/5,
+              # so a step >= 25m reads 5m blocks and >= 5h reads 1h blocks.
+              #
+              # Blind spot that remains: a step under 25m still reads raw only, so a custom
+              # range of roughly 9-15d (past the 7d raw tier, step still under 25m) shows the
+              # last ~8d and nothing before. Presets (7d, 30d, 90d...) are unaffected.
+              - --query.auto-downsampling
               # Sidecar (recent data): discovered via the "prometheus-operated" headless
               # Service that Prometheus Operator creates automatically once the sidecar
               # is configured on the Prometheus CR (see kube-prometheus-stack HelmRelease).
@@ -166,6 +177,10 @@ spec:
               # zoom-into-old-data case. 5m keeps min/max/avg (peaks preserved, rate()
               # works) for 90d; 1h covers a full year. Cutting raw immediately deletes
               # the accumulated 8d..30d of raw blocks whose 5m/1h copies already exist.
+              #
+              # The 5m/1h tiers are only reachable because the query component runs with
+              # --query.auto-downsampling; drop that flag and history collapses to the raw
+              # tier (7d). Measured 2026-10-02: raw ~1.0 GiB/day, 5m ~0.40, 1h ~0.05.
               - --retention.resolution-raw=7d
               - --retention.resolution-5m=90d
               - --retention.resolution-1h=1y

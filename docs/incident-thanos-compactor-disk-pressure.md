@@ -29,6 +29,28 @@ patterns) are likely to recur elsewhere in this cluster.
 3. **Thanos raw retention too long for the Minio volume** (#312): 30d → 7d.
    Tiers coexist (downsampling adds a copy, doesn't replace raw), so total
    size ≈ sum of all three resolutions.
+
+   *Follow-up (2026-10-02):* the cut only preserves history if queries can
+   fall through to the 5m/1h tiers, and Thanos Query ignores downsampled
+   blocks unless it runs with `--query.auto-downsampling` (or the request
+   carries `max_source_resolution`). It didn't, so every dashboard silently
+   lost everything older than the raw tier (~8d) until the flag was added.
+   Auto mode uses `step/5`: a step ≥ 25m reads 5m blocks, ≥ 5h reads 1h
+   blocks. A custom range of ~9-15d (older than raw, step still < 25m) keeps
+   showing only the raw window; presets (7d, 30d, 90d) are fine. Measured
+   cost at current cardinality: raw ≈ 1.0, 5m ≈ 0.40, 1h ≈ 0.05 GiB/day, so
+   raw 7d + 5m 90d + 1h 1y ≈ 61 GiB before overhead. Raising raw to 14d
+   closes the blind spot for ~7 GiB, but the compactor would then build ~14
+   GiB raw blocks; at ~2x scratch (#315) that is right at the 30Gi
+   `thanos-compactor-data` PVC limit, so grow it first.
+
+   Separately, this bucket's history starts 2026-09-04 ~20:00Z, not at the
+   July rollout: the `minio` PVC was re-created empty at 2026-09-05 03:49Z,
+   a few hours after the 2026-09-04 Talos-upgrade incident (cmp-05 OOM
+   thrash, iSCSI sessions to Longhorn volumes dropped, ext4 remounted
+   read-only). The class is `longhorn-2-no-backup`, and no Longhorn backup,
+   PV, replica or orphan of the old volume (`pvc-e7b3d058…`) exists, so
+   nothing older can be restored.
 4. **`thanos-compactor` eviction loop** (#313, #314): its `/data` was an
    `emptyDir` (`sizeLimit: 20Gi`, no `ephemeral-storage` request) competing
    with every other pod's images/logs for Talos's shared ~48Gi `/var`
