@@ -1,0 +1,275 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: thanos-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: thanos.rules
+      rules:
+        # Until these rules no Thanos component was scraped at all (no thanos_*
+        # series existed in Prometheus), so a halted compactor, failing uploads or
+        # a broken Store Gateway raised nothing. The Minio volume re-creation on
+        # 2026-09-05 and the query-side history gap fixed in #693 were both found
+        # by hand. Scrape config: monitoring/thanos servicemonitor.yaml and
+        # podmonitor.yaml, and thanosServiceMonitor in this app's HelmRelease for
+        # the sidecar.
+        #
+        # Design rules, in the order they bit elsewhere in this repo:
+        #
+        #  * Self-clearing only. Every rule keys on a counter's recent increase, a
+        #    gauge that a restart resets, or absent(). None keys on an object
+        #    existing, which is what latched kube_job_failed critical for a week.
+        #  * The counter rules use an increase() window SHORTER than `for` on
+        #    purpose. increase(x[W]) stays true for exactly W after one failure,
+        #    so a one-off blip never reaches `for`, while a failure that recurs on
+        #    every retry loop keeps the expression continuously true and fires.
+        #    Each rule states its own numbers.
+        #  * Those rules spell out one `sum by (...) (increase(metric[W])) > 0` term
+        #    per counter, joined with `or`, instead of one {__name__=~"a|b|c"}
+        #    selector. The selector looks equivalent and is not: increase() drops
+        #    the metric name, the sibling counters of one pod then share an
+        #    identical label set, and evaluation fails with "vector cannot contain
+        #    metrics with the same labelset", so the rule would error instead of
+        #    firing. Each term is filtered `> 0` BEFORE the `or`, because `or`
+        #    keeps the left side on a label clash and a left-hand 0 would
+        #    otherwise hide a right-hand failure. Found by a promtool unit test;
+        #    static validation (promtool check, kubeconform, flux-local) passes.
+        #  * All warning. Nothing here loses data within hours, and warnings
+        #    collapse into one digest per namespace (alertmanagerconfig.yaml), so
+        #    one root cause such as Minio down is a line, not a page. Pod-level
+        #    failures (not ready, crash looping, scrape target down) are already
+        #    covered by the stock KubePodNotReady, KubePodCrashLooping and
+        #    TargetDown and are deliberately not repeated; the absent() rules
+        #    below are gated on the pod being ready for the same reason.
+        #  * Annotations avoid angle brackets and ampersands: Alertmanager sends
+        #    them to Telegram as HTML.
+        #  * Windows and thresholds come from the cadences measured on
+        #    2026-10-02, not from an incident backtest, because no thanos_* history
+        #    exists to backtest against. Treat them as reasoned starting values.
+        #    The one backtest that was possible, against the Store Gateway log, is
+        #    on ThanosStoreBlockSyncFailing.
+
+        # Latched by design. After a data-integrity error (overlapping blocks,
+        # out-of-order chunks) Thanos sets this to 1 and blocks forever instead of
+        # retrying, with the process still up: probes green, no restart, nothing
+        # else notices. Only a restart clears it, so keying on the gauge directly
+        # is safe: it cannot flap and it clears itself the moment the restarted
+        # process reports 0. Found latched once already, iterations_total=0 after
+        # 16h of uptime (docs/incident-thanos-compactor-disk-pressure.md section 6).
+        - alert: ThanosCompactorHalted
+          expr: thanos_compact_halted == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos compactor has halted
+            description: Compactor {{ $$labels.pod }} set thanos_compact_halted to 1 after a critical error and has stopped compacting, downsampling and applying retention. It never retries on its own and only a restart clears it. The halt reason is in the pod log (search for critical error) and is lost with the process, so read it before restarting. Meanwhile raw blocks are not deleted and Minio keeps growing.
+
+        # No successful iteration for 3h. thanos_compact_iterations_total counts
+        # only iterations that finished without error (its HELP text says
+        # "executed successfully"); a retriable error bumps retries_total instead
+        # and leaves it flat. --wait-interval defaults to 5m, so a healthy
+        # compactor does about 12 an hour (1,124 in 3d21h measured), and 3h is
+        # roughly 36 missed in a row. It catches what ThanosCompactorFailing is
+        # too narrow for: an iteration stuck in one very long step, and a
+        # compactor evicted before any iteration can finish (2,737 evictions and
+        # zero compactions in 24h in July, section 4 of the same incident doc).
+        #
+        # Summed by namespace: a pod replaced inside the window (eviction, a
+        # Renovate bump) leaves a dead series whose own increase is 0, and
+        # per-series that would alert for up to 3h after the replacement is
+        # already healthy. `unless` a halt: a halted compactor stops iterating too
+        # and has its own alert above.
+        #
+        # Known limit, accepted: a series younger than the window with no
+        # iteration yet also reads 0, so a first iteration after a restart that
+        # runs past `for` fires early. That is rare and clears itself, and gating
+        # on pod age would blind this rule to exactly the eviction loop it is for.
+        - alert: ThanosCompactorStalled
+          expr: |
+            (
+              sum by (namespace) (increase(thanos_compact_iterations_total[3h])) == 0
+            )
+            unless on (namespace)
+            (
+              max by (namespace) (thanos_compact_halted) == 1
+            )
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos compactor has not completed an iteration in 3 hours
+            description: No compactor iteration has completed successfully for 3 hours and the compactor is not halted. A healthy one finishes about one every 5 minutes. It is either retrying a retriable error such as object store timeouts or Bucket quota exceeded, stuck in a very long compaction, or being evicted before it can finish. Compaction, downsampling and retention are not running. Check the compactor log and ThanosCompactorFailing.
+
+        # The faster, cause-named companion to Stalled, for a compactor that fails
+        # and retries instead of crashing. Retriable errors (object store timeouts,
+        # Bucket quota exceeded) bump retries_total; failed compaction,
+        # downsampling, garbage collection and block cleanup each have their own
+        # counter. Iterations run every ~5m, so a persistent failure keeps the
+        # window non-empty; one blip is true for 30m and never reaches the 45m
+        # `for`. thanos_compact_todo_* (scraped, no alert reads them) shows
+        # whether work is queued behind it.
+        - alert: ThanosCompactorFailing
+          expr: |
+            (sum by (namespace) (increase(thanos_compact_retries_total[30m])) > 0)
+            or
+            (sum by (namespace) (increase(thanos_compact_group_compactions_failures_total[30m])) > 0)
+            or
+            (sum by (namespace) (increase(thanos_compact_downsample_failures_total[30m])) > 0)
+            or
+            (sum by (namespace) (increase(thanos_compact_garbage_collection_failures_total[30m])) > 0)
+            or
+            (sum by (namespace) (increase(thanos_compact_block_cleanup_failures_total[30m])) > 0)
+          for: 45m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos compactor operations keep failing
+            description: The Thanos compactor has been failing or retrying compaction, downsampling, garbage collection or block cleanup continuously for at least 45 minutes. Check the compactor log for the error, usually the object store (Minio quota or timeouts) or a full thanos-compactor-data volume.
+
+        # The shipper retries every pending block each 30s (thanos_shipper_dir_syncs_total
+        # was 11,238 in 3d21h), so a persistent failure increments constantly and
+        # the 15m window never empties; a single failed attempt is true for 15m and
+        # never reaches the 30m `for`. Covers upload failures and dir-sync
+        # failures (the shipper cannot read the TSDB directory).
+        #
+        # Warning, not critical: Prometheus keeps 3d locally (retention in the
+        # HelmRelease), which is the buffer before an un-shipped block ages out of
+        # history for good. Minio's own alerts (MinioDown and friends) fire sooner
+        # for an outage; this one also covers what they cannot see, such as a
+        # rotated credential or a quota that returns 4xx, which MinioS3ServerErrorsHigh
+        # deliberately ignores.
+        - alert: ThanosSidecarUploadFailing
+          expr: |
+            (sum by (namespace, pod) (increase(thanos_shipper_upload_failures_total[15m])) > 0)
+            or
+            (sum by (namespace, pod) (increase(thanos_shipper_dir_sync_failures_total[15m])) > 0)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos sidecar is failing to upload blocks to Minio
+            description: The Thanos sidecar in {{ $$labels.pod }} has been failing to upload or sync TSDB blocks for at least 30 minutes. It retries every 30 seconds, so this is persistent. Prometheus keeps only 3 days locally and a block that cannot be shipped before then is lost from long-term history. Check the thanos-sidecar container log and Minio (quota, credentials, availability).
+
+        # The Store Gateway re-reads block metadata from Minio every 15m. Window
+        # 30m, `for` 40m: one failed sync is true for 30m and never fires, two in
+        # a row (true for 45m) do. Also counts a block that failed to load or drop.
+        #
+        # Backtest against the live Store Gateway log (pod up since 2026-09-04
+        # 22:26Z, 27 days, 2,668 syncs): exactly 21 failures, every 15m from
+        # 2026-09-04 22:56Z to 2026-09-05 03:56Z, then none. That is the Minio
+        # outage and volume re-creation (the last lines read "Server not
+        # initialized yet" and "The Access Key Id you provided does not exist").
+        # This rule fires at about 23:37Z, 40m in, and is silent for the other
+        # 26.8 days.
+        - alert: ThanosStoreBlockSyncFailing
+          expr: |
+            (sum by (namespace, pod) (increase(thanos_blocks_meta_sync_failures_total[30m])) > 0)
+            or
+            (sum by (namespace, pod) (increase(thanos_bucket_store_block_load_failures_total[30m])) > 0)
+            or
+            (sum by (namespace, pod) (increase(thanos_bucket_store_block_drop_failures_total[30m])) > 0)
+          for: 40m
+          labels:
+            severity: warning
+          annotations:
+            summary: Thanos Store Gateway cannot sync blocks from Minio
+            description: The Store Gateway {{ $$labels.pod }} has been failing to sync, load or drop blocks for at least 40 minutes (it syncs every 15 minutes). Queries for older ranges return stale or missing history. Check the storegateway log and Minio availability and credentials.
+
+        # Query's own view of its upstreams. thanos_store_nodes_grpc_connections
+        # has one series per reachable store API and drops out about 5m after an
+        # endpoint stops answering (it never reports 0, hence absent()). Expects
+        # the sidecar (recent data, from Prometheus) and the store (history, from
+        # the Store Gateway); with one missing Grafana silently shows only recent
+        # data or only history, with no error. The endpoint list is the
+        # --endpoint flags in the thanos HelmRelease, so a deliberately removed
+        # upstream needs this rule edited too.
+        #
+        # Gated on Query itself being scraped, otherwise a Query outage would
+        # raise this as well as ThanosMetricsMissing for the same cause.
+        - alert: ThanosQueryEndpointMissing
+          expr: |
+            (
+              absent(thanos_store_nodes_grpc_connections{store_type="sidecar"})
+              or
+              absent(thanos_store_nodes_grpc_connections{store_type="store"})
+            )
+            and on ()
+            (count(thanos_status{component="query"}) > 0)
+          for: 15m
+          labels:
+            severity: warning
+            namespace: monitoring
+          annotations:
+            summary: Thanos Query has lost a store API
+            description: Thanos Query has had no connection to its {{ $$labels.store_type }} endpoint for 15 minutes. The sidecar endpoint is recent data from Prometheus and the store endpoint is history from the Store Gateway, so Grafana is showing only one of the two. Check that pod and the --endpoint flags in the thanos HelmRelease.
+
+        # Deadman's switch for everything above, same shape as N8nWorkflowMetricsMissing.
+        # A rule over a series that does not exist evaluates to empty rather than
+        # failing, so a ServiceMonitor with the wrong selector, a typo in a
+        # metricRelabelings allowlist, or a metric renamed by a Thanos upgrade
+        # (Renovate bumps the image) would leave every rule here green and dead.
+        # Each branch lists the metrics that component's rules read and is gated on
+        # that component's pod being ready, so a genuine outage (already covered by
+        # KubePodNotReady) does not also raise this.
+        #
+        # The checks use unlabelled counters only. The group-labelled compactor
+        # counters (group_compactions_failures_total, downsample_failures_total)
+        # appear per compaction group and are legitimately absent on an empty
+        # bucket. The query branch reads thanos_status, the gate of
+        # ThanosQueryEndpointMissing; its other metric is that rule's own job.
+        - alert: ThanosMetricsMissing
+          expr: |
+            (
+              label_replace(
+                absent(thanos_compact_halted)
+                or absent(thanos_compact_iterations_total)
+                or absent(thanos_compact_retries_total)
+                or absent(thanos_compact_garbage_collection_failures_total)
+                or absent(thanos_compact_block_cleanup_failures_total),
+                "component", "compactor", "", ""
+              )
+              and on ()
+              (sum(kube_pod_status_ready{namespace="monitoring", condition="true", pod=~"thanos-compactor-.*"}) > 0)
+            )
+            or
+            (
+              label_replace(
+                absent(thanos_blocks_meta_sync_failures_total)
+                or absent(thanos_bucket_store_block_load_failures_total)
+                or absent(thanos_bucket_store_block_drop_failures_total),
+                "component", "storegateway", "", ""
+              )
+              and on ()
+              (sum(kube_pod_status_ready{namespace="monitoring", condition="true", pod=~"thanos-storegateway-.*"}) > 0)
+            )
+            or
+            (
+              label_replace(
+                absent(thanos_status{component="query"}),
+                "component", "query", "", ""
+              )
+              and on ()
+              (sum(kube_pod_status_ready{namespace="monitoring", condition="true", pod=~"thanos-query-.*"}) > 0)
+            )
+            or
+            (
+              label_replace(
+                absent(thanos_shipper_upload_failures_total)
+                or absent(thanos_shipper_dir_sync_failures_total),
+                "component", "sidecar", "", ""
+              )
+              and on ()
+              (sum(kube_pod_status_ready{namespace="monitoring", condition="true", pod=~"prometheus-kube-prometheus-stack-prometheus-.*"}) > 0)
+            )
+          for: 15m
+          labels:
+            severity: warning
+            namespace: monitoring
+          annotations:
+            summary: Thanos component metrics are missing while the pod is ready
+            description: The {{ $$labels.component }} pod is ready but metrics that the Thanos alerts read are absent from Prometheus, so those alerts cannot fire. Check the ServiceMonitor or PodMonitor for that component, its metricRelabelings allowlist (a metric renamed by a Thanos upgrade is dropped by it) and the target on the Prometheus targets page.

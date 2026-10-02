@@ -1,0 +1,34 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/monitoring.coreos.com/podmonitor_v1.json
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: thanos-compactor
+spec:
+  # The compactor has no Service, so it is scraped per pod. `port: http` only
+  # matches a port the container *declares*, and the compactor did not, so the
+  # port is declared in helmrelease.yaml. Without it Prometheus drops the target
+  # silently: no error, no `up` series, nothing to alert on.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: thanos
+      app.kubernetes.io/instance: thanos
+      app.kubernetes.io/controller: compactor
+  podMetricsEndpoints:
+    - port: http
+      metricRelabelings:
+        # Allowlist, not a denylist: the compactor exposes 612 series (go_*,
+        # grpc_*/prometheus_* bookkeeping and per-operation histograms), measured
+        # 2026-10-02, against the ~15 below. See servicemonitor.yaml for why an
+        # allowlist, and for the backstop (ThanosMetricsMissing) that covers its
+        # one weakness.
+        #
+        #   halted                              ThanosCompactorHalted
+        #   iterations_total                    ThanosCompactorStalled (counts successful iterations only)
+        #   retries_total + the four *_failures_total
+        #                                       ThanosCompactorFailing
+        #   todo_*                              no alert reads them: queued work, to read next to a
+        #                                       Stalled or Failing alert (is there a backlog?)
+        - action: keep
+          sourceLabels: [__name__]
+          regex: thanos_compact_(halted|iterations_total|retries_total|group_compactions_failures_total|downsample_failures_total|garbage_collection_failures_total|block_cleanup_failures_total|todo_(compactions|compaction_blocks|downsample_blocks|deletion_blocks))

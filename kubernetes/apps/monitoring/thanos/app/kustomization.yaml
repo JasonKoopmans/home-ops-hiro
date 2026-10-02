@@ -6,3 +6,5 @@ resources:
   - ./ocirepository.yaml
   - ./helmrelease.yaml
   - ./pvc.yaml
+  - ./servicemonitor.yaml
+  - ./podmonitor.yaml
