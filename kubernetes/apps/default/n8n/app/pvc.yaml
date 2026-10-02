@@ -9,3 +9,11 @@ spec:
     requests:
       storage: 15Gi
   storageClassName: longhorn
+  # Must match the live claim: spec.volumeName is immutable once bound, and
+  # without it Flux's dry-run tries to blank it and fails with "spec is
+  # immutable after creation". The claim was re-created on 2026-09-05 bound to
+  # static PV `n8n`, restored from a Longhorn backup after the Talos upgrade
+  # incident; that PV and the Longhorn Volume `n8n` are not in Git. On a cluster
+  # rebuild this claim stays Pending until PV `n8n` is restored, rather than
+  # silently provisioning an empty volume.
+  volumeName: n8n
