@@ -60,26 +60,16 @@ spec:
         # (so the two tiers below would have been silent), and the restart
         # detector at 0.85 matched only the echo crash loop, no false positives.
         #
-        # Recorded, not inlined: three alerts share these joins. `max by` on both
-        # sides makes the match one-to-one — cAdvisor briefly emits a second
-        # series for a restarted container (new cgroup id), and an un-deduped
-        # join errors on exactly that overlap. This group logged 30 failed
-        # evaluations in 14d before this change. Recording rules stay above the
-        # alerts that read them; rules in a group evaluate in order.
+        # The RSS ratio is recorded because both time-based tiers share it. `max
+        # by` on both sides makes the match one-to-one — cAdvisor briefly emits a
+        # second series for a restarted container (new cgroup id), and an
+        # un-deduped join errors on exactly that overlap. This group logged 30
+        # failed evaluations in 14d before this change. The recording rule stays
+        # above the alerts that read it; rules in a group evaluate in order.
         - record: namespace_pod_container:container_memory_rss_to_limit:ratio
           expr: |
             max by (namespace, pod, container) (
               container_memory_rss{container!="", image!=""}
-            )
-            /
-            max by (namespace, pod, container) (
-              kube_pod_container_resource_limits{resource="memory", unit="byte", container!=""}
-            )
-
-        - record: namespace_pod_container:container_memory_working_set_to_limit:ratio
-          expr: |
-            max by (namespace, pod, container) (
-              container_memory_working_set_bytes{container!="", image!=""}
             )
             /
             max by (namespace, pod, container) (
@@ -108,15 +98,26 @@ spec:
 
         # Slam: the two ratio alerts above cannot see a container that dies
         # faster than their `for` — every restart resets the ratio, so a crash
-        # loop never stays over a threshold long enough. This reads the peak out
-        # of the 30m window instead, so it still sees the value from before the
+        # loop never stays over a threshold long enough. This looks back over
+        # the 30m window instead, so it still sees the value from before the
         # restart, and it clears itself 30m after the last one.
         #
-        # Deliberately not keyed on an OOMKilled termination reason: the one
-        # memory crash loop this cluster has had (echo, 509 restarts) reported
-        # Error, not OOMKilled, and node_vmstat_oom_kill read 0 on every host.
-        # The app (Node) aborted on its own heap ceiling, which sits below the
-        # cgroup limit. Hence 0.85 rather than something closer to 1.
+        # The hot reading must come from BEFORE the restart, not just somewhere
+        # in the same window: otherwise a cold restart followed by ordinary
+        # warm-up growth would satisfy both halves and page as a memory crash.
+        # cAdvisor series carry the cgroup `id`, which is new for every
+        # container instance, so `unless on (id)` against the live series
+        # leaves only instances that no longer exist — the ones that died. Their
+        # peak working set is, by construction, pre-restart evidence. (If a
+        # live container's series drops out for one scrape it briefly looks
+        # dead too, but it must also have restarted in the window to matter.)
+        #
+        # Working set rather than RSS here, and not keyed on an OOMKilled
+        # termination reason: the one memory crash loop this cluster has had
+        # (echo, 509 restarts) reported Error, not OOMKilled, and
+        # node_vmstat_oom_kill read 0 on every host. The app (Node) aborted on
+        # its own heap ceiling, which sits below the cgroup limit. Hence 0.85
+        # rather than something closer to 1.
         - alert: PodMemoryRestartedWhileHot
           expr: |
             (
@@ -126,10 +127,19 @@ spec:
             )
             and on (namespace, pod, container)
             (
-              max_over_time(namespace_pod_container:container_memory_working_set_to_limit:ratio[30m]) > 0.85
+              max by (namespace, pod, container) (
+                max_over_time(container_memory_working_set_bytes{container!="", image!=""}[30m])
+                unless on (id)
+                container_memory_working_set_bytes{container!="", image!=""}
+              )
+              /
+              max by (namespace, pod, container) (
+                kube_pod_container_resource_limits{resource="memory", unit="byte", container!=""}
+              )
+              > 0.85
             )
           labels:
             severity: critical
           annotations:
-            summary: Pod container restarted while near its memory limit
-            description: Container {{ $$labels.container }} in pod {{ $$labels.namespace }}/{{ $$labels.pod }} restarted {{ $$value | printf "%.0f" }} time(s) in the last 30 minutes after its working set peaked above 85% of the memory limit. Treat it as a memory-driven crash until shown otherwise. An in-process heap abort reports Error, not OOMKilled.
+            summary: Pod container restarted after running near its memory limit
+            description: Container {{ $$labels.container }} in pod {{ $$labels.namespace }}/{{ $$labels.pod }} restarted {{ $$value | printf "%.0f" }} time(s) in the last 30 minutes, and a previous instance of it had peaked above 85% of the memory limit before dying. Treat it as a memory-driven crash until shown otherwise. An in-process heap abort reports Error, not OOMKilled.
