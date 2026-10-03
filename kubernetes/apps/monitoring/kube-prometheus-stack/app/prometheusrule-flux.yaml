@@ -1,0 +1,102 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flux-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: flux.rules
+      rules:
+        # Nothing alerted on a Flux object that stopped reconciling. The n8n
+        # Kustomization sat Ready=False for over a day after #654 and was only
+        # noticed through a downstream LonghornVolumeUsageHigh; the minio
+        # HelmRelease has been Ready=False (RollbackSucceeded, Stalled) since
+        # 2026-09-28 and nothing noticed that at all.
+        #
+        # Source: flux_resource_info, one series per Flux object with its state
+        # in the labels (ready=True|False|Unknown, suspended, reason, revision,
+        # ...). The flux-operator already exports it — the flux-system/flux-operator
+        # ServiceMonitor scrapes it at 60s, ~200 series — so this adds no scrape and
+        # no series. The controllers' own gotk_* metrics are not scraped (no
+        # PodMonitor) and are not needed for the Ready signal.
+        #
+        # Self-clearing: keyed on the *current* ready label, not on the object
+        # existing. When an object turns Ready (or is deleted) its ready!="True"
+        # series goes stale and the alert resolves; nothing latches.
+        #
+        # ready!="True" rather than ="False": a failing object flips between
+        # Ready=False and Ready=Unknown (Progressing) on each retry. Matching
+        # only False would turn every retry into a gap in the series, and a gap
+        # restarts `for:` — or resolves an alert that is already firing.
+        #
+        # `max by (kind, name, exported_namespace)` drops revision, reason, uid,
+        # pod and instance on purpose. `for:` is tracked per label set, and
+        # revision changes on every commit to main while reason flips
+        # (DependencyNotReady <-> Progressing) as a stuck object retries — carried
+        # through, either would restart the 30m clock under an object that never
+        # got better. The reason lives in the object's status conditions; the
+        # description says where to look.
+        #
+        # Kinds: the two the cluster is applied through (Kustomization,
+        # HelmRelease) plus the sources. A source that cannot fetch (chart repo
+        # 404, Git auth) leaves its dependents Ready on the last good artifact, so
+        # it is the only signal there is. HelmChart is left out (a HelmChart
+        # failure always surfaces on its HelmRelease) and so is Receiver.
+        # Suspended objects are deliberately parked and are ignored.
+        #
+        # for: 30m. A first install or a dependsOn wait is not a fault; in 28d of
+        # history no other object was not-Ready for more than ~25m in total.
+        # Backtest 2026-10-02 over 7d of raw Thanos data: exactly two objects would
+        # have fired — Kustomization n8n from 2026-10-01 03:05Z and HelmRelease
+        # minio from 2026-09-28 19:55Z — both real, and nothing else.
+        #
+        # keep_firing_for covers a flux-operator restart or a failed scrape, which
+        # drops every series for a minute or two and would otherwise resolve each
+        # firing alert and then re-fire it after another 30m. Spelled
+        # keep_firing_for, not keepFiringFor, in this CRD. Resolution is delayed
+        # by the same 15m, well inside the warning digest's 30m group_interval.
+        #
+        # Routing (alertmanagerconfig.yaml): severity=warning lands in the
+        # telegram-warnings digest. There is deliberately no `namespace` label —
+        # the flux-operator's own namespace=flux-system is aggregated away, and
+        # re-adding the object's namespace would split a broad Flux failure into
+        # one digest per namespace instead of one. Not an inhibit target either:
+        # a failed Flux rollback of Longhorn itself was the root cause of the
+        # 2026-08-16 outage, and muting that during a Longhorn outage hides it.
+        - alert: FluxResourceNotReady
+          expr: |
+            max by (kind, name, exported_namespace) (
+              flux_resource_info{
+                kind=~"Kustomization|HelmRelease|GitRepository|OCIRepository|HelmRepository",
+                ready!="True",
+                suspended!="True"
+              }
+            )
+          for: 30m
+          keep_firing_for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Flux {{ $$labels.kind }} is not Ready
+            description: Flux {{ $$labels.kind }} {{ $$labels.exported_namespace }}/{{ $$labels.name }} has not been Ready (False or Unknown) for more than 30 minutes, so Flux is not delivering changes through it. The reason is in its status conditions - kubectl -n {{ $$labels.exported_namespace }} describe {{ $$labels.kind }} {{ $$labels.name }}. Suspended objects are ignored.
+
+        # Blind-spot detector for the rule above (same pattern as
+        # PostgresMetricsMissing / N8nWorkflowMetricsMissing). FluxResourceNotReady
+        # only sees objects the flux-operator reports; if the operator is gone, its
+        # ServiceMonitor is dropped (serviceMonitor.create on the flux-operator
+        # HelmRelease) or the scrape breaks, the series vanish and the rule above
+        # evaluates empty — indistinguishable from every object being Ready.
+        # TargetDown only covers a target that exists and fails; it says nothing
+        # about one that is missing. 15m matches keep_firing_for above, so the
+        # handoff is seamless. Resolves on its own when the series return.
+        - alert: FluxMetricsMissing
+          expr: absent(flux_resource_info{kind="Kustomization"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Flux readiness metrics are missing
+            description: flux_resource_info has been absent for more than 15 minutes, so FluxResourceNotReady cannot fire and a stuck Kustomization or HelmRelease would go unnoticed. Check the flux-operator Deployment in flux-system and its ServiceMonitor (serviceMonitor.create in the flux-operator HelmRelease).

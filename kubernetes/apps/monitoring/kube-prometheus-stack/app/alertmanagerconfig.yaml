@@ -102,6 +102,13 @@ spec:
         # is the one alert that reports actual data risk during a Longhorn outage,
         # so it must never be inhibited. This guard also protects any target above
         # that a future chart version promotes to critical.
+        #
+        # FluxResourceNotReady is deliberately not in the list above. It reports
+        # on the delivery path (Flux could not apply or fetch something), which a
+        # Longhorn outage's pod-health symptoms do not produce on their own — and
+        # a Flux rollback of Longhorn itself was the root cause on 2026-08-16
+        # (#461), exactly what muting it here would hide. It is warning-severity,
+        # so it already collapses into the one namespace-less digest.
         - name: severity
           value: critical
           matchType: "!="
@@ -142,8 +149,11 @@ spec:
           chatID: 8854064758
           sendResolved: true
           parseMode: HTML
+          # The last branch names a Flux object (FluxResourceNotReady carries
+          # kind / exported_namespace / name and none of the labels above).
+          # Without it two stuck objects render as two identical lines.
           message: |-
             🟠 <b>{{ .Alerts.Firing | len }} warning(s)</b>{{ if .GroupLabels.namespace }} in <code>{{ .GroupLabels.namespace }}</code>{{ end }}
-            {{ range .Alerts.Firing }}• <b>{{ .Labels.alertname }}</b>{{ if .Labels.job_name }} <code>{{ .Labels.job_name }}</code>{{ else if .Labels.pod }} <code>{{ .Labels.pod }}</code>{{ else if .Labels.node }} <code>{{ .Labels.node }}</code>{{ else if .Labels.instance }} <code>{{ .Labels.instance }}</code>{{ end }} — since {{ .StartsAt.Format "15:04" }}
+            {{ range .Alerts.Firing }}• <b>{{ .Labels.alertname }}</b>{{ if .Labels.job_name }} <code>{{ .Labels.job_name }}</code>{{ else if .Labels.pod }} <code>{{ .Labels.pod }}</code>{{ else if .Labels.node }} <code>{{ .Labels.node }}</code>{{ else if .Labels.instance }} <code>{{ .Labels.instance }}</code>{{ else if .Labels.name }} <code>{{ .Labels.kind }} {{ .Labels.exported_namespace }}/{{ .Labels.name }}</code>{{ end }} — since {{ .StartsAt.Format "15:04" }}
             {{ end }}{{ if gt (len .Alerts.Resolved) 0 }}
             ✅ <b>{{ .Alerts.Resolved | len }} resolved</b>: {{ range .Alerts.Resolved }}{{ .Labels.alertname }} {{ end }}{{ end }}
