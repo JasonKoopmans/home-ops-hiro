@@ -28,7 +28,7 @@ spec:
           main:
             image:
               repository: ghcr.io/alexta69/metube
-              tag: latest@sha256:cd226eedd357697ab2efd4b5e7c5221e973326d210c1e3abc08687d58d97088c
+              tag: latest@sha256:8e2fe9beeefc55a02f6e1d04cad0fc3c22e8f067d309188f016551dc99ec27b3
             env:
               TZ: ${TIMEZONE}
               PUID: "1001"
