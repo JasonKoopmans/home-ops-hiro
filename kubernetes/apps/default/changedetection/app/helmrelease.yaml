@@ -6,6 +6,15 @@ metadata:
   name: &app changedetection
 spec:
   interval: 1h
+  # An image bump can leave the pod in ContainerCreating for ~10 min when it lands
+  # on hiro-cmp-05, whose system disk is ~10-30x slower than the other nodes'
+  # (2026-10-03: 9m40s to Ready; Helm's 5m default gave up and Flux stalled the
+  # release). `legacy` wait so this timeout is the only clock: the default `poller`
+  # strategy also fails the release once the Deployment passes its fixed 10m
+  # progressDeadlineSeconds, which app-template cannot raise. See freecad.
+  timeout: 20m
+  waitStrategy:
+    name: legacy
   chartRef:
     kind: OCIRepository
     name: changedetection
