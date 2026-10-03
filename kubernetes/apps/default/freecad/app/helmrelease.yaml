@@ -6,7 +6,18 @@ metadata:
   name: &app freecad
 spec:
   interval: 1h
-  timeout: 15m
+  # 1.1GB image. hiro-cmp-05's system disk (sda, where containerd extracts layers) is
+  # ~10-30x slower than the other nodes' (7d mean write latency 16 ms vs 0.6-1.5 ms;
+  # ~500 ms during the 2026-10-03 Renovate batch), so pulls there crawl: freecad took
+  # 11m45s to become Ready that day, and a comparable image 15m50s on 2026-08-30. 30m
+  # is ~2x the worst of those. `legacy` wait is what makes this timeout real: the
+  # default `poller` strategy fails the release as soon as the Deployment passes its
+  # fixed 10m progressDeadlineSeconds (which app-template cannot raise), so the
+  # previous `timeout: 15m` never applied: Helm gave up after 7m40s with "failed early
+  # due to stalled resources" and Flux stalled the release.
+  timeout: 30m
+  waitStrategy:
+    name: legacy
   chartRef:
     kind: OCIRepository
     name: freecad

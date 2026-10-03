@@ -59,6 +59,13 @@ spec:
       # Start small; grow as real recordings land rather than over-provisioning day one.
       size: 2Gi
 
+    # Recreate, not the chart default RollingUpdate (maxSurge 100%, maxUnavailable
+    # 0): one replica on a ReadWriteOnce volume deadlocks a rollout whenever the new
+    # pod lands on a different node than the old one (Multi-Attach). Failed that way
+    # for storage/minio on 2026-09-28; see the comment there.
+    deploymentUpdate:
+      type: Recreate
+
     resources:
       requests:
         cpu: 25m
