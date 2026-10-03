@@ -60,7 +60,7 @@ spec:
           app:
             image:
               repository: docker.io/apache/tika
-              tag: 4.0.0-1-full
+              tag: 4.1.0-1-full
             args:
               - -c
               - /tika-config/tika-config.json
