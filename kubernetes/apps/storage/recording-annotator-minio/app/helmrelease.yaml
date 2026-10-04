@@ -15,6 +15,12 @@ spec:
         kind: HelmRepository
         name: recording-annotator-minio
         namespace: storage
+  upgrade:
+    # Skip the chart's post-upgrade `post-job`: it needs quay.io/minio/mc, which answers
+    # HTTP 401 to anonymous pulls as of 2026-10-04 and is cached on no node, so the hook
+    # hangs in ImagePullBackOff and Flux rolls the upgrade back. The bucket already
+    # exists and is never purged. See storage/minio.
+    disableHooks: true
   values:
     # Single-node deployment dedicated to RecordingAnnotator (spec section 9) — deliberately separate from
     # the shared storage/minio instance (Thanos/Loki), which is already capacity-constrained and unrelated
