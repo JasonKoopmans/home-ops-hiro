@@ -169,6 +169,17 @@
       matchDatasources: ["github-releases"],
       addLabels: ["renovate/github-release"],
     },
+    {
+      // Hold Kubernetes at 1.36 until a Talos that supports 1.37 is running on
+      // the nodes. #555 pinned v1.36.3 for exactly that reason, and Renovate moved
+      // it to v1.37.0 two days later (#581). Without this the 1.37 bump is
+      // proposed again every Saturday. Lift it, and edit talos/talenv.yaml, as
+      // part of the Talos upgrade that adds 1.37 support.
+      description: "Hold the Kubernetes version at 1.36.x — Talos 1.13 does not support 1.37",
+      matchDatasources: ["docker"],
+      matchPackageNames: ["ghcr.io/siderolabs/kubelet"],
+      allowedVersions: "/^v1\\.36\\./",
+    },
   ],
   customManagers: [
     {
