@@ -60,9 +60,18 @@ on a `home-operations/charts-mirror` chart usually means the mirror froze the ch
 
 ## 3. A HelmRelease that is Ready=False and Stalled
 
-First work out whether the app is actually broken. `kubectl -n <ns> get deploy <name> -o wide` shows the running image;
-compare it with the tag in Git. On 2026-10-03 three HelmReleases were `Stalled` while their Deployments were already on
-the new images: Helm had given up before the rollout finished.
+First work out whether the app is actually broken, and which version is really running. `kubectl get deploy -o wide`
+shows the *desired* pod-template image, so during a stuck rollout it can show the new tag while the only Ready pod still
+serves the old one. Check the rollout and the pods behind it instead:
+
+```sh
+kubectl -n <ns> rollout status deploy/<name> --timeout=5s
+kubectl -n <ns> get pods -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[*].ready,IMAGE:.status.containerStatuses[*].image' | grep <name>
+```
+
+Compare the running `IMAGE` of the Ready pods with the tag in Git (`.status.containerStatuses[*].imageID` gives the
+digest). On 2026-10-03 three HelmReleases were `Stalled` while their pods were already Ready on the new images: Helm had
+given up before the rollout finished.
 
 Why Helm gives up early:
 
@@ -72,8 +81,15 @@ Why Helm gives up early:
 - A single-replica Deployment on a ReadWriteOnce volume with `RollingUpdate` deadlocks when the new pod lands on another
   node (`ContainerCreating` forever). Set `Recreate`; see Storage in `.github/copilot-instructions.md`.
 - A slow image pull on one node. Compare `kubelet_image_pull_duration_seconds` by node.
-- helm-controller restarted mid-upgrade (a Renovate batch that included the flux-operator group). Its rollback history
-  is cleared, so the next failed upgrade Stalls with `MissingRollbackTarget` even though the app is healthy.
+- helm-controller restarted mid-upgrade. Seen once, on 2026-10-03 (#737), during a Renovate batch that included the
+  flux-operator group: three interrupted upgrades ended `Stalled` with `MissingRollbackTarget` and a single-entry
+  `.status.history`, so there was no earlier release to roll back to. That mechanism is inferred (helm-controller dropping
+  the history of a release it had not observed), not seen, and a restart does not generally do it. Check the history and
+  the `Stalled` reason before blaming a restart:
+
+  ```sh
+  kubectl -n <ns> get helmrelease <name> -o jsonpath='{range .status.history[*]}{.version} {.status} {.chartVersion}{"\n"}{end}'
+  ```
 
 Do not roll back a one-way chart. Longhorn records its own version and refuses to run on an older binary (see
 `.renovaterc.json5`); roll forward, and never revert the version in Git.
@@ -89,8 +105,14 @@ flux reconcile hr <name> -n <ns> --reset --force
 
 ## 5. Confirm it cleared
 
-The object turns Ready, its `ready!="True"` series disappears, and the alert resolves about 15 minutes later.
-`ALERTS{alertname="FluxResourceNotReady"}` should come back empty.
+The object turns Ready, its `ready!="True"` series disappears, and the alert resolves about 15 minutes later
+(`keep_firing_for`). Check just this object, not every stuck one:
+
+```promql
+ALERTS{alertname="FluxResourceNotReady", alertstate="firing", kind="<Kind>", exported_namespace="<ns>", name="<name>"}
+```
+
+It comes back empty once the alert has resolved, whatever else is still stuck.
 
 ## What the alert cannot see
 
