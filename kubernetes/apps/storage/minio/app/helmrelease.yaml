@@ -20,6 +20,14 @@ spec:
       retries: -1
   upgrade:
     cleanupOnFail: true
+    # The chart's only hook is the post-install/post-upgrade `post-job`, which runs
+    # `mc mb --ignore-existing` for `buckets` below. Its image (quay.io/minio/mc, tag
+    # pinned by the chart) answers HTTP 401 to anonymous pulls as of 2026-10-04 and is
+    # cached on no node, so on upgrade the hook sat in ImagePullBackOff, Helm timed out
+    # after 5m and Flux rolled the whole release back. The buckets already exist and
+    # `purge: false` never removes them, so skipping the hook on upgrade loses nothing.
+    # Install still runs it.
+    disableHooks: true
     remediation:
       retries: 3
   values:
