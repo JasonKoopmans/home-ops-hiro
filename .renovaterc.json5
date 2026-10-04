@@ -111,6 +111,46 @@
       automerge: false,
     },
     {
+      // Merging this restarts every Flux controller. A restart while upgrades are
+      // in flight can clear a HelmRelease's rollback history, and the next failed
+      // upgrade then Stalls (MissingRollbackTarget) and stays Ready=False until
+      // its spec is edited. On 2026-10-03 the group merged mid-batch (30 PRs
+      // between 00:25 and 00:29Z, the group at 00:27Z) and three upgrades that
+      // were in flight ended Stalled (#737). Merge by hand, when nothing is
+      // rolling out.
+      description: "Never auto-merge the Flux Operator group — it restarts the controllers",
+      matchDatasources: ["docker"],
+      matchPackageNames: ["/flux-operator/", "/flux-instance/", "/flux-operator-manifests/"],
+      automerge: false,
+    },
+    {
+      // talos/talenv.yaml is applied by hand: `task talos:upgrade-node` and
+      // `task talos:upgrade-k8s` read it. Merging a bump therefore changes nothing
+      // in the cluster, it only makes Git claim a version the nodes are not
+      // running — and upgrade-k8s will then upgrade to whatever Git says. That
+      // already happened. #555 pinned Talos v1.13 with Kubernetes v1.36.3 because
+      // that pair is the compatible one; two days later Renovate auto-merged
+      // Kubernetes v1.37.0 (#581), and talenv.yaml now reads v1.13.11 / v1.37.1
+      // against nodes running v1.13.10 / v1.36.3 (checked 2026-10-04). Upgrade
+      // Talos and Kubernetes deliberately, one step at a time, and merge the bump
+      // when you are ready to roll it.
+      description: "Never auto-merge Talos or Kubernetes versions — they are applied by hand",
+      matchDatasources: ["docker"],
+      matchPackageNames: ["ghcr.io/siderolabs/installer", "ghcr.io/siderolabs/kubelet"],
+      automerge: false,
+    },
+    {
+      // Cilium supports upgrading one minor at a time, and a minor can need
+      // manifest changes first (#509 moved the BGP and LB-IPAM CRDs to v2). #530
+      // took 1.18 -> 1.19 by hand as phase 2 of #486, and Renovate auto-merged
+      // 1.19.7 -> 1.20.1 (#537) the same day. Patch releases stay automatic.
+      description: "Never auto-merge Cilium minor or major updates — one minor at a time, by hand",
+      matchDatasources: ["docker"],
+      matchPackageNames: ["quay.io/cilium/charts/cilium"],
+      matchUpdateTypes: ["minor", "major"],
+      automerge: false,
+    },
+    {
       matchUpdateTypes: ["digest"],
       semanticCommitType: "chore",
       commitMessageExtra: "( {{currentDigestShort}} ➔ {{newDigestShort}} )",
