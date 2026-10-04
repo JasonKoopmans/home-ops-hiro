@@ -84,15 +84,98 @@ spec:
             summary: Longhorn instance manager is unschedulable
             description: Longhorn instance-manager pod {{ $$labels.pod }} in {{ $$labels.namespace }} has been unschedulable for at least 10 minutes.
 
+        # ---- Node request pressure ---------------------------------------------
+        #
+        # What the scheduler has reserved per node, computed the way the scheduler
+        # computes it, so the figure equals `kubectl describe node` ("Allocated
+        # resources"). Checked 2026-10-04 to the milli-CPU and the MiB on all five
+        # nodes. The old per-container sum got three things wrong:
+        #
+        # - Terminal pods. kube-state-metrics emits a pod's requests until the
+        #   object is deleted, so Succeeded CronJob pods (kept by
+        #   successfulJobsHistoryLimit) and Evicted/Failed pods counted as live
+        #   reservations although the scheduler frees them. Only Pending|Running
+        #   count here. 2026-10-04: eight Succeeded Job pods held 190m on
+        #   hiro-cmp-03, 9.7 points of phantom on a 2-CPU node, and paged
+        #   NodeCpuRequestsCritical.
+        # - Init containers. A pod's request is max(sum(containers) + sidecars,
+        #   max(init containers)), not the container sum. Cilium's 100m sits only on
+        #   the install-cni-binaries init container, so the old sum missed it on
+        #   every node: 5 points on a 2-CPU node. CNPG's bootstrap-controller init
+        #   container repeats the main container's request, so summing init
+        #   containers would double-count it; max() does not.
+        # - Sidecars. The barman sidecar is a restartable init container, which the
+        #   scheduler adds on top of the container sum. kube-state-metrics has no
+        #   restartPolicy, but a restartable init container is still running where
+        #   a plain one has exited, so `status_running == 1` picks them out. A plain
+        #   init container is briefly running at pod start, which only blips the
+        #   figure for the seconds before it exits.
+        #
+        # The three errors partly cancelled: hiro-cmp-03 read 97.1% against the
+        # scheduler's 95.0%.
+        #
+        # `source` keeps the two operands of `or` distinct (`or` keeps only the left
+        # side when label sets collide) until `max by` collapses them per pod. The
+        # phase side is deduped so the join stays one-to-one, as in
+        # pod-limit-pressure. Recording rules sit above the alerts that read them;
+        # rules in a group evaluate in order.
+        - record: node:pod_requests_cpu_cores:sum
+          expr: |
+            sum by (node) (
+              max by (namespace, pod, node) (
+                label_replace(
+                  sum by (namespace, pod, node) (
+                    kube_pod_container_resource_requests{resource="cpu", unit="core"}
+                    or
+                    (
+                      kube_pod_init_container_resource_requests{resource="cpu", unit="core"}
+                      * on (namespace, pod, container) group_left()
+                      (kube_pod_init_container_status_running == 1)
+                    )
+                  ),
+                  "source", "containers", "", ""
+                )
+                or
+                label_replace(
+                  max by (namespace, pod, node) (kube_pod_init_container_resource_requests{resource="cpu", unit="core"}),
+                  "source", "init", "", ""
+                )
+              )
+              * on (namespace, pod) group_left()
+              max by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
+            )
+
+        - record: node:pod_requests_memory_bytes:sum
+          expr: |
+            sum by (node) (
+              max by (namespace, pod, node) (
+                label_replace(
+                  sum by (namespace, pod, node) (
+                    kube_pod_container_resource_requests{resource="memory", unit="byte"}
+                    or
+                    (
+                      kube_pod_init_container_resource_requests{resource="memory", unit="byte"}
+                      * on (namespace, pod, container) group_left()
+                      (kube_pod_init_container_status_running == 1)
+                    )
+                  ),
+                  "source", "containers", "", ""
+                )
+                or
+                label_replace(
+                  max by (namespace, pod, node) (kube_pod_init_container_resource_requests{resource="memory", unit="byte"}),
+                  "source", "init", "", ""
+                )
+              )
+              * on (namespace, pod) group_left()
+              max by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Running"} == 1)
+            )
+
         - alert: NodeCpuRequestsHigh
           expr: |
             100 *
             (
-              sum by (node) (
-                kube_pod_container_resource_requests{resource="cpu", unit="core"}
-                * on (namespace, pod) group_left(node)
-                kube_pod_info
-              )
+              node:pod_requests_cpu_cores:sum
               /
               clamp_min(max by (node) (kube_node_status_allocatable{resource="cpu", unit="core"}), 1)
             ) > 85
@@ -107,11 +190,7 @@ spec:
           expr: |
             100 *
             (
-              sum by (node) (
-                kube_pod_container_resource_requests{resource="cpu", unit="core"}
-                * on (namespace, pod) group_left(node)
-                kube_pod_info
-              )
+              node:pod_requests_cpu_cores:sum
               /
               clamp_min(max by (node) (kube_node_status_allocatable{resource="cpu", unit="core"}), 1)
             ) > 95
@@ -126,11 +205,7 @@ spec:
           expr: |
             100 *
             (
-              sum by (node) (
-                kube_pod_container_resource_requests{resource="memory", unit="byte"}
-                * on (namespace, pod) group_left(node)
-                kube_pod_info
-              )
+              node:pod_requests_memory_bytes:sum
               /
               clamp_min(max by (node) (kube_node_status_allocatable{resource="memory", unit="byte"}), 1)
             ) > 85
@@ -145,11 +220,7 @@ spec:
           expr: |
             100 *
             (
-              sum by (node) (
-                kube_pod_container_resource_requests{resource="memory", unit="byte"}
-                * on (namespace, pod) group_left(node)
-                kube_pod_info
-              )
+              node:pod_requests_memory_bytes:sum
               /
               clamp_min(max by (node) (kube_node_status_allocatable{resource="memory", unit="byte"}), 1)
             ) > 95
