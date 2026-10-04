@@ -9,6 +9,14 @@ spec:
     kind: OCIRepository
     name: *app
   interval: 1h
+  # 2026-10-03: the pod took 14 min to become Ready (~8 min in ContainerCreating on
+  # hiro-cmp-05, whose system disk is ~10-30x slower than the other nodes', then
+  # four container restarts), past Helm's 5m default and the Deployment's 10m
+  # progressDeadlineSeconds. Flux stalled the release. See freecad for why the
+  # timeout needs the `legacy` wait to apply.
+  timeout: 20m
+  waitStrategy:
+    name: legacy
   values:
     controllers:
       main:
@@ -83,6 +91,20 @@ spec:
                   timeoutSeconds: 3
                   failureThreshold: 3
               readiness: *probes
+              # Holds liveness off until the port is open. Without it a container that
+              # needs more than ~40s to bind :3000 is killed by liveness and restarts
+              # in a loop: on 2026-10-03 it restarted four times (it took 27s to bind
+              # even on the start that finally stuck) because the node was I/O-starved
+              # by image extraction. Up to 5 min to start, then liveness takes over.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *port
+                  periodSeconds: 5
+                  timeoutSeconds: 3
+                  failureThreshold: 60
             securityContext:
               allowPrivilegeEscalation: false
               readOnlyRootFilesystem: true

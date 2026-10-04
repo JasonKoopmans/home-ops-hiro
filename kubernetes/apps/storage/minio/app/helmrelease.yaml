@@ -80,6 +80,17 @@ spec:
       # and minio-bucket-quota-bootstrap Job re-run successfully. Grew the PVC to 120Gi to give more headroom for future compactions
       size: 120Gi
 
+    # Recreate, not the chart default RollingUpdate (maxSurge 100%, maxUnavailable
+    # 0). One replica on a ReadWriteOnce Longhorn volume cannot roll that way: the
+    # new pod starts while the old one still holds the volume and the old one only
+    # stops once the new one is Ready, so a new pod scheduled onto a different node
+    # sits in ContainerCreating on "Multi-Attach error" until Helm's timeout and
+    # Flux rolls back. 2026-09-28: the memory-limit bump below put three successive
+    # new pods on hiro-cmp-03/05/05 against an old pod on hiro-cmp-04, so the bump
+    # never applied (the pod still ran the old 1Gi limit).
+    deploymentUpdate:
+      type: Recreate
+
     # Measured 2026-09-28: 7d peak 918Mi against this 1Gi limit (90%).
     # Bumped to ~1.5x that peak.
     resources:
