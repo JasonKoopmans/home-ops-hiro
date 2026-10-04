@@ -11,3 +11,11 @@ spec:
   values:
     serviceMonitor:
       create: true
+    # Chart default is 100m / 64Mi requests and 2000m / 1Gi limits. Only the CPU
+    # request moves: a partial override deep-merges, so the memory request and both
+    # limits stay as the chart ships them (checked with `helm template`). Measured
+    # 2026-10-04 over 7d: p99 15m, max 34m, in line with the three controllers it
+    # manages (25m each). Cut because hiro-cmp-03 (2 CPU) sat at 95% requested.
+    resources:
+      requests:
+        cpu: 25m

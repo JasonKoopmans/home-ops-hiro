@@ -477,7 +477,10 @@ spec:
     # measured crest, not a bare-minimum ratio of the limit itself.
     resources:
       requests:
-        cpu: 50m
+        # CPU measured 2026-10-04 over 7d: p99 12m, max 41m. Cut from 50m because
+        # hiro-cmp-03 (2 CPU) sat at 95% requested; 25m is ~2x p99, and with no CPU
+        # limit its bursts are unaffected.
+        cpu: 25m
         memory: 128Mi
       limits:
         # No CPU limit, per repo convention — Grafana is bursty on dashboard

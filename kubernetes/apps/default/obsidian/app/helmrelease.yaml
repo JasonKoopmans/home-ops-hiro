@@ -73,7 +73,11 @@ spec:
                   failureThreshold: 30
             resources:
               requests:
-                cpu: 100m
+                # CPU measured 2026-10-04 over 7d: p99 30m, max 118m. Cut from 100m
+                # because hiro-cmp-03 (2 CPU) sat at 95% requested. 50m (~1.7x p99)
+                # rather than idle-sized: this is an interactive desktop, and with no
+                # CPU limit its spikes burst freely.
+                cpu: 50m
                 memory: 512Mi
               limits:
                 memory: 4Gi
