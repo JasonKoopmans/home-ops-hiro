@@ -66,6 +66,8 @@ spec:
         # one digest per namespace instead of one. Not an inhibit target either:
         # a failed Flux rollback of Longhorn itself was the root cause of the
         # 2026-08-16 outage, and muting that during a Longhorn outage hides it.
+        #
+        # Triage: docs/runbook-flux-not-ready.md.
         - alert: FluxResourceNotReady
           expr: |
             max by (kind, name, exported_namespace) (

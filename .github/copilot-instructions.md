@@ -201,6 +201,7 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
   | `longhorn-tsdb` | see file | reduced snapshots | Prometheus TSDB-style write-heavy volumes |
 
 - Declare PVCs in a standalone `pvc.yaml` with an explicit `storageClassName` (don't rely on the default class silently).
+- **A single-replica Deployment on a ReadWriteOnce volume must not roll.** With `RollingUpdate` (the default in some upstream charts, e.g. minio: `maxSurge: 100%`, `maxUnavailable: 0`) the new pod can land on another node, cannot attach the volume the old pod still holds, sits in `ContainerCreating` until Helm times out, and Flux rolls back. Set the chart's strategy to `Recreate` up front (minio: `deploymentUpdate: {type: Recreate}`). app-template Deployments already default to `Recreate`; check a live one with `kubectl get deploy -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,STRATEGY:.spec.strategy.type`.
 - Reclaim policy is `Delete` — removing an app deletes its data. Snapshot first if it matters.
 - Do **not** reference storage classes other than the Longhorn ones above (`local-path`, `nfs`, etc. do not exist).
 
@@ -214,6 +215,22 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 - **Size limits from real data, not intuition.** Query `max_over_time(container_memory_working_set_bytes{...}[14d])` via Thanos (it holds ~14d of cadvisor series), then set the limit at roughly **2x** the observed peak — a 30s scrape cannot sample the spike that actually triggers an OOM kill, so a measured peak is a floor, not a ceiling. One-shot Jobs and init containers finish faster than one scrape and never produce metrics; their limits are judgment.
 - **Label unmeasured values as guesses.** For a new workload there is no data yet. Set deliberately-generous starting values, comment them in-manifest as an informed guess, and record the revisit condition in the app's plan/runbook doc — don't let a placeholder silently harden into an assumed-tuned value.
 - Nodes are **CPU-asymmetric** (`hiro-cmp-05` has 4 CPU, `-01`/`-02` have 3, `-03`/`-04` have 2; memory is uniform ~11.8Gi). CPU is the scarce resource — memory limits are comparatively cheap to set generously, CPU requests are not.
+
+---
+
+## Alerting (PrometheusRules)
+
+Alert rules live with the Prometheus stack, not with the app they watch: `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-<area>.yaml`, listed in that directory's `kustomization.yaml`. Copy a recent one (`prometheusrule-flux.yaml`, `prometheusrule-thanos.yaml`).
+
+- **Shape.** `metadata.namespace: monitoring`, label `release: kube-prometheus-stack`, groups named `<area>.rules`, a `severity` of `warning` or `critical` on every alert, and `$$` for every `$` in annotation templates (Flux post-build substitution turns it into one).
+- **Look before adding.** The gap here has been alert noise, not missing detection. List what already alerts, and where it routes, before writing a rule (the read-only recipe is in `CLAUDE.md`).
+- **An alert must be able to clear on its own.** Key it on the current state, never on an object merely existing: `kube_job_failed` latches until the Job is deleted, so use the age of the last success instead, and add a `...NeverSucceeded` twin where the metric is absent until the first success. When a scrape gap or an exporter restart must not resolve and re-fire a long-running alert, use `keep_firing_for` (spelled that way in this CRD, unlike `for`).
+- **Keep the `for:` clock stable.** It is tracked per label set, so aggregate away labels that change while the fault persists (`revision`, `reason`, `pod`, `instance`); otherwise every flip restarts it.
+- **Add a `...MetricsMissing` detector** when a group of rules depends on one exporter or scrape. A vanished series makes every rule evaluate empty, which looks exactly like healthy.
+- **Routing** is `alertmanagerconfig.yaml`. Criticals get one message per alertname and repeat hourly; warnings collapse into a digest per namespace (alert names starting `Node`, `KubeNode`, `Host` or `Kubelet` keep their own message). A digest line prints only `job_name`, `pod`, `node`, `instance` or `name`, so a warning must carry one of those to be identifiable, and Telegram caps a message at 4096 characters, so a rule that can fire dozens of instances at once should aggregate. An alert with no `namespace` label lands in the single namespace-less digest. Inhibit rules mute symptoms only, never a signal that can be the root cause.
+- **Test the behavior, not just the render.** CI only builds the manifests. Run `promtool check rules` and `promtool test rules` (steps in `CLAUDE.md`), check the live CRD and operator accept the rule with `kubectl apply --dry-run=server`, and backtest the expression on raw Thanos data: a range-query step of 300s or less, inside the 7-day raw retention. Coarser steps read downsampled 5-minute blocks, where one scrape blip looks like five minutes of continuous state.
+- **After merge, check it in prod:** the rule's `health` and `state` in the Prometheus rules API, the receiver of each firing instance in Alertmanager, and `alertmanager_notifications_failed_total` if you changed a notification template.
+- Triage for the Flux alerts: `docs/runbook-flux-not-ready.md`.
 
 ---
 
