@@ -36,7 +36,12 @@ spec:
               UMASK: "022"
             resources:
               requests:
-                cpu: 100m
+                # CPU measured 2026-10-04 over 7d: p99 ~0m, max 11m. Cut from a 100m
+                # guess because hiro-cmp-03 (2 CPU) sat at 95% requested. 25m, not
+                # lower: the ffmpeg remux below is a real burst, and with no CPU limit
+                # it is not throttled; the request only sets the scheduling
+                # reservation and the share under node contention.
+                cpu: 25m
                 memory: 256Mi
               # Unmeasured guess — no history for this workload yet. yt-dlp's ffmpeg
               # remux/merge step is the likely spike; revisit against Thanos

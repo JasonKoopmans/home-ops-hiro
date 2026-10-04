@@ -15,12 +15,16 @@ spec:
   # this cluster and were the bulk of a scheduling-headroom warning on one
   # node. Memory requests and all limits are preserved, so bursting is
   # unchanged — only the CPU reservation shrinks.
+  #
+  # 2026-10-04: activator 50m -> 25m, the same as the other components. Measured
+  # over 7d it used p99 0.3m / max 0.4m, and at 50m it was the largest reservation
+  # left here while hiro-cmp-03 (2 CPU) sat at 95% requested.
   workloads:
     - name: activator
       resources:
         - container: activator
           requests:
-            cpu: 50m
+            cpu: 25m
             memory: 60Mi
           limits:
             cpu: "1"
