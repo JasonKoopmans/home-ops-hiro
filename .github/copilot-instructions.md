@@ -366,6 +366,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
   ```
 - Commit messages follow **conventional commits** (`feat(app): …`, `fix(scope): …`) — Renovate uses `:semanticCommits`, and humans/agents should match.
 - **Do not remove Renovate annotations or change the version pinning strategy** without explicit approval.
+- **Some updates are never auto-merged** — `automerge: false` rules in `.renovaterc.json5`, each with a comment saying why: Longhorn and LifeOS (one-way), the Flux Operator group (restarts the controllers), Talos and Kubernetes versions in `talos/talenv.yaml` (applied by hand, so a merged bump only makes Git claim a version the nodes are not running), and Cilium minor/major. Merge those by hand when you are ready to roll them. A new dependency of that kind needs its own rule.
 
 ---
 
@@ -373,6 +374,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 
 - Talos machine configuration lives in `talos/`; `talconfig.yaml` is the source of truth, global patches in `talos/patches/global/`.
 - **Do not modify Talos configs** unless the issue explicitly asks for infrastructure-level changes. Most application-level work happens only in `kubernetes/`.
+- `talosVersion` and `kubernetesVersion` in `talos/talenv.yaml` must be a compatible pair, and they are what `task talos:upgrade-node` and `task talos:upgrade-k8s` act on, so Git ahead of the nodes is an upgrade waiting to happen. Do not bump them as a side effect.
 
 ---
 
