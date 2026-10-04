@@ -392,6 +392,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 - Talos machine configuration lives in `talos/`; `talconfig.yaml` is the source of truth, global patches in `talos/patches/global/`.
 - **Do not modify Talos configs** unless the issue explicitly asks for infrastructure-level changes. Most application-level work happens only in `kubernetes/`.
 - `talosVersion` and `kubernetesVersion` in `talos/talenv.yaml` must be a compatible pair, and they are what `task talos:upgrade-node` and `task talos:upgrade-k8s` act on, so Git ahead of the nodes is an upgrade waiting to happen. Do not bump them as a side effect.
+- Renovate tracks `talosVersion` from the GitHub releases of `siderolabs/talos` (the `ghcr.io/siderolabs/installer` image stopped at 1.13, so it cannot see 1.14 or later) and `kubernetesVersion` from the `ghcr.io/siderolabs/kubelet` image. Both PRs are merged by hand, then rolled with `task talos:upgrade-node` and `task talos:upgrade-k8s`.
 
 ---
 
