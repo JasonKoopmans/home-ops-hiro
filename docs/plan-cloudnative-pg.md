@@ -252,19 +252,31 @@ behaviour under load.
 |---|---|---|---|
 | Operator `requests` / `limit` | 50m / 128Mi, limit 512Mi | Measured 78Mi idle; headroom for reconciling 3 instances | After phase 2 runs |
 | Plugin controller `requests` / `limit` | 50m / 64Mi, limit 256Mi | Measured 29Mi idle | After first base backups |
-| Postgres `requests` | 500m CPU / 1Gi | Homelab-modest starting point | 14d of data exists |
+| Postgres `requests` | 250m CPU / 1Gi | CPU measured 2026-10-04 over 8d: primary p99 71m, max 296m, replicas ≤14m, so cut from a 500m guess (see below). Memory is still the original guess | Memory: 14d of data exists (2026-10-10) |
 | Postgres memory `limit` | 2Gi | ~2x the request | 14d of data exists |
 | Sidecar `requests` | 50m CPU / 128Mi | Idle between WAL segments; matches repo's 50m convention | After first few base backups |
 | Sidecar memory `limit` | 512Mi | ~4x request, to absorb gzip + multipart upload buffers | After first few base backups |
 | `storage.size` | 10Gi | Pure placeholder — no schema exists yet | Once real data volume is known |
 
 **These are now multiplied by three.** At `instances: 3` the cluster books
-**1.5 CPU / 3Gi** in requests (plus 150m / 384Mi across the three sidecars), and
-30Gi of Longhorn capacity. The per-instance numbers are unchanged and still
-guesses; the aggregate is what constrains scheduling. Replicas mostly replay WAL
-and are likely lighter than the primary, but CNPG applies one `resources` block
-to every instance — so if measurement shows replicas idling, the honest fix is
-lowering the shared request, not per-role tuning.
+**750m CPU / 3Gi** in requests (plus 150m / 384Mi across the three sidecars), and
+30Gi of Longhorn capacity. The aggregate is what constrains scheduling. Replicas
+mostly replay WAL and are lighter than the primary, but CNPG applies one
+`resources` block to every instance — so when measurement showed replicas idling,
+the honest fix was lowering the shared request, not per-role tuning.
+
+**CPU request cut 500m → 250m (2026-10-04).** Eight days in, the primary's 5m-rate
+CPU was p50 11m / p99 71m / max 296m and the replicas never passed 14m. At 500m the
+three instances held 1.5 cores for roughly 100m of use, and `hiro-cmp-03` (2 CPU,
+the node this document already flagged as the tightest) reached 95% CPU requested
+by the scheduler's own count while using ~37%, which paged
+`NodeCpuRequestsCritical`. 250m is ~3.5x the p99 and just under the one spike;
+with no CPU limit a burst is not throttled. This was done six days ahead of the
+14d revisit date because CPU is the cheap half to be wrong about (it can only
+slow a pod under node contention, not kill it). **Memory is untouched and still
+a guess**, and `shared_buffers` still waits on the same data. The revisit on
+2026-10-10 should re-read the primary's CPU p99 over the full 14d and check that
+it still sits well under 250m.
 
 **No CPU limits anywhere**, by repo convention (74 memory limits vs. 12 CPU
 limits across `kubernetes/apps/`). CFS throttling is particularly bad for a

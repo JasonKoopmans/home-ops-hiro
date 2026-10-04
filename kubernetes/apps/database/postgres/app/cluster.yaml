@@ -110,13 +110,25 @@ spec:
     storageClass: longhorn-1-no-backup
     size: 10Gi
 
-  # INFORMED GUESS — no workload on this cluster yet, so these are not measured.
-  # Revisit once there is ~14d of real data (see docs/plan-cloudnative-pg.md).
+  # CPU request is MEASURED, memory is still an INFORMED GUESS.
+  #
+  # CPU, 2026-10-04, 8d of data (5m rate): primary p50 11m / p99 71m / max 296m,
+  # replicas never above 14m. CNPG applies one `resources` block to every instance,
+  # so the old 500m guess booked 1.5 cores across three nodes for ~100m of real
+  # use (p99, all three summed), and left hiro-cmp-03 (2 CPU) with 95% of its CPU
+  # requested at ~37% usage.
+  # 250m is ~3.5x the p99 and just under the single spike; there is no CPU limit,
+  # so a burst past it is not throttled. It also matches the restore drill's
+  # recovery cluster. See docs/plan-cloudnative-pg.md §3.
+  #
+  # Memory: no measurement yet. Revisit once there is ~14d of data (2026-10-10,
+  # docs/revisit-register.md #1).
+  #
   # No CPU limit by repo convention: CFS throttling is especially harmful to a
   # database (latency spikes while locks are held). Memory limit only.
   resources:
     requests:
-      cpu: 500m
+      cpu: 250m
       memory: 1Gi
     limits:
       memory: 2Gi
