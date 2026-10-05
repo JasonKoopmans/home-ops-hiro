@@ -130,13 +130,19 @@
       // running — and upgrade-k8s will then upgrade to whatever Git says. That
       // already happened. #555 pinned Talos v1.13 with Kubernetes v1.36.3 because
       // that pair is the compatible one; two days later Renovate auto-merged
-      // Kubernetes v1.37.0 (#581), and talenv.yaml now reads v1.13.11 / v1.37.1
-      // against nodes running v1.13.10 / v1.36.3 (checked 2026-10-04). Upgrade
-      // Talos and Kubernetes deliberately, one step at a time, and merge the bump
-      // when you are ready to roll it.
+      // Kubernetes v1.37.0 (#581), and talenv.yaml came to read v1.13.11 / v1.37.1
+      // against nodes running v1.13.10 / v1.36.3 (2026-10-04). Upgrade Talos and
+      // Kubernetes deliberately, one step at a time, and merge the bump when you
+      // are ready to roll it.
+      //
+      // Talos is tracked from its GitHub releases, not from the installer image:
+      // Talos 1.14 stopped publishing ghcr.io/siderolabs/installer (the Image
+      // Factory replaces it), so that feed ends at v1.13.11 and could never offer
+      // 1.14. The `aqua:siderolabs/talos` mise tool (the talosctl CLI) is a
+      // github-tags dependency, is not matched here, and still auto-merges.
       description: "Never auto-merge Talos or Kubernetes versions — they are applied by hand",
-      matchDatasources: ["docker"],
-      matchPackageNames: ["ghcr.io/siderolabs/installer", "ghcr.io/siderolabs/kubelet"],
+      matchDatasources: ["docker", "github-releases"],
+      matchPackageNames: ["siderolabs/talos", "ghcr.io/siderolabs/kubelet"],
       automerge: false,
     },
     {
