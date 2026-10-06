@@ -1,0 +1,57 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: etcd-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: etcd-extra.rules
+      rules:
+        # Deadman's switch for the stock `etcd` rule group that kube-prometheus-stack
+        # ships (etcdNoLeader, etcdInsufficientMembers, etcdHighFsyncDurations, ...).
+        # Those rules read `up{job="kube-etcd"}` and etcd_* series, and a rule over a
+        # series that does not exist evaluates to empty rather than failing. That was
+        # this cluster's state until the kubeEtcd endpoints were wired up: 15 etcd
+        # alerts loaded, all inactive, none able to fire. The same blindness returns
+        # if the Service endpoints are dropped, the ServiceMonitor selector drifts, or
+        # the metricRelabelings allowlist in the HelmRelease stops matching after an
+        # etcd upgrade renames a metric (Renovate does not bump etcd; Talos does).
+        # Same shape as ThanosMetricsMissing and FluxMetricsMissing.
+        #
+        # Two branches. No `up` series at all means there is no scrape target. A
+        # target that is up but whose etcd_server_has_leader is absent means the scrape
+        # works and the allowlist (or etcd) stopped producing the series the rules
+        # read. The second is gated on at least one target being up, so a real outage
+        # - every member down, already covered critical by etcdInsufficientMembers and
+        # etcdNoLeader - does not also raise this.
+        #
+        # The branch on etcd_server_has_leader stands for the allowlist as a whole: it
+        # is the series etcdNoLeader reads, and it is in the same regex as the others.
+        #
+        # for: 15m. After the HelmRelease first applies, the Service endpoints and the
+        # first scrape take a minute or two; 15m also rides out a Prometheus restart.
+        #
+        # Routing: severity=warning and no Node/Kube/Host/Kubelet prefix, so it lands
+        # in the telegram-warnings digest. namespace=kube-system puts it in the digest
+        # the stock etcd warnings use (the target's namespace), so all etcd warnings
+        # read together. The absent() series carries only job, and the digest prints
+        # the alert name, which is enough here.
+        - alert: EtcdMetricsMissing
+          expr: |
+            absent(up{job="kube-etcd"})
+            or
+            (
+              absent(etcd_server_has_leader{job="kube-etcd"})
+              and on ()
+              (count(up{job="kube-etcd"} == 1) > 0)
+            )
+          for: 15m
+          labels:
+            severity: warning
+            namespace: kube-system
+          annotations:
+            summary: etcd metrics are missing
+            description: Prometheus has had no etcd scrape target, or no etcd_server_has_leader series from a target that is up, for 15 minutes, so every etcd alert (quorum, leader, disk fsync, database size) is blind and would read as healthy. Check the kube-prometheus-stack-kube-etcd Service endpoints (kubectl -n kube-system get endpoints kube-prometheus-stack-kube-etcd), the kubeEtcd.endpoints and its metricRelabelings allowlist in the kube-prometheus-stack HelmRelease, and that etcd still serves metrics on 2381 (talos/patches/controller/cluster.yaml).

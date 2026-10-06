@@ -26,6 +26,8 @@ resources:
   - ./prometheusrule-postgres.yaml
   - ./prometheusrule-thanos.yaml
   - ./prometheusrule-flux.yaml
+  - ./prometheusrule-node-disk.yaml
+  - ./prometheusrule-etcd.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml
