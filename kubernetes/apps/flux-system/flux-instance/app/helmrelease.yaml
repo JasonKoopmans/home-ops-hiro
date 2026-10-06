@@ -40,7 +40,29 @@ spec:
                 value: --requeue-dependency=5s
             target:
               kind: Deployment
-              name: (kustomize-controller|helm-controller|source-controller)
+              name: (kustomize-controller|source-controller)
+          - # helm-controller gets fewer workers than the other two, on purpose. A
+            # worker is held for a HelmRelease's whole upgrade, readiness wait
+            # included, so --concurrent is also "how many rollouts start at once".
+            # At 10, a burst of merges started ~20 upgrades inside five minutes on
+            # 2026-10-03 and the new pods' image pulls piled onto hiro-cmp-05 (system
+            # disk ~90% busy, 13 pulls in parallel averaging 181s against 11-20s on the
+            # other nodes), so three upgrades outran Helm's timeout and Stalled (#737).
+            # That disk copes with one or two pulls at a time. 4 is the Flux default.
+            # The cost is that a HelmRelease stuck waiting holds a worker for up to its
+            # `timeout` (5m by default, 20-30m on a few), which four workers absorb.
+            # kustomize-controller and source-controller keep 10 (kustomize 20, below):
+            # applying manifests and fetching sources do not wait on pods.
+            patch: |
+              - op: add
+                path: /spec/template/spec/containers/0/args/-
+                value: --concurrent=4
+              - op: add
+                path: /spec/template/spec/containers/0/args/-
+                value: --requeue-dependency=5s
+            target:
+              kind: Deployment
+              name: helm-controller
           - # Increase the memory limits
             patch: |
               apiVersion: apps/v1

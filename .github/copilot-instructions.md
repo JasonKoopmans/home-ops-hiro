@@ -230,7 +230,7 @@ Alert rules live with the Prometheus stack, not with the app they watch: `kubern
 - **Routing** is `alertmanagerconfig.yaml`. Criticals get one message per alertname and repeat hourly; warnings collapse into a digest per namespace (alert names starting `Node`, `KubeNode`, `Host` or `Kubelet` keep their own message). A digest line prints only `job_name`, `pod`, `node`, `instance` or `name`, so a warning must carry one of those to be identifiable, and Telegram caps a message at 4096 characters, so a rule that can fire dozens of instances at once should aggregate. An alert with no `namespace` label lands in the single namespace-less digest. Inhibit rules mute symptoms only, never a signal that can be the root cause.
 - **Test the behavior, not just the render.** CI only builds the manifests. Run `promtool check rules` and `promtool test rules` (steps in `CLAUDE.md`), check the live CRD and operator accept the rule with `kubectl apply --dry-run=server`, and backtest the expression on raw Thanos data. Ask for raw resolution explicitly (`max_source_resolution=0s` on the datasource-proxy API) and stay inside the 7-day raw retention: with auto-downsampling the querier reads 5-minute blocks from a 25-minute step and 1-hour blocks from 5 hours, and one scrape blip then looks like five minutes of continuous state. To measure how long a condition held, count it with a subquery at the rule's evaluation interval (`count_over_time(<expr>[30m:30s])`) instead of reading a coarse range query, which can step over a short recovery.
 - **After merge, check it in prod:** the rule's `health` and `state` in the Prometheus rules API, the receiver of each firing instance in Alertmanager, and `alertmanager_notifications_failed_total` if you changed a notification template.
-- Triage for the Flux alerts: `docs/runbook-flux-not-ready.md`.
+- Triage for the Flux alerts: `docs/runbook-flux-not-ready.md`. For a node's system disk (`NodeSystemDiskWriteLatencyHigh`, and the etcd fsync alerts that read the same disk): `docs/runbook-node-disk-slow.md`.
 
 ---
 
@@ -374,7 +374,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 
 ## Renovate & Dependency Updates
 
-- Renovate is configured via `.renovaterc.json5` and runs on Saturdays.
+- Renovate is configured via `.renovaterc.json5` and runs on Saturdays. PR creation is rate-limited (`prHourlyLimit: 4`) so a week's updates roll out over hours, not minutes: 30 merges in under five minutes once piled their image pulls onto one node's slow disk and stalled three upgrades. Do not re-add `:disableRateLimiting`.
 - It creates PRs for Helm chart bumps, container image updates, and GitHub Action digests; Flux-managed `OCIRepository` tags and `chart:` versions are picked up automatically by the flux manager.
 - For version strings Renovate can't infer, use hint comments on the line above:
   ```yaml

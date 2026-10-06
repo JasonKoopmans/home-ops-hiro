@@ -47,21 +47,59 @@ spec:
     kubeProxy:
       enabled: false
 
+    # Talos runs etcd as a host service, not a pod, so the chart's selector-based
+    # Service had no endpoints and nothing was scraped. The whole stock `etcd`
+    # rule group (15 alerts, including etcdNoLeader and etcdInsufficientMembers)
+    # was therefore loaded but blind, which looks exactly like a healthy etcd: a
+    # lost quorum, or a member on a saturated disk, would not have alerted.
+    # Pointing the Service at the control-plane IPs fixes that. etcd already
+    # listens for metrics on 0.0.0.0:2381 (talos/patches/controller/cluster.yaml).
+    #
+    # The first thing this makes visible is hiro-cmp-05, whose system disk is
+    # HDD-class and shared with its etcd member (sda). Measured 2026-10-05 on a
+    # quiet cluster: p99 WAL fsync 51 ms there against 4-15 ms on the other four
+    # members, backend commit 63 ms against 4-16 ms. The stock thresholds (fsync
+    # 0.5s warning / 1s critical, commit 0.25s) sit far above that baseline and
+    # only a pull storm like 2026-10-03's would approach them.
     kubeEtcd:
+      endpoints:
+        - 192.168.25.21
+        - 192.168.25.22
+        - 192.168.25.23
+        - 192.168.25.24
+        - 192.168.25.25
       serviceMonitor:
         metricRelabelings:
-          # etcd request histograms are extremely high-cardinality for a homelab.
-          # The _count and _sum variants are retained for rate/avg queries.
+          # Allowlist, as for the Thanos sidecar below. A member exposes ~1,650
+          # series (measured 2026-10-05), 748 of them grpc_server_handled_total and
+          # ~150 etcd_server_apply_duration_seconds_bucket: ~8,300 across five
+          # members, about 3% of the TSDB. This keeps ~133 per member (~670 in all):
+          # exactly what the stock etcd alerts and the chart's etcd dashboard read,
+          # plus two slow-disk indicators that no rule reads but that are the first
+          # thing to look at when one fires (etcd_server_slow_apply_total and
+          # etcd_server_heartbeat_send_failures_total).
           #
-          # NOTE: this rule only covers etcd's own scrape job, which currently has
-          # no targets — the chart's kube-etcd Service has zero endpoints on Talos,
-          # so nothing matches this today. It is kept so the rule is already correct
-          # if etcd scraping is ever wired up. The series that actually exist come
-          # from the apiserver's etcd *client* instrumentation — see kubeApiServer
-          # below. Do not assume this rule is what bounds etcd histogram cardinality.
-          - action: drop
+          # Deliberately not kept: grpc_server_handled_total, which only the
+          # etcdHighNumberOfFailedGRPCRequests rules and the dashboard's RPC panels
+          # read, and etcd_request_duration_seconds_bucket. Those two alerts are
+          # switched off under defaultRules below rather than left loaded and blind.
+          #
+          # Its weakness is the usual one: a typo here, or a metric renamed by an etcd
+          # upgrade, empties a rule without any error. EtcdMetricsMissing
+          # (prometheusrule-etcd.yaml) is the detector.
+          - action: keep
             sourceLabels: [__name__]
-            regex: etcd_request_duration_seconds_bucket
+            regex: etcd_server_(has_leader|is_leader|leader_changes_seen_total|proposals_failed_total|quota_backend_bytes|slow_apply_total|heartbeat_send_failures_total)|etcd_disk_(wal_fsync|backend_commit)_duration_seconds_(bucket|sum|count)|etcd_network_peer_(round_trip_time_seconds_(bucket|sum|count)|sent_failures_total|sent_bytes_total|received_bytes_total)|etcd_network_client_grpc_(sent|received)_bytes_total|etcd_mvcc_db_total_size_(in_use_)?in_bytes|process_resident_memory_bytes
+
+    defaultRules:
+      disabled:
+        # Fed by grpc_server_handled_total, which the kubeEtcd allowlist above does
+        # not keep (748 series per member). Left on, both would be loaded and never
+        # able to fire.
+        etcdHighNumberOfFailedGRPCRequests: true
+        # Needs grpc_server_handling_seconds_bucket, which etcd only exposes with
+        # --metrics=extensive. It is not on here, so this has never matched anything.
+        etcdGRPCRequestsSlow: true
 
     kubeApiServer:
       serviceMonitor:

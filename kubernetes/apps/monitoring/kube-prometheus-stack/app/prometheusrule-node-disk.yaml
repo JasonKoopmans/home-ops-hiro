@@ -1,0 +1,77 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: node-disk-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: node-disk.rules
+      rules:
+        # The stock NodeDiskIOSaturation did not catch 2026-10-03. It fires on an
+        # average queue length above 10 held for 30 minutes. Over the 7 days to
+        # 2026-10-03 hiro-cmp-05's queue was above 10 for 35 minutes in all, peaking
+        # at 118 in the Renovate batch that saturated its system disk (~90% busy,
+        # ~500 ms per write), and that alert never fired while three upgrades timed
+        # out and Stalled (#737). Queue length also says little about pain: an SSD
+        # can sit at 100% busy and stay fast. Write latency is the symptom itself.
+        #
+        # sda is the Talos system disk on every node: /var, which holds containerd's
+        # image store, kubelet's ephemeral storage and the etcd data. Longhorn's
+        # data disks (sdb and the iSCSI-attached volume devices) are deliberately
+        # left out; their latency swings with replica rebuilds and says nothing about
+        # image pulls. job="node-exporter" excludes the Proxmox hosts, which report
+        # their own sda under job="integrations/unix".
+        #
+        # Average write latency over 10m, from two counters that always move
+        # together: time spent writing divided by writes completed. 100 ms is well
+        # clear of normal. Backtest 2026-10-05 over 7d of raw Thanos data: the
+        # worst 10m average was 10 ms on cmp-01, 9 on cmp-02, 3 on cmp-03, 1 on
+        # cmp-04 and 501 on cmp-05; cmp-05's baseline is ~16 ms. The only stretch
+        # above 100 ms in the week was 20 minutes of cmp-05 around the Renovate
+        # batch of 2026-10-03, so this would have fired once. At 50 ms it would have
+        # had ~70 minutes of cmp-05 to fire on, 3.5x as much, which is the noise
+        # this threshold is chosen to stay out of.
+        #
+        # The second term drops a disk that is nearly idle: with a handful of writes
+        # an interval, one slow write is a 10m "average". Every node does ~65-70
+        # writes a second at its quietest (p10 over 7d), so the guard of 5 never
+        # masks a real node and only exists so the ratio cannot be a sample of one.
+        #
+        # for: 5m. The 10m window already does the smoothing: a burst has to add up
+        # to about a minute of 1-second writes to lift the average past 100 ms at
+        # all, and once it has, it holds the average there for most of the next ten
+        # minutes, so the alert neither flaps nor needs keep_firing_for. `for` only
+        # delays the first message a little and filters a one-evaluation artefact.
+        #
+        # max by (instance, device) drops pod, namespace and job. `for:` is tracked
+        # per label set, and a node-exporter pod replaced mid-storm would otherwise
+        # restart the clock. instance is the node's IP (hiro-cmp-01..05 are
+        # 192.168.25.21..25), which is what the Telegram message prints.
+        #
+        # Routing (alertmanagerconfig.yaml): the name starts with Node, so it is
+        # sent as its own message on the 4h cadence rather than folded into a
+        # digest. A node whose disk is in this state is worth knowing about while
+        # it is happening. Warning only: nothing is down, rollouts on that node are
+        # slow and may time out.
+        #
+        # Triage: docs/runbook-node-disk-slow.md.
+        - alert: NodeSystemDiskWriteLatencyHigh
+          expr: |
+            max by (instance, device) (
+              (
+                rate(node_disk_write_time_seconds_total{job="node-exporter", device="sda"}[10m])
+                /
+                rate(node_disk_writes_completed_total{job="node-exporter", device="sda"}[10m])
+              )
+              and
+              (rate(node_disk_writes_completed_total{job="node-exporter", device="sda"}[10m]) > 5)
+            ) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Node system disk is slow to write
+            description: The system disk (sda - containerd images, kubelet, etcd) on {{ $$labels.instance }} has averaged {{ $$value | humanizeDuration }} per write over the last 10 minutes (normal is under 20 ms). Image pulls and rollouts on that node crawl and may time out, and its etcd member slows with it. On 2026-10-03 hiro-cmp-05 reached ~500 ms during a burst of Renovate merges and three HelmRelease upgrades stalled. Check what is rolling out and hold further merges - docs/runbook-node-disk-slow.md.
