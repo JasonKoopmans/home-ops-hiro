@@ -374,7 +374,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 
 ## Renovate & Dependency Updates
 
-- Renovate is configured via `.renovaterc.json5` and runs on Saturdays.
+- Renovate is configured via `.renovaterc.json5` and runs on Saturdays. PR creation is rate-limited (`prHourlyLimit: 4`) so a week's updates roll out over hours, not minutes: 30 merges in under five minutes once piled their image pulls onto one node's slow disk and stalled three upgrades. Do not re-add `:disableRateLimiting`.
 - It creates PRs for Helm chart bumps, container image updates, and GitHub Action digests; Flux-managed `OCIRepository` tags and `chart:` versions are picked up automatically by the flux manager.
 - For version strings Renovate can't infer, use hint comments on the line above:
   ```yaml

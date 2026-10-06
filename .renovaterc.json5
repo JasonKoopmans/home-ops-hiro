@@ -6,10 +6,23 @@
     "helpers:pinGitHubActionDigests",
     ":automergePr",
     ":dependencyDashboard",
-    ":disableRateLimiting",
     ":semanticCommits",
   ],
   dependencyDashboard: true,
+  // Pace the updates. This config used to extend :disableRateLimiting, and on
+  // 2026-10-03 Renovate automerged 30 PRs in 4m23s (00:25-00:29Z). About 20 of
+  // them rolled workloads at once, and their image pulls piled onto hiro-cmp-05,
+  // whose system disk is HDD-class: 13 pulls in parallel averaged 181s (p90 ~400s)
+  // against 11-20s on every other node, so three upgrades outran Helm's timeout
+  // and Stalled (#737). That disk is fine one or two pulls at a time (~28s), so
+  // the fix is fewer at once, not faster. 4 an hour spreads a typical 30-PR
+  // Saturday over ~7.5h, inside the schedule; the rest wait on the Dependency
+  // Dashboard for the next run instead of being dropped.
+  prHourlyLimit: 4,
+  // No cap on open PRs, on purpose. The PRs that are never auto-merged (below)
+  // stay open until someone merges them by hand, and a cap lower than their
+  // number would stop Renovate opening any new PR at all, silently.
+  prConcurrentLimit: 0,
   // Automerge goes through a PR + GitHub native auto-merge so the main ruleset's
   // required "Flux Local Success" check gates every update. Branch automerge
   // pushed straight to main with no CI.
