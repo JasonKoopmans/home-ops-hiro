@@ -11,13 +11,12 @@ spec:
     - name: node-disk.rules
       rules:
         # The stock NodeDiskIOSaturation did not catch 2026-10-03. It fires on an
-        # average queue length above 10 held for 30 minutes; the Renovate batch
-        # that saturated hiro-cmp-05's system disk (~90% busy, ~500 ms per write)
-        # pushed the queue past 10 for 35 minutes in all (peak 118), never as one
-        # unbroken half hour, and in 7d of raw history that alert never fired while
-        # three upgrades timed out and Stalled (#737). Queue length also says little
-        # about pain: an SSD can sit at 100% busy and stay fast. Write latency is
-        # the symptom itself.
+        # average queue length above 10 held for 30 minutes. Over the 7 days to
+        # 2026-10-03 hiro-cmp-05's queue was above 10 for 35 minutes in all, peaking
+        # at 118 in the Renovate batch that saturated its system disk (~90% busy,
+        # ~500 ms per write), and that alert never fired while three upgrades timed
+        # out and Stalled (#737). Queue length also says little about pain: an SSD
+        # can sit at 100% busy and stay fast. Write latency is the symptom itself.
         #
         # sda is the Talos system disk on every node: /var, which holds containerd's
         # image store, kubelet's ephemeral storage and the etcd data. Longhorn's
