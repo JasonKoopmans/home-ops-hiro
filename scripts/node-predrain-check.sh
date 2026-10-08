@@ -71,10 +71,11 @@ fi
 
 # --- 2. etcd ------------------------------------------------------------------
 head_ "etcd"
-if ! command -v talosctl >/dev/null || [[ -z "${TALOSCONFIG:-}" || ! -f "${TALOSCONFIG:-}" ]]; then
-    warn "talosctl or TALOSCONFIG missing -- etcd leader/health NOT checked"
-elif ! kubectl get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | awk -v n="${NODE}" '$1==n' | grep -q .; then
+if ! kubectl get nodes -l node-role.kubernetes.io/control-plane --no-headers 2>/dev/null | awk -v n="${NODE}" '$1==n' | grep -q .; then
     ok "${NODE} is not a control-plane node"
+elif ! command -v talosctl >/dev/null || [[ -z "${TALOSCONFIG:-}" || ! -f "${TALOSCONFIG:-}" ]]; then
+    # Fail closed: a control-plane target may be the etcd leader, and we cannot tell.
+    block "${NODE} is a control-plane node but talosctl/TALOSCONFIG is unavailable -- etcd leader/health NOT checked"
 else
     cp_ips="$(kubectl get nodes -l node-role.kubernetes.io/control-plane \
         -o jsonpath='{range .items[*]}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}')"
@@ -114,11 +115,15 @@ else
                 talosctl -e "${asker}" -n "${target_ip}" etcd forfeit-leadership
                 sleep 5
                 out="$(etcd_status)"
-                new_leader="$(printf '%s\n' "${out}" | parse_rows | awk '{print $3}' | sort -u)"
-                if [[ "$(printf '%s\n' "${new_leader}" | grep -c .)" -eq 1 && "${new_leader}" != "${target_member}" ]]; then
-                    ok "leadership moved off ${NODE}"
+                parsed2="$(printf '%s\n' "${out}" | parse_rows)"
+                got2="$(printf '%s\n' "${parsed2}" | grep -c .)"
+                new_leader="$(printf '%s\n' "${parsed2}" | awk '{print $3}' | sort -u)"
+                if [[ "${got2}" -eq "${expected}" \
+                      && "$(printf '%s\n' "${new_leader}" | grep -c .)" -eq 1 \
+                      && "${new_leader}" != "${target_member}" ]]; then
+                    ok "leadership moved off ${NODE} (${got2}/${expected} members agree)"
                 else
-                    block "leadership did not move off ${NODE}"
+                    block "after forfeit: ${got2}/${expected} members answered or leader unsettled/still ${NODE} -- re-run the check"
                 fi
             else
                 block "${NODE} is the etcd leader -- re-run with --forfeit-etcd (or: talosctl -n ${target_ip} etcd forfeit-leadership)"
@@ -135,16 +140,14 @@ fi
 # --- 3. PDBs that would refuse eviction --------------------------------------
 head_ "PodDisruptionBudgets covering pods on ${NODE}"
 pdb_hit=0
-# namespace|name|allowed|selector(k=v,k=v) -- matchLabels only; matchExpressions PDBs are listed as a warning
-pdbs="$(kubectl get pdb -A -o go-template='{{range .items}}{{.metadata.namespace}}|{{.metadata.name}}|{{.status.disruptionsAllowed}}|{{range $k,$v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}|{{if .spec.selector.matchExpressions}}expr{{end}}{{"\n"}}{{end}}')"
-while IFS='|' read -r ns name allowed sel expr; do
+# namespace|name|allowed|selectorState|label-selector. The selector string is built from
+# matchLabels and matchExpressions (In/NotIn/Exists/DoesNotExist) in kubectl -l syntax.
+# policy/v1: a null selector matches nothing, an empty {} one matches every pod in the namespace.
+pdbs="$(kubectl get pdb -A -o go-template='{{range .items}}{{.metadata.namespace}}|{{.metadata.name}}|{{.status.disruptionsAllowed}}|{{printf "%v" .spec.selector}}|{{range $k,$v := .spec.selector.matchLabels}}{{$k}}={{$v}},{{end}}{{range .spec.selector.matchExpressions}}{{if eq .operator "In"}}{{.key}} in ({{range $i,$v := .values}}{{if $i}},{{end}}{{$v}}{{end}}),{{else if eq .operator "NotIn"}}{{.key}} notin ({{range $i,$v := .values}}{{if $i}},{{end}}{{$v}}{{end}}),{{else if eq .operator "Exists"}}{{.key}},{{else if eq .operator "DoesNotExist"}}!{{.key}},{{end}}{{end}}{{"\n"}}{{end}}')"
+while IFS='|' read -r ns name allowed selstate sel; do
     [[ -n "${name}" ]] || continue
     [[ "${allowed}" == "0" ]] || continue
-    if [[ -n "${expr}" ]]; then
-        warn "PDB ${ns}/${name} allows 0 disruptions and uses matchExpressions -- check by hand"
-        continue
-    fi
-    [[ -n "${sel}" ]] || continue
+    [[ "${selstate}" == "<nil>" ]] && continue   # null selector matches no pods
     pods="$(kubectl get pods -n "${ns}" -l "${sel%,}" --field-selector "spec.nodeName=${NODE}" --no-headers 2>/dev/null | awk '{print $1}' | paste -sd' ' -)"
     if [[ -n "${pods}" ]]; then
         # Longhorn creates an instance-manager PDB per node and removes it itself
