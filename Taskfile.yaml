@@ -271,6 +271,27 @@ tasks:
       - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
       - { msg: "Missing envoy healthcheck script", sh: "test -f {{.SCRIPTS_DIR}}/envoy-healthcheck.sh" }
 
+  node:predrain:
+    desc: Read-only gate before draining/upgrading a node — PDBs, etcd leader, Longhorn health, Ready peers
+    summary: |
+      Args:
+        node: node name to be drained, e.g. hiro-cmp-04 (required)
+        forfeit: set to "true" to move the etcd leadership off the node if it holds it
+                 (optional; the only thing this task changes)
+
+      Exits non-zero, naming the pod/PDB/volume, if a drain would hang or cost
+      redundancy. Run it before `task talos:upgrade-node` and again between nodes.
+    cmd: >-
+      bash {{.SCRIPTS_DIR}}/node-predrain-check.sh --node {{.node}}
+      {{if eq .forfeit "true"}}--forfeit-etcd{{end}}
+    vars:
+      forfeit: '{{.forfeit | default "false"}}'
+    requires:
+      vars: ["node"]
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing predrain script", sh: "test -f {{.SCRIPTS_DIR}}/node-predrain-check.sh" }
+
   longhorn:evict-replica:
     desc: Safely evict/relocate a Longhorn replica off a node (disables dataLocality first to avoid a stalled handoff)
     summary: |

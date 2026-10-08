@@ -19,8 +19,15 @@ spec:
   # 2026-10-04: activator 50m -> 25m, the same as the other components. Measured
   # over 7d it used p99 0.3m / max 0.4m, and at 50m it was the largest reservation
   # left here while hiro-cmp-03 (2 CPU) sat at 95% requested.
+  #
+  # Two replicas and a PDB that permits one disruption for the two components
+  # that sit on the request path. The upstream PDBs are minAvailable: 80%, which
+  # rounds up to "all of them" at any replica count below 5, so a node drain
+  # could never evict either pod (disruptionsAllowed: 0 even with 2 replicas).
+  # Replicas alone do not fix that; the PDB override below does.
   workloads:
     - name: activator
+      replicas: 2
       resources:
         - container: activator
           requests:
@@ -48,6 +55,7 @@ spec:
             cpu: "1"
             memory: 1000Mi
     - name: webhook
+      replicas: 2
       resources:
         - container: webhook
           requests:
@@ -56,6 +64,21 @@ spec:
           limits:
             cpu: 500m
             memory: 500Mi
+  # Overrides the operator's activator-pdb / webhook-pdb by name. minAvailable: 1
+  # of 2 replicas = one pod can be evicted at a time, the other keeps serving.
+  # If either component is ever scaled back to 1 replica this goes back to
+  # blocking drains, so keep it in step with the replicas above.
+  podDisruptionBudgets:
+    - name: activator-pdb
+      minAvailable: 1
+      selector:
+        matchLabels:
+          app: activator
+    - name: webhook-pdb
+      minAvailable: 1
+      selector:
+        matchLabels:
+          app: webhook
   ingress:
     istio:
       enabled: false
