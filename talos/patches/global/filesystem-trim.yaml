@@ -1,0 +1,10 @@
+# Talos 1.14 generates a FilesystemTrimConfig (weekly fstrim of EPHEMERAL and the
+# longhorn user volume) by default. Deleted to keep the cluster's behaviour
+# unchanged: the Proxmox disks have no discard=on, so a node-level trim would
+# reach no host storage, and Longhorn already trims inside its volumes
+# (kubernetes/apps/storage/longhorn-system/app/default-jobs.yaml). Remove this
+# file once discard=on is set on the VM disks and node-level trim is wanted.
+---
+apiVersion: v1alpha1
+kind: FilesystemTrimConfig
+$$patch: delete
