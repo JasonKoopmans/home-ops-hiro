@@ -1,5 +1,10 @@
-machine:
-  network:
-    disableSearchDomain: true
-    nameservers:
-      - 192.168.25.1
+# Talos 1.14 generates a ResolverConfig (host DNS) by default and rejects
+# .machine.network.nameservers / .disableSearchDomain alongside it, so the
+# resolver settings live here. hostDNS keeps its generated defaults.
+---
+apiVersion: v1alpha1
+kind: ResolverConfig
+nameservers:
+  - address: 192.168.25.1
+searchDomains:
+  disableDefault: true
