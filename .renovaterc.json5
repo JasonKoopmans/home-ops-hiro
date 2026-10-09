@@ -159,6 +159,17 @@
       automerge: false,
     },
     {
+      // kubernetes-sigs/kustomize is a multi-module monorepo whose release tags
+      // are prefixed per module (`kustomize/v5.8.1`, `api/v0.21.1`, `kyaml/...`).
+      // aqua resolves them with `version_prefix: kustomize/`, but Renovate saw no
+      // tag newer than the pin and never opened a PR for the .mise.toml line
+      // (#683). Keep only the `kustomize/` tags and strip the prefix and the `v`.
+      description: "Resolve kustomize versions from its prefixed monorepo tags",
+      matchManagers: ["mise"],
+      matchPackageNames: ["aqua:kubernetes-sigs/kustomize", "kubernetes-sigs/kustomize"],
+      extractVersion: "^kustomize/v(?<version>\\d+\\.\\d+\\.\\d+)$",
+    },
+    {
       // topf renders the Talos machine config, so its version decides which
       // Talos contract and defaults get rendered at the next apply. A bump
       // changes nothing on the nodes by itself, but it can start emitting
