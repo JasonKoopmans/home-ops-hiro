@@ -30,12 +30,18 @@ tasks:
     desc: Apply Talos config to a node [IP=required]
     dir: '{{.TALOS_DIR}}'
     cmds:
-      - '{{.ROOT_DIR}}/scripts/talos-check-etcd-encryption.sh {{.IP}} {{.NODE_CONFIG}}'
+      - '{{.SCRIPTS_DIR | shellQuote}}/talos-check-etcd-encryption.sh {{.IP}} {{.NODE_CONFIG | shellQuote}}'
       - talhelper gencommand apply --node {{.IP}} --extra-flags '--mode={{.MODE}}{{if .TIMEOUT}} --timeout={{.TIMEOUT}}{{end}}' | bash
     vars:
       MODE: '{{.MODE | default "auto"}}'
+      # Absolute path of the generated config for this node. Dynamic variables run from
+      # the Taskfile's directory, not from `dir` above, hence the explicit cd.
       NODE_CONFIG:
-        sh: echo "clusterconfig/$(yq '.clusterName' talconfig.yaml)-$(yq '.nodes[] | select(.ipAddress == "{{.IP}}") | .hostname' talconfig.yaml).yaml"
+        sh: |
+          cd {{.TALOS_DIR | shellQuote}}
+          host=$(yq '.nodes[] | select(.ipAddress == "{{.IP}}") | .hostname' talconfig.yaml)
+          if [ -z "$host" ]; then echo "no node with ipAddress {{.IP}} in talos/talconfig.yaml" >&2; exit 1; fi
+          echo "$PWD/clusterconfig/$(yq '.clusterName' talconfig.yaml)-$host.yaml"
     requires:
       vars: [IP]
     preconditions:
