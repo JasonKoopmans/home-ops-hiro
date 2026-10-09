@@ -14,6 +14,13 @@ spec:
   # because the running version is already persisted in the current-longhorn-version
   # Setting. Rollback is disabled for this release in kubernetes/flux/cluster/ks.yaml.
   timeout: 30m
+  # `legacy` is what makes the 30m real: the default `poller` strategy fails the
+  # release once a Deployment (ui, driver-deployer, CSI) passes its fixed 10m
+  # progressDeadlineSeconds, whatever `timeout` says. Failing early is the wrong
+  # trade here: the upgrade is one-way and never rolled back, so a release declared
+  # failed at 10m just starts another attempt on a half-upgraded system.
+  waitStrategy:
+    name: legacy
   chart:
     spec:
       chart: longhorn
