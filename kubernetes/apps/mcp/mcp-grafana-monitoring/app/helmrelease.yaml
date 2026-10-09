@@ -75,6 +75,9 @@ spec:
               - --disable-write
             env:
               TZ: ${TIMEZONE}
+              # 2.0 reports anonymous usage statistics by default; this server
+              # fronts personal Grafana data, so opt out (also honours DO_NOT_TRACK=1).
+              GRAFANA_USAGE_STATS: disabled
               GRAFANA_URL: http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80
               GRAFANA_SERVICE_ACCOUNT_TOKEN:
                 secretKeyRef:
