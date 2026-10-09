@@ -4,8 +4,10 @@
 # written under "key2" (what Talos 1.13 used), so a node running the generated
 # document cannot decrypt any Secret and its kube-apiserver never becomes ready.
 # Fixed in Talos itself (siderolabs/talos 570fe34f0, in talosctl 1.14.0) but not
-# yet in a talhelper release. Delete this file and its twin once talhelper
-# renders key2 by itself (check: the check script passes without them).
+# yet in a talhelper release. Once talhelper renders key2 by itself (check: the
+# check script passes without these patches), delete this file, its twin,
+# talos/talenv.sops.yaml and the talenv.sops.yaml precondition on
+# generate-config in .taskfiles/talos/Taskfile.yaml.
 ---
 apiVersion: v1alpha1
 kind: KubeEtcdEncryptionConfig
