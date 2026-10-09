@@ -1,0 +1,12 @@
+# Step 1 of 2 (see etcd-encryption-2-key2.yaml): drop the KubeEtcdEncryptionConfig
+# the generator emits. talhelper 3.1.17 is built on a pre-release Talos library
+# that names the secretbox key "key1"; this cluster's secrets in etcd were
+# written under "key2" (what Talos 1.13 used), so a node running the generated
+# document cannot decrypt any Secret and its kube-apiserver never becomes ready.
+# Fixed in Talos itself (siderolabs/talos 570fe34f0, in talosctl 1.14.0) but not
+# yet in a talhelper release. Delete this file and its twin once talhelper
+# renders key2 by itself (check: the check script passes without them).
+---
+apiVersion: v1alpha1
+kind: KubeEtcdEncryptionConfig
+$$patch: delete
