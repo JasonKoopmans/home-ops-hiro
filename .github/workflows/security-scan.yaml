@@ -44,7 +44,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup mise
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           cache: false
 
@@ -54,6 +54,12 @@ jobs:
       # scoped to this workflow. Still goes through mise/aqua (checksum +
       # attestation verified) rather than a raw curl-to-shell script.
       - name: Install Kubescape (CI-only)
+        # mise-action v5.1.1 no longer exports its token to later steps, and this
+        # is the one later step that makes GitHub API calls (aqua release lookup +
+        # attestation check). Scope the token to this step rather than turning on
+        # `persist_github_token`, which would expose it to every step after it.
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
         run: |
           # renovate: datasource=github-releases depName=kubescape/kubescape
           KUBESCAPE_VERSION=4.0.15
