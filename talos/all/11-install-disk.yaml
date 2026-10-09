@@ -1,0 +1,10 @@
+# The install disk and image. topf fills in the installer image from
+# schematic.yaml and talosVersion; the disk would default to /dev/sda anyway,
+# but a default that happens to equal the real value is stated, not assumed.
+# (machine.install is deprecated in 1.14 and mutually exclusive with this.)
+---
+apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/sda"

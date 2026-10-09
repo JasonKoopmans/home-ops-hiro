@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Refuse to apply a generated Talos machine config whose Secret-at-rest (etcd)
+# Refuse to apply a rendered Talos machine config whose Secret-at-rest (etcd)
 # encryption key differs from the one the node's kube-apiserver runs with.
 #
 # kube-apiserver stores the secretbox key NAME next to every encrypted Secret.
 # A config that renders the same secret under a different name (talhelper
-# 3.1.17 renders "key1" where this cluster uses "key2") leaves the apiserver
-# unable to decrypt anything: the cacher loops, informer-sync never passes and
-# /readyz stays 500. Found with a `--mode=try` apply on hiro-cmp-01 on
-# 2026-10-08; see talos/patches/global/etcd-encryption-*.yaml.
+# 3.1.17 rendered "key1" where this cluster uses "key2"; topf renders "key2")
+# leaves the apiserver unable to decrypt anything: the cacher loops,
+# informer-sync never passes and /readyz stays 500. Found with a `--mode=try`
+# apply on hiro-cmp-01 on 2026-10-08. Kept as a guard for any future generator
+# or Talos bump.
 #
 # Compares the secretbox (name, secret) pairs of the node's live
 # encryptionconfig.yaml with the generated config. Secret values are compared
 # but never printed.
 #
-# Usage: talos-check-etcd-encryption.sh <node-ip> <generated-config.yaml>
+# Usage: talos-check-etcd-encryption.sh <node-ip> <rendered-config.yaml>
 # Invoked by `task talos:apply-node`. Set TALOS_SKIP_ETCD_KEY_CHECK=1 only for a
 # deliberate key rotation.
 set -o errexit
@@ -67,8 +68,9 @@ if [[ "$(sort <<<"${live_pairs}")" != "$(sort <<<"${rendered_pairs}")" ]]; then
     echo "  The key name(s) match but the secret value differs." >&2
   fi
   echo "  A different name or secret makes kube-apiserver unable to decrypt existing Secrets." >&2
-  echo "  Check talos/talenv.sops.yaml (etcdSecretboxSecret) against talsecret.sops.yaml and the" >&2
-  echo "  etcd-encryption patches in talos/patches/global/. Not applying." >&2
+  echo "  Check that talos/secrets.sops.yaml is the bundle this cluster was built from" >&2
+  echo "  (secrets.secretboxencryptionsecret) and that no patch under talos/ replaces" >&2
+  echo "  KubeEtcdEncryptionConfig. Not applying." >&2
   exit 1
 fi
 

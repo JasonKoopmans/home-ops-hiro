@@ -1,0 +1,50 @@
+---
+clusterName: kubernetes
+clusterEndpoint: https://192.168.25.20:6443
+
+# talosVersion is the installer tag AND the machine-config version contract
+# topf renders for: at 1.14 that is the multi-document format (see README.md).
+# These two are applied by hand (`task talos:upgrade-node`, `task
+# talos:upgrade-k8s`); Renovate's PRs for them are never auto-merged.
+# renovate: datasource=github-releases depName=siderolabs/talos
+talosVersion: v1.14.2
+# renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
+kubernetesVersion: v1.37.1
+
+# The installer image is derived from this (Image Factory) plus talosVersion.
+schematicId: "@schematic.yaml"
+
+# Kept *.sops.yaml-suffixed (topf's own default is secrets.yaml) so it still
+# matches the creation rule in .sops.yaml (talos/.*\.sops\.ya?ml). If this file
+# is missing topf GENERATES a new secrets bundle instead of failing, and a
+# config rendered from that cannot talk to the running cluster: every task
+# below checks for it first.
+secretsPath: secrets.sops.yaml
+
+# `mac` is the node's NIC, used by control-plane/01-network.yaml.tpl.
+nodes:
+  - host: hiro-cmp-01
+    ip: 192.168.25.21
+    role: control-plane
+    data:
+      mac: "bc:24:11:4b:43:c7"
+  - host: hiro-cmp-02
+    ip: 192.168.25.22
+    role: control-plane
+    data:
+      mac: "bc:24:11:1d:a0:92"
+  - host: hiro-cmp-03
+    ip: 192.168.25.23
+    role: control-plane
+    data:
+      mac: "bc:24:11:39:c5:4c"
+  - host: hiro-cmp-04
+    ip: 192.168.25.24
+    role: control-plane
+    data:
+      mac: "bc:24:11:ac:0a:05"
+  - host: hiro-cmp-05
+    ip: 192.168.25.25
+    role: control-plane
+    data:
+      mac: "bc:24:11:8e:69:d9"

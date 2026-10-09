@@ -1,5 +1,9 @@
 # Spike: replacing talhelper
 
+> **Status:** acted on. The repo now renders with topf; the migration, its rendering checks and what differed from
+> talhelper are in the pull request that moved `talos/` to `topf.yaml`, and `talos/README.md` describes the layout.
+> The text below is the original spike and still describes talhelper as the current tool.
+
 talhelper (`aqua:budimanjojo/talhelper` pinned at `3.1.17` in `.mise.toml`)
 shipped its last release and the repo is archived — see
 [v3.1.17](https://github.com/budimanjojo/talhelper/releases/tag/v3.1.17).
@@ -252,8 +256,6 @@ against any node, and nothing on the live cluster changed.
 
 ## Revisit trigger
 
-Tracked in [revisit-register.md](revisit-register.md). The local-testing
-section above already confirms topf handles this cluster's current
-`talosVersion`/`kubernetesVersion`; re-open this if a future Talos or
-Kubernetes bump breaks that, or once someone runs the actual migration
-(items 1–6 above) against a scratch node.
+Superseded: the migration was done (see the status note at the top) and its register entries are gone. One path is
+still unexercised against real nodes: `task bootstrap:talos` (from-scratch bootstrap with `topf apply
+--auto-bootstrap`) only runs on nodes in maintenance mode. Try it on a scratch node before relying on it.

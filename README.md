@@ -151,7 +151,7 @@ There are **5 stages** outlined below for completing this project, make sure you
 
     ```sh
     git add -A
-    git commit -m "chore: add talhelper encrypted secret :lock:"
+    git commit -m "chore: add talos encrypted secret :lock:"
     git push
     ```
 
@@ -262,7 +262,7 @@ task talos:reset
 ### ⚙️ Updating Talos node configuration
 
 > [!TIP]
-> Ensure you have updated `talconfig.yaml` and any patches with your updated configuration. In some cases you **not only need to apply the configuration but also upgrade talos** to apply new configuration.
+> Ensure you have updated `talos/topf.yaml` and the patch files in `talos/all/` and `talos/control-plane/` with your updated configuration. In some cases you **not only need to apply the configuration but also upgrade talos** to apply new configuration.
 
 ```sh
 # (Re)generate the Talos config
@@ -275,7 +275,7 @@ task talos:apply-node IP=? MODE=?
 ### ⬆️ Updating Talos and Kubernetes versions
 
 > [!TIP]
-> Ensure the `talosVersion` and `kubernetesVersion` in `talenv.yaml` are up-to-date with the version you wish to upgrade to.
+> Ensure the `talosVersion` and `kubernetesVersion` in `talos/topf.yaml` are up-to-date with the version you wish to upgrade to.
 
 ```sh
 # Upgrade node to a newer Talos version
@@ -478,23 +478,16 @@ Initially added installed only the base system without the extensions seen here.
 `talosctl get disks`
 
 ### Create UserVolumes in Talos
-I added `talos/patches/global/machine-volumes.yaml` to patch in the creation of user volumes on the new disks dedicated to longhorn.
-
-Edited `talconfig.yaml` to add
-```
-# Global patches
-patches:
-  - "@./patches/global/machine-volumes.yaml"
-```
+I added `talos/all/05-machine-volumes.yaml` to patch in the creation of user volumes on the new disks dedicated to longhorn. Every file in `talos/all/` is applied to every node, so there is nothing to register in `talos/topf.yaml`.
 
 ### Apply the changes to Talos
 
 ```
 task talos:generate-config
-task talos:apply-node 192.168.25.21
-task talos:apply-node 192.168.25.22
-task talos:apply-node 192.168.25.23
-task talos:apply-node 192.168.25.24
+task talos:apply-node IP=192.168.25.21
+task talos:apply-node IP=192.168.25.22
+task talos:apply-node IP=192.168.25.23
+task talos:apply-node IP=192.168.25.24
 ```
 
 ### Confirm that new user volumes are created

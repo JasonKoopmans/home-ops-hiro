@@ -7,4 +7,4 @@
 ---
 apiVersion: v1alpha1
 kind: FilesystemTrimConfig
-$$patch: delete
+$patch: delete

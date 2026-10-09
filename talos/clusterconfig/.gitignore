@@ -1,10 +1,4 @@
-kubernetes-testhl01.yaml
-kubernetes-testhl02.yaml
-kubernetes-testhl03.yaml
-talosconfig
-kubernetes-testhl04.yaml
-kubernetes-hiro-cmp-01.yaml
-kubernetes-hiro-cmp-02.yaml
-kubernetes-hiro-cmp-03.yaml
-kubernetes-hiro-cmp-04.yaml
-kubernetes-hiro-cmp-05.yaml
+# topf render writes <host>.yaml here, and each file holds the cluster secrets in plaintext.
+# Ignore everything except this file (talhelper used to list its output names).
+*
+!.gitignore
