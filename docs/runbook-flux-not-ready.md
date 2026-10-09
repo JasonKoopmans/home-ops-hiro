@@ -77,7 +77,9 @@ Why Helm gives up early:
 
 - The default `timeout` is 5m.
 - With the default wait strategy, Helm fails the release as soon as a Deployment reaches `progressDeadlineSeconds`
-  (600s), whatever `spec.timeout` says, so a longer `timeout` alone does not help past 10 minutes.
+  (600s), whatever `spec.timeout` says, so a longer `timeout` alone does not help past 10 minutes. Set
+  `waitStrategy: {name: legacy}` beside it (the rule is in `.github/copilot-instructions.md`). The price is no fail-fast: a
+  broken rollout is declared failed only at `timeout`.
 - A single-replica Deployment on a ReadWriteOnce volume with `RollingUpdate` deadlocks when the new pod lands on another
   node (`ContainerCreating` forever). Set `Recreate`; see Storage in `.github/copilot-instructions.md`.
 - A slow image pull on one node. Compare `kubelet_image_pull_duration_seconds` by node.
@@ -90,6 +92,26 @@ Why Helm gives up early:
   ```sh
   kubectl -n <ns> get helmrelease <name> -o jsonpath='{range .status.history[*]}{.version} {.status} {.chartVersion}{"\n"}{end}'
   ```
+
+Read what Helm itself recorded for a failed attempt. Events expire after an hour, but every attempt leaves a release
+secret, and Helm keeps only the last five (`maxHistory`), so look soon:
+
+```sh
+kubectl -n <ns> get secret sh.helm.release.v1.<name>.v<N> -o jsonpath='{.data.release}' | base64 -d | base64 -d | gunzip | jq -r '.info.status + ": " + .info.description'
+```
+
+What the description tells you:
+
+- `failed early due to stalled resources: [Deployment/<ns>/<name> status: 'Failed']`: the default wait failed fast because the
+  Deployment reached `progressDeadlineSeconds` (freecad, 2026-10-03).
+- `timeout waiting for: [Deployment/<ns>/<name> status: 'InProgress']`: the wait ran to `spec.timeout` with the rollout still
+  going.
+- `Upgrade "<name>" failed: context canceled`: a new reconcile or a controller restart cancelled the wait. Not a timeout
+  (tika-ner, 2026-10-03).
+- `Rollback to <N>`: a remediation rollback ran.
+
+A secret's `creationTimestamp` is when that attempt began, so the next revision's minus this one's is how long the attempt
+lasted.
 
 Do not roll back a one-way chart. Longhorn records its own version and refuses to run on an older binary (see
 `.renovaterc.json5`); roll forward, and never revert the version in Git.
