@@ -1,0 +1,16 @@
+# The SANs on the node's own API (machine.certSANs) stay v1alpha1. The
+# Kubernetes API server's SANs are certExtraSANs in control-plane/00-cluster.yaml,
+# and the pod/service CIDRs are the KubeNetworkConfig document (the old
+# cluster.network.* block). 10.42.0.0/16 and 10.43.0.0/16 are not the Talos
+# defaults; the CNI is Cilium (see 10-disabled-defaults.yaml).
+machine:
+  certSANs:
+    - "127.0.0.1"
+    - "192.168.25.20"
+---
+apiVersion: v1alpha1
+kind: KubeNetworkConfig
+podSubnets:
+  - 10.42.0.0/16
+serviceSubnets:
+  - 10.43.0.0/16

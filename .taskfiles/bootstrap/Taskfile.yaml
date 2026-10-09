@@ -3,20 +3,23 @@ version: '3'
 
 tasks:
 
+  # UNTESTED against fresh nodes: this path only runs on nodes in maintenance
+  # mode, and has not been exercised since the move from talhelper to topf. Try
+  # it on a scratch node first. `topf secrets` prints the whole bundle, unredacted,
+  # to stdout, hence the redirect.
   talos:
     desc: Bootstrap the Talos cluster
     dir: '{{.TALOS_DIR}}'
     cmds:
-      - '[ -f talsecret.sops.yaml ] || talhelper gensecret | sops --filename-override talos/talsecret.sops.yaml --encrypt /dev/stdin > talsecret.sops.yaml'
-      - talhelper genconfig
-      - talhelper gencommand apply --extra-flags="--insecure" | bash
-      - until talhelper gencommand bootstrap | bash; do sleep 10; done
-      - until talhelper gencommand kubeconfig --extra-flags="{{.ROOT_DIR}} --force" | bash; do sleep 10; done
+      - '[ -f secrets.sops.yaml ] || topf secrets --confirm=false >/dev/null'
+      - mkdir -p clusterconfig && topf talosconfig > clusterconfig/talosconfig
+      - topf apply --auto-bootstrap --confirm=false
+      - until topf kubeconfig > {{.ROOT_DIR | shellQuote}}/kubeconfig; do sleep 10; done
     preconditions:
-      - test -f {{.ROOT_DIR}}/.sops.yaml
-      - test -f {{.SOPS_AGE_KEY_FILE}}
-      - test -f {{.TALOS_DIR}}/talconfig.yaml
-      - which talhelper talosctl sops
+      - test -f {{.ROOT_DIR | shellQuote}}/.sops.yaml
+      - test -f {{.SOPS_AGE_KEY_FILE | shellQuote}}
+      - test -f {{.TALOS_DIR | shellQuote}}/topf.yaml
+      - which topf talosctl sops
 
   apps:
     desc: Bootstrap apps into the Talos cluster

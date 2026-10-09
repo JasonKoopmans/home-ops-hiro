@@ -3,88 +3,126 @@ version: '3'
 
 tasks:
 
+  # Renders every node's machine config into talos/clusterconfig/ with topf. That
+  # directory is gitignored: the files hold the cluster secrets in plaintext.
   generate-config:
-    desc: Generate Talos configuration
+    desc: Render Talos machine configs with topf
     dir: '{{.TALOS_DIR}}'
-    cmd: talhelper genconfig
+    cmd: topf render --output clusterconfig
     preconditions:
-      - test -f {{.TALOS_DIR}}/talconfig.yaml
-      - test -f {{.ROOT_DIR}}/.sops.yaml
-      - test -f {{.SOPS_AGE_KEY_FILE}}
-      - sh: test -f {{.TALOS_DIR}}/talenv.sops.yaml
+      - test -f {{.TALOS_DIR | shellQuote}}/topf.yaml
+      - test -f {{.ROOT_DIR | shellQuote}}/.sops.yaml
+      - test -f {{.SOPS_AGE_KEY_FILE | shellQuote}}
+      - sh: test -f {{.TALOS_DIR | shellQuote}}/secrets.sops.yaml
         msg: >-
-          talos/talenv.sops.yaml is missing. It must hold etcdSecretboxSecret (the value of
-          secrets.secretboxencryptionsecret in talsecret.sops.yaml), which the
-          etcd-encryption patches in talos/patches/global/ render under the key name key2;
-          create it with `sops talos/talenv.sops.yaml`. Without it the generated config would
-          use a key name the running kube-apiserver cannot decrypt.
-      - which talhelper
+          talos/secrets.sops.yaml is missing. topf would generate a NEW secrets bundle
+          instead of failing, and nothing rendered from it can reach the running cluster.
+          Restore the file from Git.
+      - which topf
+
+  # Renders every node and checks each with `talosctl validate --mode metal`.
+  # There is no CI gate for talos/, so run this after any change to it.
+  validate:
+    desc: Render and validate every node's Talos config
+    cmd: bash {{.SCRIPTS_DIR | shellQuote}}/talos-validate.sh
+    preconditions:
+      - test -f {{.TALOS_DIR | shellQuote}}/topf.yaml
+      - test -f {{.SOPS_AGE_KEY_FILE | shellQuote}}
+      - sh: test -f {{.TALOS_DIR | shellQuote}}/secrets.sops.yaml
+        msg: talos/secrets.sops.yaml is missing; topf would generate a new bundle instead of failing.
+      - which topf talosctl
 
   # An apply restarts the kubelet and the control-plane static pods on the node and
   # moves the VIP if the node holds it. For a changed config try `MODE=try
   # TIMEOUT=5m` first (it reverts by itself after TIMEOUT, default 1m) and confirm
   # kube-apiserver answers /readyz on the node before a real apply. The etcd-key
   # check below is what catches an apiserver that cannot decrypt Secrets; it runs
-  # in every mode.
+  # in every mode. `DRY_RUN=1` shows the diff and changes nothing.
+  #
+  # topf renders; talosctl applies. `topf apply` has no try-mode timeout, which a
+  # slow control plane needs (hiro-cmp-05's apiserver took ~70s to answer).
   apply-node:
     desc: Apply Talos config to a node [IP=required]
     dir: '{{.TALOS_DIR}}'
     cmds:
+      - topf render --nodes-filter '^{{.NODE_HOST}}$' --output clusterconfig
       - '{{.SCRIPTS_DIR | shellQuote}}/talos-check-etcd-encryption.sh {{.IP}} {{.NODE_CONFIG | shellQuote}}'
-      - talhelper gencommand apply --node {{.IP}} --extra-flags '--mode={{.MODE}}{{if .TIMEOUT}} --timeout={{.TIMEOUT}}{{end}}' | bash
+      - talosctl apply-config --nodes {{.IP}} --file {{.NODE_CONFIG | shellQuote}} --mode={{.MODE}}{{if .TIMEOUT}} --timeout={{.TIMEOUT}}{{end}}{{if .DRY_RUN}} --dry-run{{end}}
     vars:
       MODE: '{{.MODE | default "auto"}}'
-      # Absolute path of the generated config for this node. Dynamic variables run from
-      # the Taskfile's directory, not from `dir` above, hence the explicit cd.
-      NODE_CONFIG:
+      # Dynamic variables run from the Taskfile's directory, not from `dir` above,
+      # hence the explicit cd.
+      NODE_HOST:
         sh: |
           cd {{.TALOS_DIR | shellQuote}}
-          host=$(yq '.nodes[] | select(.ipAddress == "{{.IP}}") | .hostname' talconfig.yaml)
-          if [ -z "$host" ]; then echo "no node with ipAddress {{.IP}} in talos/talconfig.yaml" >&2; exit 1; fi
-          echo "$PWD/clusterconfig/$(yq '.clusterName' talconfig.yaml)-$host.yaml"
+          host=$(yq '.nodes[] | select(.ip == "{{.IP}}") | .host' topf.yaml)
+          if [ -z "$host" ]; then echo "no node with ip {{.IP}} in talos/topf.yaml" >&2; exit 1; fi
+          echo "$host"
+      NODE_CONFIG: '{{.TALOS_DIR}}/clusterconfig/{{.NODE_HOST}}.yaml'
     requires:
       vars: [IP]
     preconditions:
+      - test -f {{.TALOS_DIR | shellQuote}}/topf.yaml
+      - test -f {{.SOPS_AGE_KEY_FILE | shellQuote}}
+      - sh: test -f {{.TALOS_DIR | shellQuote}}/secrets.sops.yaml
+        msg: talos/secrets.sops.yaml is missing; topf would generate a new bundle instead of failing.
       - talosctl --nodes {{.IP}} get machineconfig
       - talosctl config info
-      - test -f {{.TALOSCONFIG}}
-      - which talhelper talosctl yq
+      - test -f {{.TALOSCONFIG | shellQuote}}
+      - which topf talosctl yq
 
   # Consider `task alerts:silence` first (repo root Taskfile) so the reboot
   # this triggers doesn't page Telegram via KubeNodeNotReady/Unreachable.
+  # topf compares the node's running version and schematic with talos/topf.yaml
+  # and skips a node that already matches; `DRY_RUN=1` shows what it would do.
   upgrade-node:
     desc: Upgrade Talos on a single node [IP=required]
     dir: '{{.TALOS_DIR}}'
-    cmd: talhelper gencommand upgrade --node {{.IP}} --extra-flags "{{.UPGRADE_FLAGS}}" | bash
+    cmd: topf upgrade --nodes-filter '^{{.NODE_HOST}}$'{{if .DRAIN}} --drain={{.DRAIN}}{{end}}{{if .DRY_RUN}} --dry-run{{end}}
     vars:
-      UPGRADE_FLAGS: '--timeout=10m{{if .DRAIN}} --drain={{.DRAIN}}{{end}}'
+      NODE_HOST:
+        sh: |
+          cd {{.TALOS_DIR | shellQuote}}
+          host=$(yq '.nodes[] | select(.ip == "{{.IP}}") | .host' topf.yaml)
+          if [ -z "$host" ]; then echo "no node with ip {{.IP}} in talos/topf.yaml" >&2; exit 1; fi
+          echo "$host"
     requires:
       vars: [IP]
     preconditions:
+      - test -f {{.TALOS_DIR | shellQuote}}/topf.yaml
+      - test -f {{.SOPS_AGE_KEY_FILE | shellQuote}}
+      - sh: test -f {{.TALOS_DIR | shellQuote}}/secrets.sops.yaml
+        msg: talos/secrets.sops.yaml is missing; topf would generate a new bundle instead of failing.
       - talosctl --nodes {{.IP}} get machineconfig
       - talosctl config info
-      - test -f {{.TALOSCONFIG}}
-      - which kubectl talhelper talosctl yq
+      - test -f {{.TALOSCONFIG | shellQuote}}
+      - which kubectl topf talosctl yq
 
   # Consider `task alerts:silence` first (repo root Taskfile) — a k8s upgrade
   # rolls control-plane components and can trip KubeAPIInstanceUnreachable/
-  # etcd* alerts.
+  # etcd* alerts. This calls `talosctl upgrade-k8s` directly, as topf's own docs
+  # recommend: it checks version skew and component readiness, which applying a
+  # new kubernetesVersion through `topf apply` does not. `DRY_RUN=1` previews.
   upgrade-k8s:
     desc: Upgrade Kubernetes
     dir: '{{.TALOS_DIR}}'
-    cmd: talhelper gencommand upgrade-k8s --extra-flags "--to '{{.KUBERNETES_VERSION}}'" | bash
+    cmd: talosctl upgrade-k8s --nodes {{.CONTROL_PLANE_IP}} --to '{{.KUBERNETES_VERSION}}'{{if .DRY_RUN}} --dry-run{{end}}
     vars:
       KUBERNETES_VERSION:
-        sh: yq '.kubernetesVersion' {{.TALOS_DIR}}/talenv.yaml
+        sh: yq '.kubernetesVersion' {{.TALOS_DIR | shellQuote}}/topf.yaml
+      CONTROL_PLANE_IP:
+        sh: yq '[.nodes[] | select(.role == "control-plane")][0].ip' {{.TALOS_DIR | shellQuote}}/topf.yaml
     preconditions:
       - talosctl config info
-      - test -f {{.TALOSCONFIG}}
-      - which talhelper talosctl yq
+      - test -f {{.TALOSCONFIG | shellQuote}}
+      - which talosctl yq
 
   reset:
     desc: Resets nodes back to maintenance mode
     dir: '{{.TALOS_DIR}}'
     prompt: This will destroy your cluster and reset the nodes back to maintenance mode... continue?
-    cmd: talhelper gencommand reset --extra-flags="--reboot {{- if eq .CLI_FORCE false }} --system-labels-to-wipe STATE --system-labels-to-wipe EPHEMERAL{{ end }} --graceful=false --wait=false" | bash
+    cmd: topf reset{{ if eq .CLI_FORCE false }} --full=false{{ end }} --graceful=false
     preconditions:
-      - which talhelper
+      - test -f {{.TALOS_DIR | shellQuote}}/topf.yaml
+      - test -f {{.SOPS_AGE_KEY_FILE | shellQuote}}
+      - which topf

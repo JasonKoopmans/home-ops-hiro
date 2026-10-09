@@ -1,25 +1,18 @@
+# Talos 1.14 moved the control-plane components out of the v1alpha1 `cluster:`
+# block into their own documents, and refuses a config that sets both
+# (".cluster.apiServer is already set in v1alpha1 config"). Only etcd is still
+# configured in v1alpha1 below.
 cluster:
-  allowSchedulingOnControlPlanes: true
-  coreDNS:
-    disabled: true
   etcd:
     extraArgs:
       listen-metrics-urls: http://0.0.0.0:2381
     advertisedSubnets:
       - 192.168.25.0/24
-# Talos 1.14 moved the control-plane components out of the v1alpha1 `cluster:`
-# block into their own documents, and refuses a config that sets both
-# (".cluster.apiServer is already set in v1alpha1 config"). The blocks below
-# are the same settings this file carried for apiServer, controllerManager,
-# scheduler and proxy before the 1.14 upgrade. allowSchedulingOnControlPlanes,
-# coreDNS and etcd are still v1alpha1: talhelper 3.1.17 does not generate a
-# conflicting document for them, so they keep working unchanged.
 ---
 apiVersion: v1alpha1
 kind: KubeAPIServerConfig
-# talhelper maps talconfig's additionalApiServerCertSans onto the v1alpha1
-# cluster.apiServer.certSANs, which is no longer rendered at the 1.14 contract,
-# so the SANs are stated here. 192.168.25.20 is the control-plane VIP.
+# 192.168.25.20 is the control-plane VIP. topf does not derive these from the
+# endpoint, so they are stated here.
 certExtraSANs:
   - "127.0.0.1"
   - "192.168.25.20"
@@ -44,9 +37,22 @@ kind: KubeProxyConfig
 enabled: false
 ---
 # The cluster has never enforced Pod Security admission (the old
-# `admissionControl: $$patch: delete`); the 1.14 generator emits a PodSecurity
+# `admissionControl: $patch: delete`); the 1.14 generator emits a PodSecurity
 # baseline-enforce document by default, so drop it to keep that behaviour.
 apiVersion: v1alpha1
 kind: KubeAdmissionControlConfig
 name: PodSecurity
-$$patch: delete
+$patch: delete
+---
+# cluster.allowSchedulingOnControlPlanes: true. All five nodes are control
+# plane, so workloads run on them: remove the NoSchedule taint.
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+taints:
+  node-role.kubernetes.io/control-plane:
+    $patch: delete
+---
+# cluster.coreDNS.disabled: true (kubernetes/apps/kube-system/coredns runs it).
+apiVersion: v1alpha1
+kind: KubeCoreDNSConfig
+enabled: false

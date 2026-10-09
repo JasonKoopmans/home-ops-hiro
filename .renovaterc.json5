@@ -137,13 +137,13 @@
       automerge: false,
     },
     {
-      // talos/talenv.yaml is applied by hand: `task talos:upgrade-node` and
+      // talos/topf.yaml is applied by hand: `task talos:upgrade-node` and
       // `task talos:upgrade-k8s` read it. Merging a bump therefore changes nothing
       // in the cluster, it only makes Git claim a version the nodes are not
       // running — and upgrade-k8s will then upgrade to whatever Git says. That
       // already happened. #555 pinned Talos v1.13 with Kubernetes v1.36.3 because
       // that pair is the compatible one; two days later Renovate auto-merged
-      // Kubernetes v1.37.0 (#581), and talenv.yaml came to read v1.13.11 / v1.37.1
+      // Kubernetes v1.37.0 (#581), and talenv.yaml (since replaced by topf.yaml) came to read v1.13.11 / v1.37.1
       // against nodes running v1.13.10 / v1.36.3 (2026-10-04). Upgrade Talos and
       // Kubernetes deliberately, one step at a time, and merge the bump when you
       // are ready to roll it.

@@ -113,11 +113,11 @@ tasks:
 
   validate-talos-config:
     internal: true
-    dir: '{{.TALOS_DIR}}'
-    cmd: talhelper validate talconfig {{.TALOS_DIR}}/talconfig.yaml
+    cmd: bash {{.SCRIPTS_DIR}}/talos-validate.sh
     preconditions:
-      - test -f {{.TALOS_DIR}}/talconfig.yaml
-      - which talhelper
+      - test -f {{.TALOS_DIR}}/topf.yaml
+      - test -f {{.SCRIPTS_DIR}}/talos-validate.sh
+      - which topf talosctl
 
   debug:
     desc: Gather common resources in your cluster

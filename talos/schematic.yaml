@@ -1,0 +1,18 @@
+# Image Factory schematic, declared inline rather than as a hardcoded
+# talosImageURL: topf submits this to the factory and derives the installer
+# URL itself, so the 64-char schematic ID is never hand-copied. (It is a
+# sha256 of the schematic body, so it changes whenever this list does — a
+# typed ID silently drifts, and did: cmp-05 previously carried a 65-char ID
+# the factory 404'd on.)
+#
+# iscsi-tools + util-linux-tools are both Longhorn requirements — the latter
+# provides the `fstrim` binary that Longhorn runs via `nsenter` for
+# filesystem-trim / space reclamation. qemu-guest-agent is the Proxmox guest
+# integration.
+customization:
+  systemExtensions:
+    officialExtensions:
+      - siderolabs/iscsi-tools
+      - siderolabs/nfs-utils
+      - siderolabs/qemu-guest-agent
+      - siderolabs/util-linux-tools

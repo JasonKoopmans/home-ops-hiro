@@ -1,0 +1,15 @@
+# topf renders the full Talos 1.14 default config, and two of its defaults are
+# things this cluster has not chosen. Omitting a document is not enough, the
+# generated one is still there, so each is deleted explicitly.
+---
+# Cilium is the CNI (the old cluster.network.cni.name: none). Left in, this
+# document would deploy Flannel next to it.
+apiVersion: v1alpha1
+kind: KubeFlannelCNIConfig
+$patch: delete
+---
+# Workload isolation (Talos sandboxd) is an opt-in not yet evaluated against
+# Longhorn's nsenter-based trim and engine binaries; tracked in #760.
+apiVersion: v1alpha1
+kind: SecurityProfileConfig
+$patch: delete
