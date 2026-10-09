@@ -26,7 +26,7 @@ This repo started from the [onedr0p/cluster-template](https://github.com/onedr0p
 │   └── flux/            # Flux entry point (cluster/ks.yaml only — see below)
 ├── scripts/             # Helper scripts (healthchecks, kubeconform)
 ├── talos/               # Talos Linux machine config: topf.yaml + patch dirs (all/, control-plane/)
-├── templates/           # makejinja templates (leftover from initial setup)
+├── templates/           # makejinja templates for bootstrap/ and kubernetes/ (leftover from initial setup; renders nothing under talos/)
 ├── .sops.yaml           # SOPS encryption rules
 ├── .renovaterc.json5    # Renovate configuration
 ├── Taskfile.yaml        # Root Taskfile for `task` CLI
@@ -261,7 +261,6 @@ Alert rules live with the Prometheus stack, not with the app they watch: `kubern
 | **Security Scan** | Report-only. Runs KubeLinter (manifest misconfigurations) and Kubescape (NSA framework compliance score) against Helm-rendered manifests, plus gitleaks (accidental plaintext secrets) against the raw repo. On PRs touching `kubernetes/**` and weekly (for score-over-time tracking). Never fails the build — findings post to the run's **step summary**, not a PR comment. |
 | **CRD Upgrade Check** | Report-only. Runs on PRs touching `**/helmrelease-crds.yaml` (the CRD charts that version independently of their operator image). Compares the old and new chart's CRDs for removals, dropped served/storage versions and schema deltas, then dry-runs every rendered CR against a disposable kind cluster running the new CRDs. Posts to the step summary and a PR comment; never fails the build. See `docs/crd-upgrade-check.md`, including the list of things it deliberately does not verify. Local equivalent: `task crd:check`. |
 | **Image Vulnerability Scan** | Report-only. Trivy CVE scan of every container image referenced in the rendered manifests. Weekly + manual dispatch only (not per-PR — image CVEs don't change with unrelated PRs). Results in the step summary. |
-| **e2e** | Template-validation workflow inherited from cluster-template. It is gated to `onedr0p/cluster-template` and **does not run in this repo**. |
 | **Labeler / Label Sync** | PR auto-labeling housekeeping. |
 
 ### What This Means for Agents

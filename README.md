@@ -117,7 +117,7 @@ There are **5 stages** outlined below for completing this project, make sure you
 
 2. Fill out `cluster.yaml` and `nodes.yaml` configuration files using the comments in those file as a guide.
 
-3. Template out the kubernetes and talos configuration files, if any issues come up be sure to read the error and adjust your config files accordingly.
+3. Template out the kubernetes configuration files, if any issues come up be sure to read the error and adjust your config files accordingly.
 
     ```sh
     task configure

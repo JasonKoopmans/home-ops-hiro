@@ -112,14 +112,6 @@ def github_push_token(file_path: str = 'github-push-token.txt') -> str:
         raise RuntimeError(f"Unexpected error while reading {file_path}: {e}")
 
 
-# Return a list of files in the talos patches directory
-def talos_patches(value: str) -> list[str]:
-    path = Path(f'templates/config/talos/patches/{value}')
-    if not path.is_dir():
-        return []
-    return [str(f) for f in sorted(path.glob('*.yaml.j2')) if f.is_file()]
-
-
 class Plugin(makejinja.plugin.Plugin):
     def __init__(self, data: dict[str, Any]):
         self._data = data
@@ -163,6 +155,5 @@ class Plugin(makejinja.plugin.Plugin):
             cloudflare_tunnel_id,
             cloudflare_tunnel_secret,
             github_deploy_key,
-            github_push_token,
-            talos_patches
+            github_push_token
         ]
