@@ -44,6 +44,8 @@ The `cluster-apps` Kustomization also patches defaults onto everything it applie
 
 **Do not repeat blocks that are already provided by these patches** — new `ks.yaml` files don't need a `decryption` section. Only add HelmRelease remediation overrides when you need behavior different from the cluster defaults.
 
+**A HelmRelease `timeout` above 10m needs `waitStrategy: {name: legacy}` beside it.** The default `poller` wait fails the release once a Deployment passes its `progressDeadlineSeconds` (600s, and app-template cannot raise it), whatever `timeout` says, so a longer `timeout` alone is ignored. `legacy` makes `timeout` the only clock. The price is no fail-fast: a broken rollout is declared failed only at `timeout`, and a single-replica `Recreate` app stays down until then. Set it only where a rollout can really run that long (`docs/revisit-register.md` #16 lists the apps).
+
 ### Variable Substitution (important)
 
 Every app's `ks.yaml` includes `postBuild.substituteFrom: cluster-secrets`. That SOPS-encrypted Secret (defined in `kubernetes/components/sops/`, wired into every namespace group via a Kustomize `components:` entry) provides Flux post-build variables — most importantly:
