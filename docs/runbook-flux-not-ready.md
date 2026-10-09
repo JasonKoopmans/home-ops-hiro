@@ -93,8 +93,11 @@ Why Helm gives up early:
   kubectl -n <ns> get helmrelease <name> -o jsonpath='{range .status.history[*]}{.version} {.status} {.chartVersion}{"\n"}{end}'
   ```
 
-Read what Helm itself recorded for a failed attempt. Events expire after an hour, but every attempt leaves a release
-secret, and Helm keeps only the last five (`maxHistory`), so look soon:
+Read what Helm itself recorded for a failed attempt. Events expire after an hour, but an attempt that got as far as
+storing its release leaves a release secret, and Helm keeps only the last five (`maxHistory`), so look soon. Helm stores
+nothing until it has checked the cluster is reachable, rendered the chart, validated the manifests and looked for
+resources that already exist, so a failure at one of those steps leaves no secret; read it from the `Ready` condition's
+message on the HelmRelease instead:
 
 ```sh
 kubectl -n <ns> get secret sh.helm.release.v1.<name>.v<N> -o jsonpath='{.data.release}' | base64 -d | base64 -d | gunzip | jq -r '.info.status + ": " + .info.description'
@@ -110,8 +113,9 @@ What the description tells you:
   (tika-ner, 2026-10-03).
 - `Rollback to <N>`: a remediation rollback ran.
 
-A secret's `creationTimestamp` is when that attempt began, so the next revision's minus this one's is how long the attempt
-lasted.
+A secret's `creationTimestamp` is when that attempt began. The next revision's minus this one's is start-to-start elapsed
+time, so it also counts any controller downtime or retry delay in between: read it as an upper bound on how long the
+attempt ran, not the exact length.
 
 Do not roll back a one-way chart. Longhorn records its own version and refuses to run on an older binary (see
 `.renovaterc.json5`); roll forward, and never revert the version in Git.
