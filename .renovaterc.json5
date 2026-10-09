@@ -159,6 +159,21 @@
       automerge: false,
     },
     {
+      // topf renders the Talos machine config, so its version decides which
+      // Talos contract and defaults get rendered at the next apply. A bump
+      // changes nothing on the nodes by itself, but it can start emitting
+      // defaults this cluster has not chosen: the Flannel document topf
+      // generates by default would have deployed Flannel next to Cilium. Merge
+      // by hand, then run `task talos:validate` and read a `DRY_RUN=1
+      // task talos:apply-node` diff for each node before any apply. The pin is
+      // in .mise.toml as `aqua:postfinance/topf`; Renovate names that tool with
+      // the `aqua:` prefix, so both spellings are listed.
+      description: "Never auto-merge topf — a bump changes which Talos defaults get rendered",
+      matchManagers: ["mise"],
+      matchPackageNames: ["aqua:postfinance/topf", "postfinance/topf"],
+      automerge: false,
+    },
+    {
       // Cilium supports upgrading one minor at a time, and a minor can need
       // manifest changes first (#509 moved the BGP and LB-IPAM CRDs to v2). #530
       // took 1.18 -> 1.19 by hand as phase 2 of #486, and Renovate auto-merged
