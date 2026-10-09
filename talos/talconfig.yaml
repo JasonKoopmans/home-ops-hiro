@@ -165,6 +165,8 @@ nodes:
 # Global patches
 patches:
   - "@./patches/global/filesystem-trim.yaml"
+  - "@./patches/global/etcd-encryption-1-delete.yaml"
+  - "@./patches/global/etcd-encryption-2-key2.yaml"
   - "@./patches/global/machine-files.yaml"
   - "@./patches/global/machine-kubelet.yaml"
   - "@./patches/global/machine-network.yaml"

@@ -11,14 +11,31 @@ tasks:
       - test -f {{.TALOS_DIR}}/talconfig.yaml
       - test -f {{.ROOT_DIR}}/.sops.yaml
       - test -f {{.SOPS_AGE_KEY_FILE}}
+      - sh: test -f {{.TALOS_DIR}}/talenv.sops.yaml
+        msg: >-
+          talos/talenv.sops.yaml is missing. It must hold etcdSecretboxSecret (the value of
+          secrets.secretboxencryptionsecret in talsecret.sops.yaml), which the
+          etcd-encryption patches in talos/patches/global/ render under the key name key2;
+          create it with `sops talos/talenv.sops.yaml`. Without it the generated config would
+          use a key name the running kube-apiserver cannot decrypt.
       - which talhelper
 
+  # An apply restarts the kubelet and the control-plane static pods on the node and
+  # moves the VIP if the node holds it. For a changed config try `MODE=try
+  # TIMEOUT=5m` first (it reverts by itself after TIMEOUT, default 1m) and confirm
+  # kube-apiserver answers /readyz on the node before a real apply. The etcd-key
+  # check below is what catches an apiserver that cannot decrypt Secrets; it runs
+  # in every mode.
   apply-node:
     desc: Apply Talos config to a node [IP=required]
     dir: '{{.TALOS_DIR}}'
-    cmd: talhelper gencommand apply --node {{.IP}} --extra-flags '--mode={{.MODE}}' | bash
+    cmds:
+      - '{{.ROOT_DIR}}/scripts/talos-check-etcd-encryption.sh {{.IP}} {{.NODE_CONFIG}}'
+      - talhelper gencommand apply --node {{.IP}} --extra-flags '--mode={{.MODE}}{{if .TIMEOUT}} --timeout={{.TIMEOUT}}{{end}}' | bash
     vars:
       MODE: '{{.MODE | default "auto"}}'
+      NODE_CONFIG:
+        sh: echo "clusterconfig/$(yq '.clusterName' talconfig.yaml)-$(yq '.nodes[] | select(.ipAddress == "{{.IP}}") | .hostname' talconfig.yaml).yaml"
     requires:
       vars: [IP]
     preconditions:
