@@ -57,7 +57,6 @@ tasks:
       - task: render-configs
       - task: encrypt-secrets
       - task: validate-kubernetes-config
-      - task: validate-talos-config
     preconditions:
       - msg: An existing Age key interferes with the age key in this repository, rename or delete ~/.config/sops/age/keys.txt
         sh: '! test -f ~/.config/sops/age/keys.txt'
@@ -111,14 +110,6 @@ tasks:
       - test -f {{.TEMPLATE_RESOURCES_DIR}}/kubeconform.sh
       - which kubeconform
 
-  validate-talos-config:
-    internal: true
-    cmd: bash {{.SCRIPTS_DIR}}/talos-validate.sh
-    preconditions:
-      - test -f {{.TALOS_DIR}}/topf.yaml
-      - test -f {{.SCRIPTS_DIR}}/talos-validate.sh
-      - which topf talosctl
-
   debug:
     desc: Gather common resources in your cluster
     cmds:
@@ -166,5 +157,4 @@ tasks:
     cmds:
       - rm -rf {{.BOOTSTRAP_DIR}}
       - rm -rf {{.KUBERNETES_DIR}}
-      - rm -rf {{.TALOS_DIR}}
       - rm -rf {{.ROOT_DIR}}/.sops.yaml

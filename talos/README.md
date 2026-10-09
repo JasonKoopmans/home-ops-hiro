@@ -44,5 +44,4 @@ An apply is not a no-op, and the order matters; see the Talos section of
 - **topf renders every Talos default** for the version, including ones this cluster has not chosen. Omitting a
   document does not remove it. See `all/10-disabled-defaults.yaml` and `all/09-filesystem-trim.yaml`.
 - **v1alpha1 versus documents**: Talos 1.14 rejects a setting that exists in both. `task talos:validate` catches it.
-- The files in `templates/config/talos/` are the old talhelper output of the initial cluster template and are not
-  updated for topf.
+- The initial-setup makejinja template no longer renders anything under `talos/`; edit these files directly.
