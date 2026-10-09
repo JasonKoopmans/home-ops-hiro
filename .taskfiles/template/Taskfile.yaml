@@ -157,5 +157,4 @@ tasks:
     cmds:
       - rm -rf {{.BOOTSTRAP_DIR}}
       - rm -rf {{.KUBERNETES_DIR}}
-      - rm -rf {{.TALOS_DIR}}
       - rm -rf {{.ROOT_DIR}}/.sops.yaml

@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Any
 
 import base64
@@ -6,11 +5,6 @@ import ipaddress
 import makejinja
 import re
 import json
-
-
-# Return the filename of a path without the j2 extension
-def basename(value: str) -> str:
-    return Path(value).stem
 
 
 # Return the nth host in a CIDR range
@@ -144,7 +138,6 @@ class Plugin(makejinja.plugin.Plugin):
 
     def filters(self) -> makejinja.plugin.Filters:
         return [
-            basename,
             nthhost
         ]
 
