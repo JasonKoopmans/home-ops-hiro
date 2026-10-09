@@ -16,7 +16,9 @@
       "Bash(gh pr diff:*)",
       "Bash(gh pr checks:*)",
       "Bash(gh pr status:*)",
-      "Bash(gh pr list:*)"
+      "Bash(gh pr list:*)",
+      "mcp__grafana-monitoring__query_prometheus",
+      "Bash(rtk grep *)"
     ]
   },
   "enabledMcpjsonServers": [
