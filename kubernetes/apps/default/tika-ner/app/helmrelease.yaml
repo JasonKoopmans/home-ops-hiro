@@ -6,7 +6,14 @@ metadata:
   name: &app tika-ner
 spec:
   interval: 1h
+  # The init container downloads the NER models and jars on every pod start (525s to Ready
+  # at worst in the 7d to 2026-10-07, so ~1 min under a 10m ceiling).
+  # `legacy` wait makes this timeout the only clock. The default `poller` strategy fails the
+  # release once the Deployment passes its fixed 10m progressDeadlineSeconds (app-template
+  # cannot raise it), so a timeout above 10m never applied. See freecad.
   timeout: 20m
+  waitStrategy:
+    name: legacy
   chartRef:
     kind: OCIRepository
     name: tika-ner

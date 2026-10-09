@@ -15,7 +15,12 @@ spec:
   # back to the last "successful" release even if the pod would have come up seconds later — which is exactly
   # what caused this app to flap back to a broken pre-fix release repeatedly. 15m matches other image-heavy
   # apps in this cluster (hermes-ai-agent, freecad, openreel, obsidian).
+  # `legacy` wait makes that timeout the only clock. The default `poller` strategy fails the
+  # release once the Deployment passes its fixed 10m progressDeadlineSeconds (app-template
+  # cannot raise it), so a timeout above 10m never applied. See freecad.
   timeout: 15m
+  waitStrategy:
+    name: legacy
   values:
     fullnameOverride: *app
     controllers:

@@ -76,7 +76,8 @@ for cmp-05, an LVM-thin pool that was 77% full on 2026-10-04) or the host's disk
 ## What is already in place, and what is not
 
 In place: Renovate `prHourlyLimit: 4`, helm-controller `--concurrent=4`, longer HelmRelease `timeout` plus
-`waitStrategy: legacy` on freecad, changedetection and mcp-kubernetes (revisit-register #16), etcd scraped with an
+`waitStrategy: legacy` on freecad, changedetection and mcp-kubernetes, and `legacy` alone on hermes-ai-agent, openreel,
+obsidian, recording-annotator and tika-ner so their existing timeouts apply (revisit-register #16), etcd scraped with an
 allowlist, `EtcdMetricsMissing` for the scrape going blind.
 
 Not in place, deliberately or for now: a cap on parallel pulls for cmp-05 (kubelet `maxParallelImagePulls`, a Talos change),
