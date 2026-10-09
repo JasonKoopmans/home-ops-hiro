@@ -125,4 +125,8 @@ tasks:
     preconditions:
       - test -f {{.TALOS_DIR | shellQuote}}/topf.yaml
       - test -f {{.SOPS_AGE_KEY_FILE | shellQuote}}
+      # Without the bundle topf generates a new one that cannot authenticate to the
+      # running nodes, and the reset would skip every node after replacing it.
+      - sh: test -f {{.TALOS_DIR | shellQuote}}/secrets.sops.yaml
+        msg: talos/secrets.sops.yaml is missing; topf would generate a new bundle instead of failing.
       - which topf
