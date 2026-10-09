@@ -123,3 +123,17 @@ data:
             icon: longhorn
             href: https://longhorn.${SECRET_DOMAIN}
             description: Distributed Block Storage
+    - Tools:
+        # Static entry, not route discovery: Gotenberg deliberately has no
+        # HTTPRoute (see docs/gotenberg-egress-policy.md), so there is nothing for
+        # the gethomepage.dev annotations to attach to. No href (there is no UI to
+        # open) and no siteMonitor either: its NetworkPolicy admits only the n8n
+        # pod, so a probe from Homepage would be dropped and the tile would show
+        # permanently "down". namespace+app instead makes Homepage read pod
+        # status/CPU/memory from the Kubernetes API, which needs no network path
+        # to Gotenberg at all.
+        - Gotenberg:
+            icon: mdi-file-pdf-box
+            description: Office to PDF conversion (in-cluster API, no UI)
+            namespace: default
+            app: gotenberg
