@@ -54,7 +54,9 @@
 #   LONGHORN_NAMESPACE  Namespace holding longhorn.io CRs (auto-detected; default storage).
 set -euo pipefail
 
-GROUPS=""
+# Not GROUPS: that is a bash builtin (the caller's gid list), assignments to it are
+# silently discarded, and it expands to e.g. "0" -- so no volume ever matched.
+RJ_GROUPS=""
 VOLUMES=""
 ALL_VOLUMES=0
 CONCURRENCY=2
@@ -76,14 +78,14 @@ while [ $# -gt 0 ]; do
     *) die "unknown argument: $key" ;;
   esac
   case "$key" in
-    --group)       GROUPS="$GROUPS $val" ;;
+    --group)       RJ_GROUPS="$RJ_GROUPS $val" ;;
     --volume)      VOLUMES="$VOLUMES $val" ;;
     --concurrency) CONCURRENCY="$val" ;;
     --timeout)     TIMEOUT="$val" ;;
   esac
 done
 
-[ -n "$GROUPS" ] || [ -n "$VOLUMES" ] || [ "$ALL_VOLUMES" -eq 1 ] || GROUPS="default"
+[ -n "$RJ_GROUPS" ] || [ -n "$VOLUMES" ] || [ "$ALL_VOLUMES" -eq 1 ] || RJ_GROUPS="default"
 
 command -v kubectl >/dev/null 2>&1 || die "kubectl not found"
 
@@ -105,7 +107,7 @@ resolve_targets() {
     kubectl -n "$LH_NS" get volumes.longhorn.io -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
     return
   fi
-  for g in $GROUPS; do
+  for g in $RJ_GROUPS; do
     kubectl -n "$LH_NS" get volumes.longhorn.io \
       -l "recurring-job-group.longhorn.io/${g}=enabled" \
       -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
@@ -116,14 +118,14 @@ resolve_targets() {
 }
 
 TARGETS="$(resolve_targets | sort -u)"
-[ -n "$TARGETS" ] || die "no volumes matched (groups:${GROUPS:- none}, volumes:${VOLUMES:- none}, all-volumes: $ALL_VOLUMES)"
+[ -n "$TARGETS" ] || die "no volumes matched (groups:${RJ_GROUPS:- none}, volumes:${VOLUMES:- none}, all-volumes: $ALL_VOLUMES)"
 TOTAL="$(printf '%s\n' "$TARGETS" | grep -c .)"
 
 log "Longhorn namespace : $LH_NS"
 if [ "$ALL_VOLUMES" -eq 1 ]; then
   log "Target             : ALL volumes (ignoring backup policy)"
 else
-  log "Groups             : ${GROUPS:-<none>}"
+  log "Groups             : ${RJ_GROUPS:-<none>}"
   [ -n "$VOLUMES" ] && log "Extra volumes      : $VOLUMES"
 fi
 log "Concurrency        : $CONCURRENCY"
