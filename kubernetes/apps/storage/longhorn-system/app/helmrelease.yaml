@@ -53,6 +53,28 @@ spec:
       updateStrategy:
         rollingUpdate:
           maxUnavailable: 1
+    longhornGlobalManager:
+      # New in chart 1.13: a stateless Deployment (one active leader, the rest warm
+      # standbys). The chart ships `resources: ~`, so unbounded by default.
+      # UNMEASURED — an informed guess, no data exists yet. Memory scales with the
+      # cluster's Pod count (cluster-wide informer cache). The 25m CPU request is
+      # deliberately small: CPU is the scarce resource here and standbys idle.
+      # Revisit after ~14d: size the limit at ~2x
+      # max_over_time(container_memory_working_set_bytes{pod=~"longhorn-global-manager.*"}[14d])
+      # and cut the request to the measured CPU.
+      resources:
+        requests:
+          cpu: 25m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
+      # Keeps a drain from evicting two replicas at once (soft anti-affinity can
+      # co-locate them). A node drain waits only for the replacement to become
+      # Ready elsewhere, seconds, unlike instance-manager pods, whose drain blocks
+      # until their volumes detach.
+      podDisruptionBudget:
+        enabled: true
+        maxUnavailable: 1
     persistence:
       defaultDataLocality: best-effort
     defaultSettings:
