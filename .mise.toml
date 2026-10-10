@@ -37,5 +37,5 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 "aqua:aquasecurity/trivy" = "0.75.0"
 "aqua:open-policy-agent/conftest" = "0.71.1"
 "npm:@anthropic-ai/claude-code" = "2.1.296"
-node = "26.10.0"
+node = "26.11.1"
 "aqua:aws/aws-cli" = { version = "2.37.12", symlink_bins = "true" }
