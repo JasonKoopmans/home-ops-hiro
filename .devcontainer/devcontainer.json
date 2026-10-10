@@ -53,6 +53,7 @@
 	"remoteEnv": {
 		"GITHUB_TOKEN": "${localEnv:GITHUB_TOKEN}",
 		"MCP_GRAFANA_LIFEOS_TOKEN": "${localEnv:MCP_GRAFANA_LIFEOS_TOKEN}",
-		"MCP_PROXMOX_TOKEN": "${localEnv:MCP_PROXMOX_TOKEN}"
+		"MCP_PROXMOX_TOKEN": "${localEnv:MCP_PROXMOX_TOKEN}",
+		"MCP_N8N_TOKEN": "${localEnv:MCP_N8N_TOKEN}"
 	}
 }
