@@ -52,7 +52,7 @@ spec:
           browser:
             image:
               repository: docker.io/library/caddy
-              tag: 2.11.6-alpine
+              tag: 2.11.7-alpine
 
             securityContext:
               allowPrivilegeEscalation: false
