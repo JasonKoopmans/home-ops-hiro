@@ -186,7 +186,7 @@ interactively, a hang anywhere non-interactive. Adding a server to `.mcp.json`
 therefore means adding its name there too; that second step is deliberate, so a
 new endpoint is an explicit decision rather than an inherited one.
 
-**Two entries need auth-ladder step 2: `grafana-lifeos` and `proxmox`.**
+**Three entries need auth-ladder step 2: `grafana-lifeos`, `n8n` and `proxmox`.**
 Claude Code expands `${VAR}` in `.mcp.json` string values (including
 `headers`) from the process environment at session start — the file commits
 the *reference*, never the token. Export the real values before launching
@@ -195,19 +195,27 @@ the *reference*, never the token. Export the real values before launching
 ```sh
 export MCP_GRAFANA_LIFEOS_TOKEN="<MCP_GRAFANA_SERVER_TOKEN from
   kubernetes/apps/mcp/mcp-grafana-lifeos/app/secret-auth-token.sops.yaml>"
+export MCP_N8N_TOKEN="<AUTH_TOKEN from
+  kubernetes/apps/mcp/mcp-n8n/app/secret.sops.yaml>"
 export MCP_PROXMOX_TOKEN="<MCP_API_KEY from
   kubernetes/apps/mcp/mcp-proxmox/app/secret.sops.yaml>"
 ```
 
 Claude Code does not read repo `.env` files for this — it has to be a real
 exported variable in the shell that starts `claude`. `.devcontainer/devcontainer.json`
-forwards both through `remoteEnv`, so a devcontainer inherits whatever the host
+forwards all three through `remoteEnv`, so a devcontainer inherits whatever the host
 shell exported and nothing more.
 
 An unset variable does not fail loudly: the header is sent with the literal
 text unexpanded and the server answers `401`, which reads like a bad token
 rather than a missing export. Check with `echo ${MCP_PROXMOX_TOKEN:-UNSET}`
 before debugging anything else.
+
+**`n8n` is deliberately left out of `enabledMcpjsonServers`.** Its workflows
+exist only on the n8n PVC with no copy in Git, so an unwanted edit has no
+`git revert`. Without the pre-approval, Claude Code prompts the first time a
+session connects to it — approve it there if you want it, rather than adding
+it to the checked-in list.
 
 **`proxmox` is pre-approved in `enabledMcpjsonServers`, which deserves a
 sentence of its own.** That setting approves *connecting* to the server, not
