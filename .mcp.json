@@ -8,6 +8,10 @@
       "type": "sse",
       "url": "https://mcp-postgres.koopmans.co/sse"
     },
+    "prometheus": {
+      "type": "http",
+      "url": "https://mcp-prometheus.koopmans.co/mcp"
+    },
     "grafana-monitoring": {
       "type": "http",
       "url": "https://mcp-grafana-monitoring.koopmans.co/mcp"
@@ -17,6 +21,13 @@
       "url": "https://mcp-grafana-lifeos.koopmans.co/mcp",
       "headers": {
         "Authorization": "Bearer ${MCP_GRAFANA_LIFEOS_TOKEN}"
+      }
+    },
+    "n8n": {
+      "type": "http",
+      "url": "https://mcp-n8n.koopmans.co/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_N8N_TOKEN}"
       }
     },
     "playwright": {
