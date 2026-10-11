@@ -22,6 +22,7 @@
     ]
   },
   "enabledMcpjsonServers": [
-    "postgres"
+    "postgres",
+    "obsidian"
   ]
 }
