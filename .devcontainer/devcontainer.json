@@ -14,7 +14,8 @@
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// groff-base: `aws help` renders man pages and errors with "Could not find executable named groff or mandoc" without it.
-	"postCreateCommand": "apt-get update && apt-get install -y --no-install-recommends groff-base && rm -rf /var/lib/apt/lists/* && mise trust && mise install",
+	// libatomic1: node's linux-arm64 builds link libatomic.so.1, which the slim debian image lacks; without it `mise install` fails node (exit 127) and skips npm: tools.
+	"postCreateCommand": "apt-get update && apt-get install -y --no-install-recommends groff-base libatomic1 && rm -rf /var/lib/apt/lists/* && mise trust && mise install",
 
 	// Extensions VS Code installs into the container automatically on create/rebuild.
 	// Keep in step with .vscode/extensions.json (recommendations only prompt, they don't install).
@@ -42,12 +43,16 @@
 	"mounts": [
 		"source=aws-cli-config,target=/root/.aws,type=volume",
 		// Survives rebuilds, so extensions installed by hand aren't lost either.
-		"source=vscode-server-extensions,target=/root/.vscode-server/extensions,type=volume"
+		"source=vscode-server-extensions,target=/root/.vscode-server/extensions,type=volume",
+		// Claude Code sessions, memory, login and plugins; they live in the container filesystem and are lost on every rebuild otherwise.
+		"source=claude-config,target=/root/.claude,type=volume"
 	],
 
 	"containerEnv": {
 		// The image has no `less`; the default aws pager fails with "Unable to redirect output to pager".
-		"AWS_PAGER": ""
+		"AWS_PAGER": "",
+		// Moves ~/.claude.json (settings, folder trust) into the claude-config volume; by default it sits outside it and is lost on rebuild.
+		"CLAUDE_CONFIG_DIR": "/root/.claude"
 	},
 
 	"remoteEnv": {
