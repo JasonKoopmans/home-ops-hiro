@@ -10,12 +10,67 @@ spec:
   interval: 1h
   values:
     fullnameOverride: k8s-gateway
+    # Transitional (#806): this file carries the 3.x keys and the 4.x keys at
+    # once. Each chart ignores the other's keys, so the release renders the
+    # same live config whichever chart helm-controller has when the values
+    # change. Drop the 3.x block (and set resources.limits.cpu: null) in a
+    # follow-up once 4.x is Ready. Do not add cpu: null before then: 3.7.2
+    # renders it as a 0 CPU limit, which the API rejects.
+    # --- chart 3.x keys ---
     domain: "${SECRET_DOMAIN}"
     ttl: 1
+    watchedResources: ["HTTPRoute", "Service"]
     service:
       type: LoadBalancer
       port: 53
       annotations:
         lbipam.cilium.io/ips: "#{ cluster_dns_gateway_addr }#"
       externalTrafficPolicy: Cluster
-    watchedResources: ["HTTPRoute", "Service"]
+    # --- chart 4.x keys ---
+    serviceType: LoadBalancer
+    # Surge, never drop: one replica, and this is the LAN's resolver for
+    # every internal hostname. Chart default is maxUnavailable: 1.
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+    # 4.x drops the chart's runAsUser and the image has no USER, so it would
+    # run as root. Stay uid 1000 on :1053, as 3.x did.
+    securityContext:
+      runAsUser: 1000
+    # Measured 14d peak: 33Mi working set, ~2m CPU (2026-10-17).
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+    readinessProbe:
+      initialDelaySeconds: 10
+      failureThreshold: 5
+    servers:
+      - zones:
+          - zone: .
+        port: 1053
+        servicePort: 53
+        plugins:
+          # The chart derives RBAC from the "resources" line below; a typo
+          # there drops the permission without any error.
+          - name: k8s_gateway
+            parameters: "${SECRET_DOMAIN}"
+            configBlock: |-
+              apex k8s-gateway.network
+              ttl 1
+              resources HTTPRoute Service
+          - name: log
+          - name: errors
+          - name: health
+            configBlock: |-
+              lameduck 5s
+          - name: ready
+          - name: prometheus
+            parameters: 0.0.0.0:9153
+          - name: forward
+            parameters: . /etc/resolv.conf
+          - name: loop
+          - name: reload
+          - name: loadbalance

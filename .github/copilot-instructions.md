@@ -136,7 +136,7 @@ Do **not** add `metadata.namespace`, `commonMetadata`, `retryInterval`, `timeout
 - There are two gateways (both in the `network` namespace):
   - `envoy-external` — for services accessible from the public internet via Cloudflare Tunnel
   - `envoy-internal` — for services accessible only on the private home network
-- **Cloudflared** handles secure tunneling for public-facing services; **external-dns** manages Cloudflare DNS records; **k8s_gateway** provides split-horizon DNS internally.
+- **Cloudflared** handles secure tunneling for public-facing services; **external-dns** manages Cloudflare DNS records; **k8s_gateway** provides split-horizon DNS internally. k8s_gateway's upstream moved to Codeberg (charts and images on `codeberg.org`, ghcr frozen) and its 4.x chart renders old values without error while serving the wrong zone: read `docs/k8s-gateway.md` before touching it.
 
 **Two ways to expose a service — pick by chart type:**
 
