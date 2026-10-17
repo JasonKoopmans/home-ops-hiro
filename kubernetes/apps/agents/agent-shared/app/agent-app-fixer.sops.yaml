@@ -1,12 +1,25 @@
-# GitHub App for the agent-pipeline `fixer` role (shared by every repo it works on).
-# Owner: run agent-pipeline's scripts/provision_apps.py with
-#   --out kubernetes/apps/agents/agent-shared/app
-# It replaces this placeholder with the App id and private key, encrypted with sops.
-# Mounted only into the prepare and publish containers of fixer pods.
+# GitHub App for the agent-pipeline `fixer` role: https://github.com/apps/jk-agent-fixer
+# Created by scripts/provision_apps.py. Mounted only into the prepare and publish containers.
 apiVersion: v1
 kind: Secret
 metadata:
   name: agent-app-fixer
 stringData:
-  app-id: ENC[AES256_GCM,data:PLACEHOLDER_FILL_AND_ENCRYPT,type:str]
-  private-key: ENC[AES256_GCM,data:PLACEHOLDER_FILL_AND_ENCRYPT,type:str]
+  app-id: ENC[AES256_GCM,data:aWXbHDPAng==,iv:Ew5bm1CY4Kn83FDr+bNbExylWv2/+3WQz8WtS7LebHQ=,tag:3e/CNIwI2scYCXF92xHtCA==,type:str]
+  private-key: ENC[AES256_GCM,data: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,iv:q0YCCtPwLxvVUdQzcUb25S/6LQHSFfvdRqXj1WdMBvQ=,tag:xdBOJOvOXvoDV4z7e7BGmw==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB6SjVudHJEcXBzbkJlb05u
+        NkJ3amo4VXlPdnVnVStuMVRrdlk1cEtXb1dVCnIyQVJTa20xdW5JeDBpMTBMTkJN
+        eDBScnJEQnZXdzU4aHlMR0FFb0dRcTAKLS0tIDBTR0VHaitQTEpmWUN3Y2ZqN2dR
+        YUhJaEFrbFByWUtXK1ZqZGZjbTFSR0UKRfB1iHkC+AqMUEotusZ3RINgHV+uEOWh
+        uHJ4/SP5mpuXTH9vOdHIlYvVYrSjscTliEX9d7BbPERaRUVguF1Ujw==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1gekuxnpd95l5j8gsvmpsn2mewnevd0c5y5v66p4trzcqhmpn0svqkmnyy7
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-10-17T20:45:25Z"
+  mac: ENC[AES256_GCM,data:nhPXe3hDJUIM7SQQnz9oMdJiQhkrvpwVhqQlcEmH7aLGJ2j+xkg7fAHNuaycKBY5wlOb5UPbADIRzdLtjYQoW5/g5rO0+P6P51d1zyPzAiVNBeb6RoU2WNITCNnol0mdG7B0cWlCs06TbnZAPZKl4D8nD18TZArbD5LSJGdz+48=,iv:VqkusDgqqGTRUV8wuDKk7ygzsRg7G7BoAN6x/jBooF8=,tag:gI1aWdzijTDV+hgynxpP0w==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.2

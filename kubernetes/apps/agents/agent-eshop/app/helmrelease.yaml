@@ -38,15 +38,14 @@ spec:
         - ["dotnet", "test", "tests/IntegrationTests/IntegrationTests.csproj"]
         - ["dotnet", "test", "tests/FunctionalTests/FunctionalTests.csproj"]
         - ["dotnet", "test", "tests/PublicApiIntegrationTests/PublicApiIntegrationTests.csproj"]
-    # One GitHub App per role (agent-shared holds the keys). Slugs assume the
-    # provisioning prefix `jk-agent`; set appUserId from the script's output so
-    # commits link to the bot's avatar. Resources are informed guesses (no data
-    # yet); revisit after Phase 1 with 14d peaks.
+    # One GitHub App per role (agent-shared holds the keys). appUserId is the
+    # App's bot account id, so commits link to its avatar. Resources are informed
+    # guesses (no data yet); revisit after Phase 1 with 14d peaks.
     roles:
-      planner: {enabled: true, appSlug: jk-agent-planner, appSecret: agent-app-planner}
-      implementer: {enabled: true, appSlug: jk-agent-implementer, appSecret: agent-app-implementer}
-      fixer: {enabled: true, appSlug: jk-agent-fixer, appSecret: agent-app-fixer}
-      review-quality: {enabled: true, appSlug: jk-agent-review-quality, appSecret: agent-app-review-quality}
+      planner: {enabled: true, appSlug: jk-agent-planner, appUserId: 344100795, appSecret: agent-app-planner}
+      implementer: {enabled: true, appSlug: jk-agent-implementer, appUserId: 344100808, appSecret: agent-app-implementer}
+      fixer: {enabled: true, appSlug: jk-agent-fixer, appUserId: 344100823, appSecret: agent-app-fixer}
+      review-quality: {enabled: true, appSlug: jk-agent-review-quality, appUserId: 344100830, appSecret: agent-app-review-quality}
       review-security: {enabled: false}
       review-e2e: {enabled: false}
       merger: {enabled: false}
