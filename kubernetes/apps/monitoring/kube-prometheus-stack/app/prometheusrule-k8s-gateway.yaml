@@ -1,0 +1,50 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/monitoring.coreos.com/prometheusrule_v1.json
+# k8s-gateway is the LAN's resolver for every internal hostname
+# (192.168.25.100). See docs/k8s-gateway.md.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: k8s-gateway-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: k8s-gateway.rules
+      rules:
+        - alert: K8sGatewayDown
+          expr: max(kube_deployment_status_replicas_available{namespace="network",deployment="k8s-gateway"}) < 1
+          for: 2m
+          labels:
+            severity: critical
+            namespace: network
+            name: k8s-gateway
+          annotations:
+            summary: k8s-gateway has no available pods
+            description: Internal DNS for every internal hostname at 192.168.25.100 is down. Check `kubectl -n network get pods -l app.kubernetes.io/name=k8s-gateway`.
+
+        - alert: K8sGatewayDegraded
+          expr: max(kube_deployment_status_replicas_available{namespace="network",deployment="k8s-gateway"}) < 2
+          for: 15m
+          labels:
+            severity: warning
+            namespace: network
+            name: k8s-gateway
+          annotations:
+            summary: k8s-gateway is running on {{ $$value }} of 2 replicas
+            description: Internal DNS has no redundancy; one more node loss is an outage. The anti-affinity needs a free node per replica.
+
+        # A vanished scrape makes every coredns_* series empty, which looks
+        # healthy. kube_deployment_* comes from kube-state-metrics, not this
+        # scrape, so K8sGatewayDown still works without it.
+        - alert: K8sGatewayMetricsMissing
+          expr: absent(up{namespace="network",job="k8s-gateway-metrics"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+            namespace: network
+            name: k8s-gateway
+          annotations:
+            summary: No k8s-gateway CoreDNS metrics scraped for 15m
+            description: The ServiceMonitor k8s-gateway in network has no up target. Check the k8s-gateway-metrics Service and the Prometheus targets page.

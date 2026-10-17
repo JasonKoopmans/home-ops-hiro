@@ -196,21 +196,6 @@
       automerge: false,
     },
     {
-      // Chart 4.0.0 rewrites the values schema (#806). The old values would
-      // likely still render against it without an error, so a tag-only PR can
-      // pass Flux Local and then silently drop the apex domain, TTL and watched
-      // resources of the cluster's internal DNS resolver. Majors were already
-      // never auto-merged; this keeps the PR from existing, merge button and
-      // all, until the values migration is ready. Tick its box on the
-      // Dependency Dashboard (#1), then push the values commit onto the PR's
-      // branch before merging. Remove this rule once #806 lands.
-      description: "Hold k8s-gateway major updates for approval — the values schema changes with them",
-      matchDatasources: ["docker"],
-      matchPackageNames: ["ghcr.io/k8s-gateway/charts/k8s-gateway"],
-      matchUpdateTypes: ["major"],
-      dependencyDashboardApproval: true,
-    },
-    {
       matchUpdateTypes: ["digest"],
       semanticCommitType: "chore",
       commitMessageExtra: "( {{currentDigestShort}} ➔ {{newDigestShort}} )",

@@ -1,0 +1,14 @@
+---
+# Plain (non-secret) cluster values for Flux post-build substitution, beside
+# cluster-secrets. An app reads them only if its ks.yaml lists cluster-settings
+# under postBuild.substituteFrom; an unknown ${VAR} renders as an empty string
+# without error.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-settings
+data:
+  # Cilium LB IPAM addresses (L2-announced on the LAN).
+  K8S_GATEWAY_ADDR: "192.168.25.100"
+  ENVOY_INTERNAL_ADDR: "192.168.25.101"
+  ENVOY_EXTERNAL_ADDR: "192.168.25.102"

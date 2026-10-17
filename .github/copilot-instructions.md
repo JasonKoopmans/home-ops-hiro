@@ -53,6 +53,8 @@ Every app's `ks.yaml` includes `postBuild.substituteFrom: cluster-secrets`. That
 - `${SECRET_DOMAIN}` — the cluster's public domain. **Always use this in hostnames** (`app.${SECRET_DOMAIN}`), never a literal domain.
 - `${TIMEZONE}` — the cluster timezone.
 
+Non-secret shared values (the Cilium LB IPs of k8s-gateway and the two envoy Gateways) live in the plain ConfigMap `cluster-settings` in the same component (`kubernetes/components/sops/cluster-settings.yaml`). An app reads them only if its `ks.yaml` adds a second `substituteFrom` entry, `{name: cluster-settings, kind: ConfigMap}`; without it, `${ENVOY_INTERNAL_ADDR}` renders as an empty string with no error. Change an address there, never in a manifest.
+
 Beware: any `${VAR}` string in a manifest reconciled by these Kustomizations will be substituted (or emptied). Escape literal `$` as `$$` if needed.
 
 ### The Standard App Deployment Pattern
@@ -136,7 +138,7 @@ Do **not** add `metadata.namespace`, `commonMetadata`, `retryInterval`, `timeout
 - There are two gateways (both in the `network` namespace):
   - `envoy-external` — for services accessible from the public internet via Cloudflare Tunnel
   - `envoy-internal` — for services accessible only on the private home network
-- **Cloudflared** handles secure tunneling for public-facing services; **external-dns** manages Cloudflare DNS records; **k8s_gateway** provides split-horizon DNS internally.
+- **Cloudflared** handles secure tunneling for public-facing services; **external-dns** manages Cloudflare DNS records; **k8s_gateway** provides split-horizon DNS internally. k8s_gateway's upstream moved to Codeberg (charts and images on `codeberg.org`, ghcr frozen) and its 4.x chart renders old values without error while serving the wrong zone: read `docs/k8s-gateway.md` before touching it.
 
 **Two ways to expose a service — pick by chart type:**
 
@@ -385,6 +387,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 - Commit messages follow **conventional commits** (`feat(app): …`, `fix(scope): …`) — Renovate uses `:semanticCommits`, and humans/agents should match.
 - **Do not remove Renovate annotations or change the version pinning strategy** without explicit approval.
 - **Some updates are never auto-merged** — `automerge: false` rules in `.renovaterc.json5`, each with a comment saying why: Longhorn and LifeOS (one-way), the Flux Operator group (restarts the controllers), Talos and Kubernetes versions in `talos/topf.yaml` (applied by hand, so a merged bump only makes Git claim a version the nodes are not running), the topf version in `.mise.toml` (it decides which Talos defaults get rendered at the next apply), and Cilium minor/major. Merge those by hand when you are ready to roll them. A new dependency of that kind needs its own rule.
+- **A chart pinned in two places gets two PRs.** `kube-prometheus-stack`, `external-dns` and `envoy-gateway` are also pinned in `bootstrap/helmfile.d/00-crds.yaml` (and its `.j2` template), so a release produces one PR for that helmfile and one for the HelmRelease with the same version in the title (#799 and #800 were 91.9.0 ➔ 92.10.1). The helmfile is "extract CRDs, never apply" and lives outside `kubernetes/`, so its PR changes nothing in the cluster and Flux Local skips the test and diff. Review and merge the HelmRelease PR first, watch it land, then merge the bootstrap one so the two pins stay equal. A merge reaches the cluster within a minute or two; there is no need to run `flux reconcile`.
 
 ---
 
