@@ -1,0 +1,12 @@
+# GitHub App for the agent-pipeline `planner` role (shared by every repo it works on).
+# Owner: run agent-pipeline's scripts/provision_apps.py with
+#   --out kubernetes/apps/agents/agent-shared/app
+# It replaces this placeholder with the App id and private key, encrypted with sops.
+# Mounted only into the prepare and publish containers of planner pods.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-app-planner
+stringData:
+  app-id: ENC[AES256_GCM,data:PLACEHOLDER_FILL_AND_ENCRYPT,type:str]
+  private-key: ENC[AES256_GCM,data:PLACEHOLDER_FILL_AND_ENCRYPT,type:str]
