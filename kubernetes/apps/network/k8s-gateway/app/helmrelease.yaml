@@ -13,7 +13,7 @@ spec:
     serviceType: LoadBalancer
     service:
       annotations:
-        lbipam.cilium.io/ips: "192.168.25.100"
+        lbipam.cilium.io/ips: "${K8S_GATEWAY_ADDR}"
       externalTrafficPolicy: Cluster
     # Two replicas on different nodes: this is the LAN's resolver for every
     # internal hostname, so a node loss must not be a DNS outage.

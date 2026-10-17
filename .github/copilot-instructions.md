@@ -53,6 +53,8 @@ Every app's `ks.yaml` includes `postBuild.substituteFrom: cluster-secrets`. That
 - `${SECRET_DOMAIN}` — the cluster's public domain. **Always use this in hostnames** (`app.${SECRET_DOMAIN}`), never a literal domain.
 - `${TIMEZONE}` — the cluster timezone.
 
+Non-secret shared values (the Cilium LB IPs of k8s-gateway and the two envoy Gateways) live in the plain ConfigMap `cluster-settings` in the same component (`kubernetes/components/sops/cluster-settings.yaml`). An app reads them only if its `ks.yaml` adds a second `substituteFrom` entry, `{name: cluster-settings, kind: ConfigMap}`; without it, `${ENVOY_INTERNAL_ADDR}` renders as an empty string with no error. Change an address there, never in a manifest.
+
 Beware: any `${VAR}` string in a manifest reconciled by these Kustomizations will be substituted (or emptied). Escape literal `$` as `$$` if needed.
 
 ### The Standard App Deployment Pattern
