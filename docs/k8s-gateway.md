@@ -30,10 +30,24 @@ Checked 2026-10-17 (#806):
 - The zone is the `k8s_gateway` plugin's `parameters` (the cluster domain).
   `apex` is `k8s-gateway.network`, the Service name; it is *not* the domain.
 - RBAC is derived from the `resources` line in the plugin's `configBlock`.
-- Chart defaults to watch for: `maxUnavailable: 1` (a gap with one replica),
-  no `runAsUser` (root), a 100m CPU limit, `cache 30`, TCP on 53. The
-  HelmRelease overrides the first two and keeps the 3.x behaviour (uid 1000 on
-  :1053, Service 53/UDP to 1053).
+- Chart defaults to watch for: `maxUnavailable: 1`, no `runAsUser` (root), a
+  100m CPU limit, `cache 30`, TCP on 53. The HelmRelease overrides the first
+  three and keeps the 3.x behaviour (uid 1000 on :1053, Service 53/UDP to 1053).
+- The chart copies `service.annotations` onto the metrics Service too, so the
+  ClusterIP `k8s-gateway-metrics` carries the `lbipam.cilium.io/ips`
+  annotation. Cilium ignores it on a non-LoadBalancer Service.
+
+## Availability and alerts
+
+- Two replicas, required anti-affinity on `kubernetes.io/hostname`, PDB
+  `maxUnavailable: 1`, rollout surges one pod (`maxUnavailable: 0`). With five
+  nodes there is always room for the surge pod; if fewer than three nodes are
+  schedulable a rollout waits.
+- CoreDNS metrics are scraped by the chart's ServiceMonitor (job
+  `k8s-gateway-metrics`, port 9153).
+- `prometheusrule-k8s-gateway.yaml`: `K8sGatewayDown` (critical, no available
+  pod for 2m), `K8sGatewayDegraded` (warning, under 2 for 15m),
+  `K8sGatewayMetricsMissing` (warning, no up target for 15m).
 
 ## Verify after any change
 
@@ -46,6 +60,9 @@ dig +short @192.168.25.100 echo.<domain>        # an envoy gateway IP
 
 ## Known gaps (open)
 
-- Single replica: a node loss is an internal-DNS outage until it reschedules.
-- Nothing monitors DNS correctness. Generic workload alerts catch a missing
-  pod, not one that answers wrong. CoreDNS metrics are not scraped.
+- Nothing checks DNS correctness. The alerts catch a missing pod or scrape,
+  not a pod that answers the wrong zone (the 4.x failure above). CoreDNS
+  metrics cannot tell: `coredns_dns_responses_total` attributes every answer
+  to the `errors` plugin, first in the chain, so gateway answers and forwarded
+  ones look alike. Closing this needs a blackbox exporter (none is deployed)
+  probing `dig @192.168.25.100` for a known HTTPRoute host.
