@@ -38,6 +38,6 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 "aqua:open-policy-agent/conftest" = "0.71.1"
 # allow_builds: mise skips npm lifecycle scripts by default, and claude-code's postinstall is what
 # swaps the native binary in over its bin/claude.exe stub ("claude native binary not installed").
-"npm:@anthropic-ai/claude-code" = { version = "2.1.296", allow_builds = ["@anthropic-ai/claude-code"] }
+"npm:@anthropic-ai/claude-code" = { version = "2.1.302", allow_builds = ["@anthropic-ai/claude-code"] }
 node = "26.11.1"
 "aqua:aws/aws-cli" = { version = "2.37.12", symlink_bins = "true" }
