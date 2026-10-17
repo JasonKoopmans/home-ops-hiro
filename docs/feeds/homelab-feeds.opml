@@ -14,7 +14,7 @@
       <outline type="rss" text="Longhorn" title="Longhorn" xmlUrl="https://github.com/longhorn/longhorn/releases.atom" htmlUrl="https://github.com/longhorn/longhorn/releases"/>
       <outline type="rss" text="CoreDNS" title="CoreDNS" xmlUrl="https://github.com/coredns/coredns/releases.atom" htmlUrl="https://github.com/coredns/coredns/releases"/>
       <outline type="rss" text="external-dns" title="external-dns" xmlUrl="https://github.com/kubernetes-sigs/external-dns/releases.atom" htmlUrl="https://github.com/kubernetes-sigs/external-dns/releases"/>
-      <outline type="rss" text="k8s_gateway" title="k8s_gateway" xmlUrl="https://github.com/k8s-gateway/k8s_gateway/releases.atom" htmlUrl="https://github.com/k8s-gateway/k8s_gateway/releases"/>
+      <outline type="rss" text="k8s_gateway" title="k8s_gateway" xmlUrl="https://codeberg.org/k8s-gateway/k8s_gateway/releases.atom" htmlUrl="https://codeberg.org/k8s-gateway/k8s_gateway/releases"/>
       <outline type="rss" text="MinIO" title="MinIO" xmlUrl="https://github.com/minio/minio/releases.atom" htmlUrl="https://github.com/minio/minio/releases"/>
       <outline type="rss" text="Multus CNI" title="Multus CNI" xmlUrl="https://github.com/k8snetworkplumbingwg/multus-cni/releases.atom" htmlUrl="https://github.com/k8snetworkplumbingwg/multus-cni/releases"/>
       <outline type="rss" text="metrics-server" title="metrics-server" xmlUrl="https://github.com/kubernetes-sigs/metrics-server/releases.atom" htmlUrl="https://github.com/kubernetes-sigs/metrics-server/releases"/>
