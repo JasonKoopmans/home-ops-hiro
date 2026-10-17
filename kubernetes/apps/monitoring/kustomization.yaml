@@ -9,6 +9,7 @@ components:
 resources:
   - ./namespace.yaml
   - ./alloy/ks.yaml
+  - ./blackbox-exporter/ks.yaml
   - ./kube-prometheus-stack/ks.yaml
   - ./loki/ks.yaml
   - ./thanos/ks.yaml

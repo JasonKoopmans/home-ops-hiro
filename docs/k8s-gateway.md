@@ -48,6 +48,17 @@ Checked 2026-10-17 (#806):
 - `prometheusrule-k8s-gateway.yaml`: `K8sGatewayDown` (critical, no available
   pod for 2m), `K8sGatewayDegraded` (warning, under 2 for 15m),
   `K8sGatewayMetricsMissing` (warning, no up target for 15m).
+- Correctness: `monitoring/blackbox-exporter` resolves `grafana.<domain>`
+  (envoy-internal) and `echo.<domain>` (envoy-external) through
+  `K8S_GATEWAY_ADDR:53` every 30s and requires every A record to equal
+  `ENVOY_INTERNAL_ADDR` / `ENVOY_EXTERNAL_ADDR` from `cluster-settings`.
+  NXDOMAIN, an empty answer, a forwarded public answer or the wrong Gateway
+  fail it. `K8sGatewayAnswerWrong` (critical, 3m) and
+  `K8sGatewayProbeMissing` (warning, under 2 probe series for 15m). The
+  probes depend on those two hostnames existing; moving either to another
+  Gateway means updating its module in the blackbox HelmRelease.
+- Blackbox resources (10m / 32Mi, 64Mi limit) are an unmeasured guess;
+  re-size from the 14d peak after 2026-10-31.
 
 ## Verify after any change
 
@@ -60,9 +71,6 @@ dig +short @192.168.25.100 echo.<domain>        # an envoy gateway IP
 
 ## Known gaps (open)
 
-- Nothing checks DNS correctness. The alerts catch a missing pod or scrape,
-  not a pod that answers the wrong zone (the 4.x failure above). CoreDNS
-  metrics cannot tell: `coredns_dns_responses_total` attributes every answer
-  to the `errors` plugin, first in the chain, so gateway answers and forwarded
-  ones look alike. Closing this needs a blackbox exporter (none is deployed)
-  probing `dig @192.168.25.100` for a known HTTPRoute host.
+- The probes test k8s-gateway itself, not the LAN path: the home DNS server's
+  forward of the domain to `K8S_GATEWAY_ADDR` is unmonitored. A broken forward
+  leaves every alert here green.

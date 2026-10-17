@@ -1,0 +1,52 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/helm.toolkit.fluxcd.io/helmrelease_v2.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: blackbox-exporter
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: blackbox-exporter
+  interval: 1h
+  values:
+    fullnameOverride: blackbox-exporter
+    # Unmeasured guess for a new workload (blackbox idles at ~15Mi); revisit
+    # against the 14d peak once it has run (docs/k8s-gateway.md).
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+    # One module per expected answer. Each requires every A record to be
+    # the expected envoy Gateway address, so NXDOMAIN, an empty answer, a
+    # forwarded public answer or the wrong Gateway all fail. Addresses come
+    # from cluster-settings (unescaped dots match any char; close enough).
+    # `$$` is Flux post-build escaping for the regex end anchor.
+    config:
+      modules:
+        dns_k8s_gateway_internal:
+          prober: dns
+          timeout: 5s
+          dns:
+            transport_protocol: udp
+            preferred_ip_protocol: ip4
+            query_name: grafana.${SECRET_DOMAIN}
+            query_type: A
+            valid_rcodes: [NOERROR]
+            validate_answer_rrs:
+              fail_if_none_matches_regexp: ['\tIN\tA\t${ENVOY_INTERNAL_ADDR}$$']
+              fail_if_not_matches_regexp: ['\tIN\tA\t${ENVOY_INTERNAL_ADDR}$$']
+        dns_k8s_gateway_external:
+          prober: dns
+          timeout: 5s
+          dns:
+            transport_protocol: udp
+            preferred_ip_protocol: ip4
+            query_name: echo.${SECRET_DOMAIN}
+            query_type: A
+            valid_rcodes: [NOERROR]
+            validate_answer_rrs:
+              fail_if_none_matches_regexp: ['\tIN\tA\t${ENVOY_EXTERNAL_ADDR}$$']
+              fail_if_not_matches_regexp: ['\tIN\tA\t${ENVOY_EXTERNAL_ADDR}$$']

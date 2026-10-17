@@ -48,3 +48,29 @@ spec:
           annotations:
             summary: No k8s-gateway CoreDNS metrics scraped for 15m
             description: The ServiceMonitor k8s-gateway in network has no up target. Check the k8s-gateway-metrics Service and the Prometheus targets page.
+
+        # Correctness: blackbox resolves a known internal and external host
+        # through 192.168.25.100 (blackbox-exporter/app/probe-k8s-gateway.yaml).
+        # Catches a Ready pod serving the wrong zone, which the alerts above
+        # cannot see. Fires alongside K8sGatewayDown when every pod is gone.
+        - alert: K8sGatewayAnswerWrong
+          expr: max by (job) (probe_success{job=~"k8s-gateway-dns-.*"}) == 0
+          for: 3m
+          labels:
+            severity: critical
+            namespace: network
+            name: k8s-gateway
+          annotations:
+            summary: k8s-gateway answers {{ $$labels.job }} wrongly
+            description: The DNS probe through the k8s-gateway LoadBalancer IP got no answer, NXDOMAIN, or an address other than the expected envoy Gateway. Try `dig @<k8s-gateway ip> grafana.<domain>` and check the Corefile (docs/k8s-gateway.md).
+
+        - alert: K8sGatewayProbeMissing
+          expr: count(probe_success{job=~"k8s-gateway-dns-.*"}) < 2 or absent(probe_success{job=~"k8s-gateway-dns-.*"})
+          for: 15m
+          labels:
+            severity: warning
+            namespace: network
+            name: k8s-gateway
+          annotations:
+            summary: k8s-gateway DNS probe results missing
+            description: Fewer than 2 k8s-gateway-dns-* probe series exist, so K8sGatewayAnswerWrong cannot fire. Check blackbox-exporter in monitoring and the Probe resources.
