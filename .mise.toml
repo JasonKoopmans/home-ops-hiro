@@ -34,7 +34,7 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 "aqua:rhysd/actionlint" = "1.7.12"
 "aqua:zricethezav/gitleaks" = "8.30.1"
 "aqua:stackrox/kube-linter" = "0.8.3"
-"aqua:aquasecurity/trivy" = "0.75.0"
+"aqua:aquasecurity/trivy" = "0.76.0"
 "aqua:open-policy-agent/conftest" = "0.71.1"
 # allow_builds: mise skips npm lifecycle scripts by default, and claude-code's postinstall is what
 # swaps the native binary in over its bin/claude.exe stub ("claude native binary not installed").
