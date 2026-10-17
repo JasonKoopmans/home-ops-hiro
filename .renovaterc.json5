@@ -53,6 +53,9 @@
   // literal: a classic PAT with read:packages only, from an account that can read
   // those packages, stored as GHCR_TOKEN for this repo. Public images there
   // (rsvp-reader, home-ops-hiro/*) accept the token too, so the match is host-wide.
+  // A new private image under that account needs no config. If the same "no-result"
+  // warning returns, suspect an expired or revoked PAT first: replace the secret in
+  // the Mend portal.
   hostRules: [
     {
       description: "Authenticate to GHCR so Renovate can read private package tags",
