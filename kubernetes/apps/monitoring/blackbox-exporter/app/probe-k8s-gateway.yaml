@@ -1,0 +1,34 @@
+---
+# Resolve a known HTTPRoute host through k8s-gateway's LoadBalancer IP (the
+# address the LAN uses, so Cilium LB IPAM/L2 is on the path too). grafana is
+# on envoy-internal, echo on envoy-external. Alerts:
+# kube-prometheus-stack/app/prometheusrule-k8s-gateway.yaml.
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/monitoring.coreos.com/probe_v1.json
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: k8s-gateway-dns-internal
+spec:
+  jobName: k8s-gateway-dns-internal
+  interval: 30s
+  module: dns_k8s_gateway_internal
+  prober:
+    url: blackbox-exporter.monitoring.svc.cluster.local:9115
+  targets:
+    staticConfig:
+      static: ["${K8S_GATEWAY_ADDR}:53"]
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/monitoring.coreos.com/probe_v1.json
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: k8s-gateway-dns-external
+spec:
+  jobName: k8s-gateway-dns-external
+  interval: 30s
+  module: dns_k8s_gateway_external
+  prober:
+    url: blackbox-exporter.monitoring.svc.cluster.local:9115
+  targets:
+    staticConfig:
+      static: ["${K8S_GATEWAY_ADDR}:53"]
