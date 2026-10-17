@@ -46,6 +46,22 @@
   kustomize: {
     managerFilePatterns: ["/^kustomization\\.ya?ml(?:\\.j2)?$/"],
   },
+  // Private images under ghcr.io/jasonkoopmans (pocket-bridge, recordingannotator)
+  // answer anonymous tag lookups with 401, which the Dependency Dashboard (#1)
+  // reports as "Failed to look up docker package ...: no-result". Renovate needs
+  // a credential for them. The token is a Mend Developer Portal secret, never a
+  // literal: a classic PAT with read:packages only, from an account that can read
+  // those packages, stored as GHCR_TOKEN for this repo. Public images there
+  // (rsvp-reader, home-ops-hiro/*) accept the token too, so the match is host-wide.
+  hostRules: [
+    {
+      description: "Authenticate to GHCR so Renovate can read private package tags",
+      matchHost: "ghcr.io",
+      hostType: "docker",
+      username: "JasonKoopmans",
+      password: "{{ secrets.GHCR_TOKEN }}",
+    },
+  ],
   packageRules: [
     {
       description: "Override Helmfile Dependency Name",
