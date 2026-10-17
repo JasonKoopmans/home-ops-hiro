@@ -1,0 +1,57 @@
+---
+# Agent pipeline for the eShopOnWeb pilot fork (github.com/JasonKoopmans/agent-pipeline).
+# One CronJob per enabled role: agent-eshop-<role>. Every pod runs
+# prepare -> agent -> verify -> publish:
+#   - prepare/publish run the small core image and act as the role's GitHub App;
+#   - agent/verify run the role's stack image and never see a GitHub credential;
+#   - only `agent` gets the model credential (per engine, below).
+#
+# Phase 1: everything suspended, merge off, plan gate on. Trigger one stage at a
+# time with `kubectl -n agents create job --from=cronjob/agent-eshop-<role> <role>-1`.
+# These values are the trusted side of the pipeline; the target repo cannot change them.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: agent-eshop
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: agent-eshop
+  interval: 1h
+  values:
+    image:
+      repository: ghcr.io/jasonkoopmans/agent-runner
+      version: "0.1.0"
+    defaultStack: dotnet10
+    suspend: true
+    pipeline:
+      repo: JasonKoopmans/eShopOnWeb
+      owner: JasonKoopmans
+      baseBranch: ai-staging
+      reviewCap: 3
+      # Shared Pro quota: about 4-8 sessions per issue. Phase 1 measures real usage.
+      dailySessionCap: 8
+      mergeMode: "off"
+      planGate: true
+      gateCommands:
+        - ["dotnet", "test", "tests/UnitTests/UnitTests.csproj"]
+        - ["dotnet", "test", "tests/IntegrationTests/IntegrationTests.csproj"]
+        - ["dotnet", "test", "tests/FunctionalTests/FunctionalTests.csproj"]
+        - ["dotnet", "test", "tests/PublicApiIntegrationTests/PublicApiIntegrationTests.csproj"]
+    # One GitHub App per role (agent-shared holds the keys). appUserId is the
+    # App's bot account id, so commits link to its avatar. Resources are informed
+    # guesses (no data yet); revisit after Phase 1 with 14d peaks.
+    roles:
+      planner: {enabled: true, appSlug: jk-agent-planner, appUserId: 344100795, appSecret: agent-app-planner}
+      implementer: {enabled: true, appSlug: jk-agent-implementer, appUserId: 344100808, appSecret: agent-app-implementer}
+      fixer: {enabled: true, appSlug: jk-agent-fixer, appUserId: 344100823, appSecret: agent-app-fixer}
+      review-quality: {enabled: true, appSlug: jk-agent-review-quality, appUserId: 344100830, appSecret: agent-app-review-quality}
+      review-security: {enabled: false}
+      review-e2e: {enabled: false}
+      merger: {enabled: false}
+    secrets:
+      engines:
+        claude:
+          - {env: CLAUDE_CODE_OAUTH_TOKEN, name: agent-claude-oauth, key: CLAUDE_CODE_OAUTH_TOKEN}
+    # Slow cold pulls on cmp-05's system disk (stack image ~1.3 GB).
+    avoidNodes: [hiro-cmp-05]

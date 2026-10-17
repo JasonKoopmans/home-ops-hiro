@@ -1,0 +1,25 @@
+# GitHub App for the agent-pipeline `review-quality` role: https://github.com/apps/jk-agent-review-quality
+# Created by scripts/provision_apps.py. Mounted only into the prepare and publish containers.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-app-review-quality
+stringData:
+  app-id: ENC[AES256_GCM,data:3GZxbYE3OA==,iv:wdyQewe/fuRMQUh/Nhrgi90W/RmjwMdeWrEnRP8ne3Y=,tag:ZQtM3cu7i2ioRlTADvScxw==,type:str]
+  private-key: ENC[AES256_GCM,data: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,iv:Uaxa9TnfacPLdmrLXXAqeCBpUYE+QoUh+/nOYJWhJ2o=,tag:S6vXEgBkkVUbrJpihA41Yg==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAzUXQxMlpIenU4amdGeUdv
+        Z3BzUkYyMnUvcHVFNHhzMUdUcnFPQS8zdXpjCjRkSWNDczFzM042eTVra3VicWxr
+        S1pnYWRGMTBqWnZNaENGdzg5UmNIaGMKLS0tIFlOclU4NkV1MFZCM002Y0swdmJH
+        SGhXQnA5ODJWbHkrT1FTMkRKMCtVWG8Ksmkw7YN6B8TJ32V7CBKsyCz1lqDra1Tv
+        2xnZhScCI13IXOU2pSJsZCsnKeZRA8UvcKtGv4ok8BfXgSDTTCKPkw==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1gekuxnpd95l5j8gsvmpsn2mewnevd0c5y5v66p4trzcqhmpn0svqkmnyy7
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-10-17T20:45:25Z"
+  mac: ENC[AES256_GCM,data:vWXdIutAPIZpnVTntbhahmo7EH2B7ikVVzNMtZ3IB1JPE56i43YaMlrjE+tjMGh1DcyAwoa2TjLG3AKOttpES6SLmRdc/Cgv/8MX2URIcxCV1Boi6jcMaGuj4oMWiKUvzMAvOesnpAB9Z0qhDT9wYvp6Gny9KbnY3bwyOiAjZUw=,iv:YGdpOLXxtALgL0fLB8vdN6FPdRYGw6zTWrB3q5xSZ7A=,tag:cgWNJH4N39uXAUK7O7ItFw==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.2

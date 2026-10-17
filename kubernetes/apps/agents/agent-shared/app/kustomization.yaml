@@ -1,0 +1,10 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./secret.sops.yaml
+  # One GitHub App per role, shared across repos (scripts/provision_apps.py).
+  - ./agent-app-planner.sops.yaml
+  - ./agent-app-implementer.sops.yaml
+  - ./agent-app-fixer.sops.yaml
+  - ./agent-app-review-quality.sops.yaml

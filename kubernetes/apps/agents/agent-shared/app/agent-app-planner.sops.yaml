@@ -1,0 +1,25 @@
+# GitHub App for the agent-pipeline `planner` role: https://github.com/apps/jk-agent-planner
+# Created by scripts/provision_apps.py. Mounted only into the prepare and publish containers.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-app-planner
+stringData:
+  app-id: ENC[AES256_GCM,data:dUo121w3UA==,iv:lKw/hKGaXpnl0eI8gN3EzICB6c4FXVJ8V1HOzhV32Wc=,tag:RODezVLN8cSmPcjBIwhAtg==,type:str]
+  private-key: ENC[AES256_GCM,data:tYpFsJN8Q80E7I+tvemafrqynNkdSgXBcqfB0H8LGn3NWS7jQQaPHXDT0z/wGW4vlcRQhXxBjWWEea/GZ0p/ASwCozm/sDS1bKZqLXbZYmS/xx+vp1fvbBMVCX3kzi2UP6sK7+NtGEtYx0F8m9iXQ2P/m9eBf7zgOBqz/ZgBdjmFAa4HjPvjcJJlrqJGPDiXtuy73z31w+fhBQfh8YII72CDmmsKWT7akMJ/gWJfKnZeUYiT3MYkbuDuqvNhlxTb5lujNDWp54FX4XSiuTvtw+wMF7yv4JGH/pKT9of+JE4R8siv/1iTmUysV2XyCELWMptdlJYLOLq+Yl7fDLo95IIznWWPvikedb0YVBr0XO3eqju3Zp3W7magbpFJhPw1X+NYyg5FHK+QEuYTWEIi/y4/xK8TUoj6EijU9+hvCTLtxHeDpSux1wZ8a2zB97d1xD0E2IqbxQKbiqLfyWppbkC/AcqO82OsQHo4+cHcz/+tKMWAqktEdjbPVaySC81jTqemuudBgUQwJKyTFDKMoq4AZR5BxP5x/66icrPsf0BGFc5C/wYWnTZ5fkhjuc6EtlmdMLBFMqp8HjPwzq0CuC5Z1CdEkFHAZid9KcZZHpgyfxH2Hye+zmjX8uzjGnFQrcYjOYCMlsFsF9pAqdPMZhO+kHrnuoMBmv7g4yCBucW2WYZ1xWUIdkkvBkGHDRPr1eIFQ+wa0pPWnpF8MR/eH9Y7YjfmwcJWZGhEySo1ebj9j7Qd5KN+/o40+QWq9kRzuS7mTl4MydPa4eo2jthXgaI67tn7Sn6tbMDHrzXGOrD4Ca+eUNKynTVkDp3wDSuj+ysYJcj4YfQFwP3UPn22R/f1+KQqsU5eRT7j7L3TBmlZcSwlEhiM1BOc+zda4PMlV3zrPfjgIO+QsrIbSUpp2VoOlvvZB35menVCvKZ02sAsokkqKLD6E+LA4poITxoombgZdi06c9wFcnSjiWBdlkKGOSK+rnZW96Rno6rrGP1/7rXLeI/JC+fFV9AVTAE4NH+GpnOdYiWdZIDYMP/k+OwELmlbp6oEdnk2R3qWWIpByvrCRmlISh3Q+NsmcxlUqYKJvx8BUFGDmSnVt7REqoiBoSd/SgmOy0A4k+Axpmnp9R2HLwPee/Z+WhntZxop10+FSgUShDGvXirvJvIP3R3K8k4ljWEtCOfHqd64y5yUWREYRf55G8hWzTTfdNlq8KaNywjLeznZV3fKDqQHgvJhG7lUdGVxCS+kyEKtNcl2t09Jr1yUAEjf51uYvPmVUP0rfin9q/LROjALvNVnIH/tXiZx+6Y7ShrIiG42hpHpB9inFs9n1BqXNBd7KbpCxmjMPIzilbO6tDtcgHU85W3GEIio3FBCpEXELHKvUP4R6ZCrwUTswCWmfR0H6vuI3Y7Eq/pxyUi/U3Ov2vlC/Zu+Y56xzOwYoLzWbbtkeVOoeUdqIIl5blENbuZ+Rmp70G/+sQ+F9XuBRY8xfA0CwT4D1nqohvxCclyXpm8Iw99uQeiqR55yuDhSnG7PXNClpBYvj1CjQIhfGAVPIytXGxMWFJvDFOL7c5epL4wCEGo0EhEstiVKJHPoXWPLiZQv45DFbmGu6ElVK5mpDXcIIQLl4iY8Yb2u/StvAhoe8g6nmdFqhpKdoB3ovzFOJEymX3C9uClHzKNDg/McxnVRbf5lRuX29k8feRAowugLgu8DAIBFZCOVX1KkCmoCSeIFgzX8/m8/LthWqhyrBIco0gS3xIlb0dahTGmMtHoI7FAc2vlce92F9XGBl1td+SzMtTGwQnkX3igQWqfGrEAM4MnM9alcLIZ80jxxZqwOWi8IkX54eBFWt6I8fY70dGlORkBw6v4GL1Pzq6YW+K4BofyHY/AgKaxwZm3Wq1JQPbgx++WJ9FOJY1j0AWrVR+6weQQwVV8A8jsD+CGU9cr52FcuMe/kCb8We5eYCdYT66018emaTLwlxK9+NAL3h5lmcJuc4rIPtLJLXgqryo4OcpQBkeGPT1LIC/f6EvIrAkPeJ/nGX3915R0jp+1iyVL1Xe3qO0VAkBB+lQljER8McS2bmFYnVMb+Hiz3NHphbjE0C9O9IWzA9/8T5ix+RPCR5C36CBkB2/CkO02rv856fFpJy9xIfRNm2rMt27zcwCUObIKR11TSWqi3gtExEjiyb8Tk4WC6581QOJP0pHRHjPdWdYo5UHR2VZqNOBnSq+5AlHjHCYwWDab1Lg==,iv:zuAGCevj5gx6oF4trrSZYtDRSykJ1/+pJRe6R7hhWmE=,tag:gTsrnpyGteZgmoORj5bFIg==,type:str]
+sops:
+  age:
+    - enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBCeFlYdmZOTUVEaGpUckdW
+        M1E1SjN4TXZ4bmlrdEZIaW5EM0twZTRXQlVZCmNJeHJ0U2twR2k3bFc4UjlnUE9a
+        MVB4L3JtSjlxMDl0d05DdXdKTWN3Nm8KLS0tIG0rTUNsVG9PTnRqWjZwcnUvRVlv
+        SEFIVnkvK0toUUlrOTl4TEZWQ0JVODQKEdS1IuzKcA6Xmd+KrYs7XqlA2NrSr52k
+        /+0vaIemcQpRZaO1cObXyCDkIZ4eTmLFYu1IKm17v1oCBicvJO/2xw==
+        -----END AGE ENCRYPTED FILE-----
+      recipient: age1gekuxnpd95l5j8gsvmpsn2mewnevd0c5y5v66p4trzcqhmpn0svqkmnyy7
+  encrypted_regex: ^(data|stringData)$
+  lastmodified: "2026-10-17T20:45:25Z"
+  mac: ENC[AES256_GCM,data:7hhAS7bcaGKVIAiHtrJPhdahzj24g/6gUTfgRgdaWidMSU1RzcHpMc4uxgrjc+JfDMzDZlnEV2PvMcrwOt2fp5cRm/0SonToHSGV3dexR/iJZ4kxJFr+BoyRot4lX7Tr7CVnG4oAmuZ9FSfjxIhyXI+41MGV3H2LhvQOFAqMSBY=,iv:UKkm3I92JzLvQmo6Jtasi7QXd0VZXXMNZnS6+OgVR6Q=,tag:PSVOF8WudZIc4IkhHTZ/Tw==,type:str]
+  mac_only_encrypted: true
+  version: 3.13.2
