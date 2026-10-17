@@ -10,26 +10,27 @@ spec:
   interval: 1h
   values:
     fullnameOverride: k8s-gateway
-    # Transitional (#806): this file carries the 3.x keys and the 4.x keys at
-    # once. Each chart ignores the other's keys, so the release renders the
-    # same live config whichever chart helm-controller has when the values
-    # change. Drop the 3.x block (and set resources.limits.cpu: null) in a
-    # follow-up once 4.x is Ready. Do not add cpu: null before then: 3.7.2
-    # renders it as a 0 CPU limit, which the API rejects.
-    # --- chart 3.x keys ---
-    domain: "${SECRET_DOMAIN}"
-    ttl: 1
-    watchedResources: ["HTTPRoute", "Service"]
+    serviceType: LoadBalancer
     service:
-      type: LoadBalancer
-      port: 53
       annotations:
         lbipam.cilium.io/ips: "#{ cluster_dns_gateway_addr }#"
       externalTrafficPolicy: Cluster
-    # --- chart 4.x keys ---
-    serviceType: LoadBalancer
-    # Surge, never drop: one replica, and this is the LAN's resolver for
-    # every internal hostname. Chart default is maxUnavailable: 1.
+    # Two replicas on different nodes: this is the LAN's resolver for every
+    # internal hostname, so a node loss must not be a DNS outage.
+    replicaCount: 2
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: k8s-gateway
+                app.kubernetes.io/instance: k8s-gateway
+            topologyKey: kubernetes.io/hostname
+    podDisruptionBudget:
+      maxUnavailable: 1
+    # Surge, never drop: keep both replicas serving through a rollout.
+    # Chart default is maxUnavailable: 1. The surge pod needs a free node
+    # under the anti-affinity (5 nodes, 2 replicas).
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
@@ -43,7 +44,15 @@ spec:
         cpu: 10m
         memory: 64Mi
       limits:
+        cpu: null # chart default is 100m; no CPU limits here
         memory: 128Mi
+    # CoreDNS metrics (coredns_*), scraped by kube-prometheus-stack; alerts
+    # in monitoring/kube-prometheus-stack/app/prometheusrule-k8s-gateway.yaml.
+    prometheus:
+      service:
+        enabled: true
+      monitor:
+        enabled: true
     readinessProbe:
       initialDelaySeconds: 10
       failureThreshold: 5
