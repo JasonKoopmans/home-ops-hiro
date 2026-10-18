@@ -1,0 +1,65 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: job-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: job.rules
+      rules:
+        # Replaces kube-prometheus-stack's KubeJobFailed (disabled under
+        # defaultRules in helmrelease.yaml). The stock rule is kube_job_failed > 0,
+        # which latches: a CronJob's failedJobsHistoryLimit caps how many failed
+        # Jobs are kept, not for how long, so the last failed Job sits there until
+        # the CronJob fails again. Two alerts were firing on 2026-10-18 for Jobs
+        # whose next run had already succeeded:
+        #   - recording-annotator-reconciliation-29870117 (failed 2026-10-17
+        #     03:17Z while the nodes were still coming up; the 03:17Z run the
+        #     next day succeeded)
+        #   - longhorn-tsdb-trim-job-29871540 (failed 2026-10-18 03:00Z)
+        # Longhorn creates its recurring-job CronJobs itself, so a TTL on the Job
+        # is not ours to set; the rule has to be the one that lets go.
+        #
+        # A failed Job owned by a CronJob stops alerting once that CronJob has a
+        # successful run that completed after the failed Job started
+        # (kube_cronjob_status_last_successful_time). Nothing latches: the next
+        # good run clears it, and if the next run fails too the alert stays,
+        # because lastSuccessful is then still older than the newest failed Job.
+        # A CronJob that has never succeeded has no last-successful series, so the
+        # `unless` removes nothing and its failures keep alerting - the
+        # "never succeeded" case needs no twin rule.
+        #
+        # Jobs with no CronJob owner (the minio bootstrap Jobs, one-shot Jobs)
+        # have no later run to wait for, so they behave exactly as the stock rule
+        # did: they alert until someone deletes the Job.
+        #
+        # `max by (namespace, job_name)` drops pod and instance on purpose. They
+        # name the kube-state-metrics replica that scraped the Job, and `for:` is
+        # tracked per label set, so a kube-state-metrics reschedule would restart
+        # the 15m clock under a Job that has not changed. The digest line needs
+        # only job_name and namespace (alertmanagerconfig.yaml).
+        - alert: KubeJobFailed
+          expr: |
+            max by (namespace, job_name) (kube_job_failed{job="kube-state-metrics"} > 0)
+            unless on (namespace, job_name)
+            (
+              (
+                kube_job_status_start_time{job="kube-state-metrics"}
+                * on (namespace, job_name) group_left (owner_name)
+                  kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+              )
+              < on (namespace, owner_name) group_left ()
+              label_replace(
+                kube_cronjob_status_last_successful_time{job="kube-state-metrics"},
+                "owner_name", "$$1", "cronjob", "(.*)"
+              )
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Job failed to complete.
+            description: Job {{ $$labels.namespace }}/{{ $$labels.job_name }} failed to complete, and no later run of its CronJob has succeeded (a Job with no CronJob stays until it is deleted). kubectl -n {{ $$labels.namespace }} describe job {{ $$labels.job_name }}; the pod is garbage collected quickly, so read its logs from Loki.

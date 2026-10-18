@@ -29,6 +29,7 @@ resources:
   - ./prometheusrule-node-disk.yaml
   - ./prometheusrule-etcd.yaml
   - ./prometheusrule-k8s-gateway.yaml
+  - ./prometheusrule-jobs.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml
