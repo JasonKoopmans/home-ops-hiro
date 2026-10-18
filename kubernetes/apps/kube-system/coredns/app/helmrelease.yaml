@@ -37,13 +37,16 @@ spec:
             configBlock: |-
               lameduck 5s
           - name: ready
+          # No autopath. It answers a pod's first search name for an outside
+          # host (api.github.com.<ns>.svc.cluster.local) with a CNAME to the
+          # real name, so the resolver never asks for the bare name and Cilium
+          # records the IPs under the suffixed one: a toFQDNs matchName never
+          # matches. Without it the suffixed names are NXDOMAIN, as upstream.
           - name: kubernetes
             parameters: cluster.local in-addr.arpa ip6.arpa
             configBlock: |-
               pods verified
               fallthrough in-addr.arpa ip6.arpa
-          - name: autopath
-            parameters: "@kubernetes"
           - name: forward
             parameters: . 1.1.1.1 8.8.8.8
           - name: cache
