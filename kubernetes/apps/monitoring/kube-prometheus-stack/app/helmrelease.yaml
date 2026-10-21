@@ -100,6 +100,11 @@ spec:
         # Needs grpc_server_handling_seconds_bucket, which etcd only exposes with
         # --metrics=extensive. It is not on here, so this has never matched anything.
         etcdGRPCRequestsSlow: true
+        # kube_job_failed > 0 latches until the failed Job is deleted, so it kept
+        # firing for CronJobs whose next run had already succeeded. Replaced by a
+        # rule of the same name that lets go on the next success
+        # (prometheusrule-jobs.yaml).
+        KubeJobFailed: true
 
     kubeApiServer:
       serviceMonitor:
