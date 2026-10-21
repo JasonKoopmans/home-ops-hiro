@@ -21,7 +21,7 @@ spec:
   values:
     image:
       repository: ghcr.io/jasonkoopmans/agent-runner
-      version: "0.1.1"
+      version: "0.1.2"
     defaultStack: dotnet10
     suspend: true
     pipeline:
@@ -38,6 +38,10 @@ spec:
         - ["dotnet", "test", "tests/IntegrationTests/IntegrationTests.csproj"]
         - ["dotnet", "test", "tests/FunctionalTests/FunctionalTests.csproj"]
         - ["dotnet", "test", "tests/PublicApiIntegrationTests/PublicApiIntegrationTests.csproj"]
+    # Web's LibMan downloads jQuery/Bootstrap from cdnjs at build time; egress
+    # blocks cdnjs (a dropped connection hangs the build) and tests don't need it.
+    buildEnv:
+      LibraryRestore: "false"
     # One GitHub App per role (agent-shared holds the keys). appUserId is the
     # App's bot account id, so commits link to its avatar. Resources are informed
     # guesses (no data yet); revisit after Phase 1 with 14d peaks.
