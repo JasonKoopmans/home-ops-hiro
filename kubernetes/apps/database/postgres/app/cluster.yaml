@@ -74,6 +74,18 @@ spec:
         # able to touch the landing tables.
         passwordSecret:
           name: lifeos-reader-credentials
+      - name: lifeos_sync
+        login: true
+        # n8n's work-calendar apply workflow (docs/lifeos-calendar.md). The
+        # schema DDL grants it USAGE on schema `sync` and SELECT on its two
+        # views, by name — nothing on raw, core or mart, and no default
+        # privileges on sync. A fourth role rather than a reuse of
+        # lifeos_reader because that role (and mcp_postgres) read all of
+        # core/mart and so must never see employer meeting titles. Not
+        # SUPERUSER, CREATEDB or CREATEROLE. Its password is entered into an
+        # n8n Postgres credential by hand, like lifeos_ingest's; rotate both.
+        passwordSecret:
+          name: lifeos-sync-credentials
       - name: mcp_postgres
         login: true
         # Dedicated credential for the mcp-postgres MCP server

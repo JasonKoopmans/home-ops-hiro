@@ -12,6 +12,10 @@ resources:
   # consumer, in kubernetes/apps/lifeos/warehouse.
   - ./database-lifeos.yaml
   - ./lifeos-role-credentials.sops.yaml
+  # Work-calendar apply workflow's login role (schema `sync`). Its own file
+  # rather than another document in the one above, so adding it touches no
+  # existing ciphertext. See docs/lifeos-calendar.md.
+  - ./lifeos-sync-credentials.sops.yaml
   # mcp-postgres MCP server's login role (kubernetes/apps/mcp/mcp-postgres) —
   # not a LifeOS role, kept in its own file for that reason. Its access grant
   # on core/mart is also its own CronJob here, independent of

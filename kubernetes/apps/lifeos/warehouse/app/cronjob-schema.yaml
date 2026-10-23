@@ -70,14 +70,16 @@ spec:
                   # just that statement — a self-inflicted KubeJobFailed on
                   # first deploy, not a race worth waiting out separately.
                   # So the readiness check waits for connectivity AND all
-                  # three roles in one query, not just for the database to
+                  # four roles in one query, not just for the database to
                   # answer. Any new role schema.sql grants to must be added
                   # here too, or its first deploy takes the whole script down.
+                  # (lifeos_sync, the work-calendar apply workflow's role,
+                  # is the fourth; see docs/lifeos-calendar.md.)
                   # (mcp_postgres deliberately does NOT belong in this list —
                   # its grants live in their own CronJob, see
                   # kubernetes/apps/database/postgres/app/cronjob-mcp-postgres-grants.yaml.)
                   RETRIES=0
-                  until [ "$(psql -tAc "SELECT count(*) FROM pg_roles WHERE rolname IN ('lifeos_writer', 'lifeos_ingest', 'lifeos_reader')" 2>/dev/null)" = "3" ]; do
+                  until [ "$(psql -tAc "SELECT count(*) FROM pg_roles WHERE rolname IN ('lifeos_writer', 'lifeos_ingest', 'lifeos_reader', 'lifeos_sync')" 2>/dev/null)" = "4" ]; do
                     RETRIES=$((RETRIES + 1))
                     if [ "$RETRIES" -ge 30 ]; then
                       # Deliberately plain, unbraced shell variable references

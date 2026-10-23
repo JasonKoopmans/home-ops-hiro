@@ -1,0 +1,167 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/v1/configmap_v1.json
+# The work-calendar retention policy, run daily by the CronJob below. See
+# docs/lifeos-calendar.md ("Retention").
+#
+# This is the one place the warehouse deletes from raw, and it is a deliberate
+# exception to "raw is append-only": work-calendar titles and locations carry a
+# 90-day TTL by the owner's decision. It is keyed on the EVENT's time, not on
+# ingested_at. Under the content-hash dedupe a stable event is inserted once
+# and never again, so a TTL on ingested_at would age out its only row while the
+# event is still current.
+#
+# Kept apart from the schema apply (cronjob-schema.yaml) on purpose: one bad
+# statement there fails the whole hourly apply, silently, and a bug in a purge
+# must not be able to take schema management down with it. It also needs a
+# role the schema file's grants never gave to lifeos_ingest: DELETE. Runs as
+# lifeos_writer, which owns the tables.
+#
+# No dollar-quoted strings in the SQL and no brace-wrapped variables in the
+# shell, for the same Flux postBuild reason as schema.yaml. Barman keeps WAL for 7 days, so a
+# purged row can persist that long in backups (about 97 days end to end).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: calendar-purge
+data:
+  purge.sql: |
+    -- 1) Every version of an event whose LATEST known end is older than 90
+    --    days. "Latest" is by ingested_at, then ingest_id for a tie. An
+    --    all-day event's end is a date; it is read as a UTC midnight
+    --    explicitly, because date::timestamptz would use the session TimeZone.
+    --    This is retention arithmetic only, to the day.
+    DELETE FROM raw.calendar_events e
+    USING (
+        SELECT source, natural_key
+        FROM (
+            SELECT DISTINCT ON (source, natural_key)
+                   source, natural_key,
+                   coalesce(ends_at, ends_on::timestamp AT TIME ZONE 'UTC') AS ended
+            FROM raw.calendar_events
+            ORDER BY source, natural_key, ingested_at DESC, ingest_id DESC
+        ) latest
+        WHERE latest.ended < now() - interval '90 days'
+    ) old
+    WHERE e.source = old.source AND e.natural_key = old.natural_key;
+
+    -- 2) Superseded versions older than 90 days. Never the latest row of a
+    --    key: the EXISTS requires a strictly newer row to be present.
+    DELETE FROM raw.calendar_events e
+    WHERE e.ingested_at < now() - interval '90 days'
+      AND EXISTS (
+          SELECT 1 FROM raw.calendar_events n
+          WHERE n.source = e.source AND n.natural_key = e.natural_key
+            AND (n.ingested_at, n.ingest_id) > (e.ingested_at, e.ingest_id)
+      );
+
+    -- 3) Snapshot key lists. Only the latest complete snapshot matters to
+    --    sync.calendar_current, so 14 days leaves a wide margin (the apply
+    --    workflow's watchdog fires after 3 hours without a complete one).
+    DELETE FROM raw.calendar_snapshots WHERE ingested_at < now() - interval '14 days';
+
+    -- 4) Parked queue messages.
+    DELETE FROM raw.ingest_rejects WHERE ingested_at < now() - interval '30 days';
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/batch/v1/cronjob_v1.json
+# CronJob for the same reason as warehouse-schema: idempotent work on a
+# schedule, so Git and the database converge on their own and a failure repeats
+# (KubeJobFailed) instead of failing once and going quiet.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: calendar-purge
+spec:
+  schedule: "41 8 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            # The CNPG postgres image's own user, as in warehouse-schema.
+            runAsUser: 26
+            runAsGroup: 26
+          containers:
+            - name: psql
+              # Same image the cluster runs, so it is already pulled on these
+              # nodes and its psql matches the server version exactly.
+              image: ghcr.io/cloudnative-pg/postgresql:18.6
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  # The tables are created by the hourly schema CronJob, which
+                  # is reconciled independently of this one. Wait for all three
+                  # rather than fail the first night after a deploy. Plain
+                  # unbraced shell variables, as in warehouse-schema: Flux
+                  # postBuild empties brace-wrapped names it does not know.
+                  RETRIES=0
+                  until [ "$(psql -tAc "SELECT (to_regclass('raw.calendar_events') IS NOT NULL AND to_regclass('raw.calendar_snapshots') IS NOT NULL AND to_regclass('raw.ingest_rejects') IS NOT NULL)::int" 2>/dev/null)" = "1" ]; do
+                    RETRIES=$((RETRIES + 1))
+                    if [ "$RETRIES" -ge 30 ]; then
+                      echo "ERROR: raw calendar tables not found after 150s (as $PGUSER on $PGDATABASE)" >&2
+                      exit 1
+                    fi
+                    echo "waiting for raw.calendar_* tables... (attempt $RETRIES/30)"
+                    sleep 5
+                  done
+
+                  # Not quiet (-q): the DELETE row counts are the only record
+                  # of what a run removed. One transaction, so now() is the
+                  # same instant for all four statements.
+                  psql --set ON_ERROR_STOP=1 --single-transaction --file /purge/purge.sql
+                  echo "calendar purge done"
+              env:
+                - name: PGHOST
+                  value: postgres-rw.database.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: lifeos
+                - name: PGUSER
+                  value: lifeos_writer
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: warehouse-credentials
+                      key: writer-password
+                - name: PGSSLMODE
+                  value: require
+                # psql wants a writable HOME for its history file; pointing it
+                # at the emptyDir keeps the root filesystem read-only.
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: purge
+                  mountPath: /purge
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+                seccompProfile: { type: RuntimeDefault }
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  # A psql client running four DELETEs. No CPU limit, per repo
+                  # convention.
+                  memory: 128Mi
+          volumes:
+            - name: purge
+              configMap:
+                name: calendar-purge
+            - name: tmp
+              emptyDir: {}

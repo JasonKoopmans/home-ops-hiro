@@ -6,4 +6,5 @@ resources:
   - ./schema.yaml
   - ./goals-seed.yaml
   - ./cronjob-schema.yaml
+  - ./cronjob-calendar-purge.yaml
   - ./secret.sops.yaml
