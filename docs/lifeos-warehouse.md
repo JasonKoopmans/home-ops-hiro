@@ -82,14 +82,19 @@ carries a 90-day TTL measured from each event's end, `raw.calendar_snapshots`
 keeps 14 days and `raw.ingest_rejects` 30, enforced daily by the `calendar-purge`
 CronJob (`lifeos/warehouse/app/cronjob-calendar-purge.yaml`, as `lifeos_writer`,
 since `lifeos_ingest` has no `DELETE`). It is keyed on event time rather than
-`ingested_at`, because under that source's hash dedupe a stable event is written
-once and its only row would otherwise expire while the event is current. Backups
+`ingested_at` or `observed_at`, because under that source's hash dedupe a stable
+event is written once and its only row would otherwise expire while the event is
+current. Backups
 keep purged rows for the Barman recovery window (7 days). Nothing else in `raw`
 is ever deleted. Design: `docs/lifeos-calendar.md`.
 
 That source also dedupes on a `content_hash` over the fields that matter instead
 of whole-payload equality (below), because the connector's cosmetic churn would
-otherwise write a version per fire.
+otherwise write a version per fire. And it orders versions by `observed_at` (the
+snapshot's `taken_at`) with `ingest_id` as the tie-break, not by `ingested_at`:
+queue delivery is at-least-once and can be out of order, and an older snapshot
+arriving late must never become the latest version. The ingest statement refuses
+to write one and the `sync` views read the same order.
 
 That matters most for the Todoist lookups, which are snapshot-shaped — the API
 reports current state rather than emitting events, so without this a project
@@ -128,6 +133,8 @@ properties follow, and both matter:
   looks subtly wrong.
 
 The `(source, natural_key, ingested_at DESC)` index makes that lookup cheap.
+(`raw.calendar_events` is the exception: its index and its "latest" are
+`(source, natural_key, observed_at DESC, ingest_id DESC)`, for the reason above.)
 
 Not enforced by the database today — it is a convention n8n has to follow. A
 `BEFORE INSERT` trigger could enforce it server-side, and is the obvious

@@ -29,8 +29,8 @@ source" recipe with the deliberate exceptions listed under
 - Cloudflare Workers Free. The 24-hour queue retention is accepted and the design
   does not depend on it.
 - Raw rows get a 90-day TTL, measured from the event's end, not from ingest.
-- Defaults: private and confidential events appear as "Busy"; cancelled events
-  are omitted; reminders none; window -7d..+60d at a 30-minute cadence; new
+- Defaults: any event whose sensitivity is not `normal` appears as "Busy" with
+  no location; cancelled events are omitted; reminders none; window -7d..+60d at a 30-minute cadence; new
   schema `sync` and role `lifeos_sync`; skip events that already list the
   owner's personal address; URL locations are replaced by "Online".
 
@@ -115,12 +115,32 @@ One manual run of "Get calendar view of events (V3)" over two days, 7 events:
   without transmitting the attendees; apply skips those by default.
 - `x-ms-apihub-cached-response: true` suggests the connector caches. Staleness is
   bounded by the cache plus the 30-minute cadence.
-- Sensitivity was `normal` on all seven, so the private/confidential path is
-  untested.
+- Sensitivity was `normal` on all seven in Spike 1; Spike 2 tested Private (below).
 
-Still unknown: how a cancelled, declined, re-accepted, or private/confidential
-event appears (Spike 2); paging past 256 events, chunk sizes and action counts
-(Spike 3); Google-side behavior (Spike 4).
+Still unknown: accept/re-accept and Confidential (Spike 2 could not reproduce
+either); paging past 256 events, chunk sizes and action counts (Spike 3);
+Google-side behavior (Spike 4).
+
+## Behavior under change (Spike 2, observed 2026-10-23)
+
+| Test | Result | Consequence |
+|---|---|---|
+| Move one occurrence of a series the owner organizes | `iCalUId` unchanged | Confirms the key. A moved occurrence patches its existing Google event. |
+| Accept or re-accept an invitation | Could not replicate | Still unverified. The key is the `iCalUId`, which should not change; a known gap. |
+| Delete a meeting the owner organized | Disappears from the output | Handled by absence from the next complete snapshot. |
+| A colleague cancels a meeting the owner attends | Stays in the output, shown as cancelled, until the owner removes it | Needs the `cancelled` flag. When the owner removes it, it vanishes and absence takes over. |
+| Decline an invitation | Disappears from the output | Handled by absence. The `response = declined` filter never fires; kept as insurance. |
+| Private event | `sensitivity` is `private`; **the subject arrives unredacted**; location empty (it was empty to begin with) | Redaction by the flow is the only thing hiding the title. Only Private was offered by this tenant's UI, so Confidential is untested. |
+
+Decisions that follow:
+
+- **Redact unless `sensitivity` is `normal`** (fail closed). Graph also defines
+  `personal` and `confidential`, and unknown values stay hidden too. The flow, the
+  ingest workflow and the `sync` views each enforce the same rule, because a miss
+  at any one of them would put an employer's private title on a personal calendar.
+- Cancellation still derives from the subject prefix (`canceled:` or
+  `cancelled:`, lower-cased, on the original subject). Confirm the exact text
+  against one real cancelled meeting when building the flow.
 
 ## Producer contract (Power Automate)
 
@@ -162,16 +182,17 @@ request, up to 100 events per chunk and under about 55 KB:
   webLink, join URLs, categories, reminders, or any response names.
 - Timed events: `start`/`end` are UTC ISO 8601 with `Z`. All-day events:
   `YYYY-MM-DD`, end exclusive. Never invent a time of day.
-- `sensitivity` of `private` or `confidential`: `subject` is `Busy` and
-  `location` is empty. Redacted at the source; the ingest workflow and the
-  `sync` views enforce it again.
-- Events with an empty `iCalUId` are filtered out by the flow **before**
-  `event_count_total` is counted. A snapshot is only "complete" when the keys it
-  carries add up to that total, so one keyless event that was counted but cannot
-  be keyed would otherwise stop the sync entirely (the safe direction, but a
-  loud one).
-- `event_count_total` is the count across all chunks; `chunks` is the number of
-  chunks; `truncated` is true when the paging cap was hit with a full last page.
+- `sensitivity` anything other than `normal`: `subject` is `Busy` and `location`
+  is empty. Redacted at the source (the connector delivers private subjects
+  unredacted); the ingest workflow and the `sync` views enforce it again.
+- Events with an empty `iCalUId` should be filtered out by the flow. If one gets
+  through anyway, the ingest workflow skips and records that single event
+  (without its title), lands the rest of the chunk, and alerts. It does not make
+  the snapshot incomplete; see [Derived state](#derived-state-no-tombstones).
+- `event_count_total` is the count across all chunks before projection
+  (informational; it can legitimately exceed the number of keys that landed);
+  `chunks` is the number of chunks; `truncated` is true when the paging cap was
+  hit with a full last page.
 - An empty calendar still sends one chunk with `events: []`. Empty is also the
   signature of a failed read, which the apply workflow's safety valve handles.
 
@@ -184,7 +205,13 @@ Defined in `kubernetes/apps/lifeos/warehouse/app/schema.yaml`.
 - `raw.calendar_events`: one row per *observed version* of an event. Columns
   follow the warehouse's common shape (`source`, `natural_key`, `ingested_at`,
   `payload`) plus `starts_at`/`ends_at` (timed), `starts_on`/`ends_on`
-  (all-day, exclusive end, no invented time of day) and `content_hash`.
+  (all-day, exclusive end, no invented time of day), `content_hash` and
+  `observed_at`, the `taken_at` of the snapshot that produced the version.
+  **"Latest version" of a key means the highest `(observed_at, ingest_id)`, never
+  the highest `ingested_at`.** Delivery from the queue is at-least-once and can
+  be out of order; an older snapshot arriving late must never become the latest
+  version. The ingest statement refuses to write such a version and every reader
+  orders the same way.
 - `raw.calendar_snapshots`: one row per received *chunk*, carrying the keys
   present in that chunk. An unchanged event inserts no event row (the hash
   dedupe below), so it leaves no trace of having been seen. This table is what
@@ -214,49 +241,110 @@ warehouse's ingest contract, for this source only.
 
 ### Idempotent insert
 
-One statement per chunk, bind parameters only. Titles are untrusted input.
+One statement per queued message, **one bound parameter**. `$1` is a JSON
+document built by the ingest workflow's parser: `kind` (`chunk` or `reject`), the
+rows, the key list, the snapshot metadata and any rejects. Nothing from the
+calendar is ever placed in SQL text (titles are untrusted input), and a chunk's
+event rows, its snapshot row and its rejects commit together or not at all. This
+is the exact statement the ingest package ran, as `lifeos_ingest`, against the
+tables in `schema.yaml`:
 
 ```sql
-INSERT INTO raw.calendar_events
-       (source, natural_key, starts_at, ends_at, starts_on, ends_on, content_hash, payload)
-SELECT r.source, r.natural_key, r.starts_at, r.ends_at, r.starts_on, r.ends_on, r.content_hash, r.payload
-FROM jsonb_to_recordset($1::jsonb) AS r(
-         source text, natural_key text, starts_at timestamptz, ends_at timestamptz,
-         starts_on date, ends_on date, content_hash text, payload jsonb)
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM (
-        SELECT l.content_hash
-        FROM raw.calendar_events l
-        WHERE l.source = r.source AND l.natural_key = r.natural_key
-        ORDER BY l.ingested_at DESC, l.ingest_id DESC
-        LIMIT 1
-    ) AS latest
-    WHERE latest.content_hash = r.content_hash
-);
+-- One statement per queued message, bound as a single parameter ($1 = the `doc`
+-- built by Parse & validate). Everything in one statement means a chunk's event
+-- rows, its snapshot row and its rejects commit together or not at all.
+--
+-- Events: insert a row only when this event's content differs from its latest
+-- known version, and never let an OLDER snapshot become the latest version
+-- (at-least-once delivery can hand us chunks out of order).
+-- Snapshots: one row per chunk, carrying the keys present in that chunk.
+-- Rejects: anything the parser parked, never with titles.
+WITH d AS (
+    SELECT $1::jsonb AS doc
+),
+ev AS (
+    INSERT INTO raw.calendar_events
+           (source, natural_key, starts_at, ends_at, starts_on, ends_on,
+            content_hash, observed_at, payload)
+    SELECT d.doc ->> 'source', r.natural_key, r.starts_at, r.ends_at, r.starts_on, r.ends_on,
+           r.content_hash, (d.doc ->> 'taken_at')::timestamptz, r.payload
+    FROM d,
+         jsonb_to_recordset(d.doc -> 'rows')
+             AS r(natural_key text, starts_at timestamptz, ends_at timestamptz,
+                  starts_on date, ends_on date, content_hash text, payload jsonb)
+    WHERE d.doc ->> 'kind' = 'chunk'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM (
+              SELECT l.content_hash, l.observed_at
+              FROM raw.calendar_events l
+              WHERE l.source = d.doc ->> 'source'
+                AND l.natural_key = r.natural_key
+              ORDER BY l.observed_at DESC, l.ingest_id DESC
+              LIMIT 1
+          ) AS latest
+          WHERE latest.content_hash = r.content_hash
+             OR latest.observed_at > (d.doc ->> 'taken_at')::timestamptz
+      )
+    RETURNING 1
+),
+snap AS (
+    INSERT INTO raw.calendar_snapshots
+           (source, snapshot_id, chunk, chunks, taken_at, window_start, window_end,
+            event_count_total, truncated, keys)
+    SELECT d.doc ->> 'source', d.doc ->> 'snapshot_id',
+           (d.doc ->> 'chunk')::int, (d.doc ->> 'chunks')::int,
+           (d.doc ->> 'taken_at')::timestamptz,
+           (d.doc ->> 'window_start')::timestamptz, (d.doc ->> 'window_end')::timestamptz,
+           (d.doc ->> 'event_count_total')::int, (d.doc ->> 'truncated')::boolean,
+           ARRAY(SELECT jsonb_array_elements_text(d.doc -> 'keys'))
+    FROM d
+    WHERE d.doc ->> 'kind' = 'chunk'
+    ON CONFLICT (source, snapshot_id, chunk) DO NOTHING
+    RETURNING 1
+),
+rej AS (
+    INSERT INTO raw.ingest_rejects (queue, message_id, attempts, error, body)
+    SELECT x.queue, x.message_id, x.attempts, x.error, x.body
+    FROM d,
+         jsonb_to_recordset(d.doc -> 'rejects')
+             AS x(queue text, message_id text, attempts int, error text, body text)
+    RETURNING 1
+)
+SELECT (SELECT count(*) FROM ev)::int   AS events_inserted,
+       (SELECT count(*) FROM snap)::int AS snapshot_rows,
+       (SELECT count(*) FROM rej)::int  AS rejects;
 ```
 
-followed by the `raw.calendar_snapshots` insert with `ON CONFLICT (source,
-snapshot_id, chunk) DO NOTHING`. "Insert only if this differs from the last thing
-we saw for the key" stays correct on a flip-back (A, B, A records three rows).
-Two rows for one key inside a single `:rows` array would both pass the
-`NOT EXISTS` (neither is visible yet), so the n8n Code node dedupes by
-`natural_key` first, last one wins.
+An event is inserted only if its latest known version has a different hash **and**
+that version is not from a newer snapshot. "Insert only if this differs from the
+last thing we saw for the key" stays correct on a flip-back (A, B, A records
+three rows). Duplicate keys inside one chunk are collapsed by the parser, last
+one wins, because two rows for one key in a single document would both pass the
+`NOT EXISTS` (neither is visible yet).
 
 ### Derived state (no tombstones)
 
 Deletes are derived at read time, not written. Both views live in schema `sync`.
 
-- A snapshot is **complete** when every chunk `1..chunks` is present, none is
-  `truncated`, and the number of keys across its chunks equals
-  `event_count_total`. A `CHECK` on the table keeps `chunk` inside `1..chunks`
-  and the unique constraint on `(source, snapshot_id, chunk)` means "as many
-  rows as `chunks`" is the same thing as "every chunk present".
+- A snapshot is **complete** when every chunk `1..chunks` is present and none is
+  `truncated`. It is deliberately *not* required that the keys add up to
+  `event_count_total`: the ingest skips and records one malformed event (say, one
+  with no `iCalUId`) rather than failing its chunk, and under a strict rule that
+  single event would make every snapshot incomplete and freeze all deletions for
+  as long as it stays in the window, up to 67 days. The skip stays loud instead:
+  the ingest workflow alerts on every skipped event, and the apply watchdog fires
+  on a stale snapshot. The cost to know about: an event that was mirrored and then
+  turns malformed is absent from the keys, so it is treated as deleted and removed
+  from the mirror.
 - `sync.calendar_status` (per source): the latest complete snapshot's id,
-  `taken_at`, window and `event_count_total`, plus the previous complete
-  snapshot's `event_count_total` and `taken_at`.
-- `sync.calendar_current`: the latest version per `(source, natural_key)`,
-  excluding cancelled ones, and keeping an event when it does not overlap the
+  `taken_at`, window and `event_count_total` (informational), its **`key_count`**
+  (the number of keys that landed, the sum of `cardinality(keys)` over its
+  chunks), and the previous complete snapshot's `event_count_total`, `taken_at`
+  and `previous_key_count`. The apply workflow's safety valve compares key
+  counts, not `event_count_total`.
+- `sync.calendar_current`: the latest version per `(source, natural_key)`, by
+  `(observed_at, ingest_id)`, excluding cancelled ones, and keeping an event when it does not overlap the
   latest complete snapshot's window (unknown, so keep) or its key is in that
   snapshot's keys. An event that overlaps the window but is absent from the
   snapshot is treated as deleted. With no complete snapshot yet, every
@@ -269,8 +357,11 @@ Deletes are derived at read time, not written. Both views live in schema `sync`.
   through the session's `TimeZone`.
 - `src_key` (first 32 hex characters of SHA-256 of `natural_key`) is a column so
   there is one definition of the Google marker value.
-- The views redact again at read time: a private or confidential event reads as
-  "Busy" with an empty location whatever `raw` holds.
+- The views redact again at read time, failing closed: unless the sensitivity is
+  `normal` (a missing value reads as normal), the event reads as "Busy" with an
+  empty location whatever `raw` holds. `private`, `personal`, `confidential` and
+  any value added later are all hidden. The column is `observed_at`, not
+  `ingested_at`.
 - Views run with their owner's privileges, as the `core` views do.
 
 ### Why not core
@@ -294,6 +385,7 @@ in `core` would expose employer meeting titles to both automatically. So:
 |---|---|---|
 | Views go in `core`, then `mart` | `sync` | `core` is readable by Grafana and the MCP server |
 | Dedupe on whole-payload equality | on `content_hash` | the payload carries fields (formatting, cosmetic) that should not create versions; the hash is over exactly the fields that matter |
+| Latest row by `ingested_at` | latest by `(observed_at, ingest_id)` | at-least-once delivery can hand over an older snapshot late; write time must not decide which state is current |
 | `raw` is append-only forever | purged on event time | work-calendar data has a 90-day TTL by the owner's decision |
 | Three LifeOS roles | a fourth, `lifeos_sync` | its job (reading derived state for apply) matches neither writer, ingest nor reader |
 
@@ -333,8 +425,10 @@ Event-time based, in a daily purge job, because a TTL on `ingested_at` alone is
 wrong: under the hash dedupe a stable event is inserted once and never again, so
 its only row would age out while the event is still current.
 
-1. Every version of an event whose **latest** known end is older than 90 days.
-2. Superseded versions older than 90 days, never the latest row of a key.
+1. Every version of an event whose **latest** known end is older than 90 days
+   (latest by `(observed_at, ingest_id)`).
+2. Superseded versions observed more than 90 days ago, never the latest row of a
+   key.
 3. Snapshot key lists older than 14 days (only the latest complete snapshot
    matters).
 4. Rejects older than 30 days.
@@ -369,19 +463,25 @@ use the existing Telegram catch-all as the error workflow.
 
 ### Calendar ingest (every 10 minutes)
 
-Modeled on the gateway repo's `health-inbox-puller.workflow.json`.
+Built and tested separately (the `calendar-ingest` package, on n8n 2.44.3 and
+PostgreSQL 18); this repo's tables and the statement above are the contract it
+was tested against. It supersedes an earlier draft that wrote with two statements.
 
-1. Pull from the `calendar-snapshot` queue (batch 20, visibility timeout 5
-   minutes).
-2. Per message: assert the CloudEvent `type` is `lifeos.calendar.snapshot.v1`.
-3. A Code node enforces redaction again, computes `natural_key` and
-   `content_hash`, dedupes by key, and builds the rows array and the chunk's key
-   list. An event without `icaluid` becomes a reject.
-4. Postgres, as `lifeos_ingest`: the two statements above, bind parameters only.
-5. Ack after success. On failure leave the message unacked (it redelivers after
-   the visibility timeout). At `attempts >= 5`, insert into
-   `raw.ingest_rejects` and ack; the DLQ's own retention (unverified, presumably
-   24 hours) is not relied on.
+1. Pull up to 20 messages from the `calendar-snapshot` queue (5-minute lease).
+2. Parse and validate each CloudEvent. Structural problems (not JSON, wrong
+   type, bad chunk metadata) are parked as a reject immediately. A single
+   malformed event is skipped and recorded, and the rest of the chunk lands.
+3. Redact again (anything not `normal` becomes Busy with no location; URL
+   locations become Online), compute `natural_key` and `content_hash`, collapse
+   duplicate keys.
+4. Write each message with the single statement above, as `lifeos_ingest`, one
+   message at a time.
+5. Ack what landed; retry what failed after 300 seconds. A message delivered more
+   than 5 times is parked as a reject and acked, so a poison message cannot loop
+   until the queue's 24-hour retention drops it. Reject rows never contain
+   subjects or locations.
+6. The execution fails (so the Telegram error workflow fires) when a message was
+   parked, events were skipped, or a write failed three or more times.
 
 ### Calendar apply (every 15 minutes)
 
@@ -400,7 +500,8 @@ Modeled on the gateway repo's `health-inbox-puller.workflow.json`.
    only). Duplicates of one `srcKey` (a half-failed earlier create) are deleted
    down to one.
 6. Safety valve: no deletes, and alert, if the latest snapshot's
-   `event_count_total` is 0 or under 50% of the previous complete snapshot's, or
+   `key_count` is 0 or under 50% of the previous complete snapshot's
+   `previous_key_count`, or
    if the run would delete more than max(20, 25% of the mirrored events). A
    legitimate bulk deletion is cleared by `allow_bulk_deletes` for one run.
 7. At most 100 write operations per run, with exponential backoff on 403/429.
@@ -435,9 +536,13 @@ Modeled on the gateway repo's `health-inbox-puller.workflow.json`.
 - Moved occurrence: key unchanged, so it patches the existing Google event.
 - Whole series deleted: the bulk-delete valve trips by design.
 - Connector cache: an edit may take a few minutes to show.
-- A keyless event in a snapshot: filtered by the flow; if one slips through,
-  the snapshot never completes and the watchdog alerts rather than the mirror
-  drifting.
+- A malformed event (for example no `iCalUId`) in a snapshot: skipped and
+  recorded by the ingest, which alerts; the rest of the chunk lands and the
+  snapshot still completes, so deletions are not frozen. If it was previously
+  mirrored it is removed from the mirror, loudly.
+- A late, older snapshot: its key list is stored, but it never becomes the latest
+  complete snapshot (ordered by `taken_at`) and writes no event version that would
+  displace a newer one.
 
 ## Rollout
 
@@ -454,10 +559,9 @@ run against.
 ## Spikes
 
 1. Done: connector output (above).
-2. Behavior under change (owner): move one occurrence (does `iCalUId` hold?),
-   re-accept an invite, cancel or delete a meeting (does "Canceled:" prefix
-   appear?), decline, create Private and Confidential events. Mind the cache;
-   redact before sharing any output.
+2. Behavior under change: done 2026-10-23 (results above). Open: accept and
+   re-accept could not be reproduced, and Confidential is not offered by this
+   tenant.
 3. End to end: Power Automate to gateway to queue to n8n over a real 67-day
    window; confirm 202, paging past 256 events, chunks under 55 KB, actions per
    run against the daily limit (about 20 per run estimated; 48 runs a day).
@@ -477,6 +581,9 @@ run against.
 - An empty or truncated snapshot: no deletes, and an alert.
 - n8n stopped for 25 hours: catches up on the next snapshot with no repair.
 - No mirrored Google event has attendees; no notification is ever sent.
-- Private and confidential events appear as Busy.
+- Any event whose sensitivity is not `normal` (private, personal, confidential,
+  anything unknown) appears as Busy with no location.
+- A meeting a colleague cancelled (still visible in Outlook, marked cancelled) is
+  removed from the mirror; so is one the owner declined or deleted.
 - The purge removes rows past 90 days without removing a currently visible event.
 - `lifeos_reader` and `mcp_postgres` cannot read `sync` or `raw.calendar_*`.
