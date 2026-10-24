@@ -11,6 +11,12 @@ LifeOS Grafana. This is what that Grafana was built to query — see
 | Apple activity rings (Move / Exercise / Stand) | one row per day per ring | a Google Sheet that n8n reads | `raw.health_metrics` |
 | Todoist completed tasks | event, one per completion | Todoist API | `raw.todoist_completed_tasks` |
 | Todoist projects / labels / sections | snapshot of current state | Todoist API | `raw.todoist_lookups` |
+| Work calendar (Outlook) | one row per observed version of an event, plus one per received snapshot chunk | Power Automate, event gateway queue, n8n | `raw.calendar_events`, `raw.calendar_snapshots` |
+
+The work calendar is the one source that is deliberately **not** exposed through
+`core`/`mart`: it holds employer meeting titles, and `lifeos_reader` and
+`mcp_postgres` read everything in those schemas. It has its own schema, `sync`,
+with its own role. See `docs/lifeos-calendar.md`.
 
 Note where the Google integration ended up. The LifeOS Grafana deliberately has
 no Sheets plugin: n8n owns the Google credential and the fetching, Postgres
@@ -71,6 +77,25 @@ Every fetch that sees a **changed** record writes another row. Nothing is ever
 updated in place, so a correction at the source becomes visible history rather
 than a silent overwrite, and `core` simply starts returning the newer row.
 
+**One deliberate exception: the work calendar is purged.** `raw.calendar_events`
+carries a 90-day TTL measured from each event's end, `raw.calendar_snapshots`
+keeps 14 days and `raw.ingest_rejects` 30, enforced daily by the `calendar-purge`
+CronJob (`lifeos/warehouse/app/cronjob-calendar-purge.yaml`, as `lifeos_writer`,
+since `lifeos_ingest` has no `DELETE`). It is keyed on event time rather than
+`ingested_at` or `observed_at`, because under that source's hash dedupe a stable
+event is written once and its only row would otherwise expire while the event is
+current. Backups
+keep purged rows for the Barman recovery window (7 days). Nothing else in `raw`
+is ever deleted. Design: `docs/lifeos-calendar.md`.
+
+That source also dedupes on a `content_hash` over the fields that matter instead
+of whole-payload equality (below), because the connector's cosmetic churn would
+otherwise write a version per fire. And it orders versions by `observed_at` (the
+snapshot's `taken_at`) with `ingest_id` as the tie-break, not by `ingested_at`:
+queue delivery is at-least-once and can be out of order, and an older snapshot
+arriving late must never become the latest version. The ingest statement refuses
+to write one and the `sync` views read the same order.
+
 That matters most for the Todoist lookups, which are snapshot-shaped — the API
 reports current state rather than emitting events, so without this a project
 rename would overwrite the old name and every historical chart would silently
@@ -108,6 +133,8 @@ properties follow, and both matter:
   looks subtly wrong.
 
 The `(source, natural_key, ingested_at DESC)` index makes that lookup cheap.
+(`raw.calendar_events` is the exception: its index and its "latest" are
+`(source, natural_key, observed_at DESC, ingest_id DESC)`, for the reason above.)
 
 Not enforced by the database today — it is a convention n8n has to follow. A
 `BEFORE INSERT` trigger could enforce it server-side, and is the obvious
@@ -128,15 +155,19 @@ executing as SQL.
 
 ## Who can do what
 
-Three CNPG-managed roles, declared in `database/postgres/app/cluster.yaml`. The
+Four CNPG-managed roles, declared in `database/postgres/app/cluster.yaml`. The
 split isn't just reader vs. writer — it's "does this connection's *job* need
-schema-level rights," and the answer is no for both consumers:
+schema-level rights," and the answer is no for every consumer:
 
 | Role | Used by | Rights |
 |---|---|---|
-| `lifeos_writer` | the schema CronJob, and nothing else | owns the `lifeos` database — full DDL |
-| `lifeos_ingest` | n8n | `SELECT` + `INSERT` on `raw` only. No DDL, no reach into `core`/`mart` |
-| `lifeos_reader` | Grafana | `SELECT` on `core` and `mart`. **Nothing on `raw`.** |
+| `lifeos_writer` | the schema CronJob, the calendar purge CronJob, and nothing else | owns the `lifeos` database — full DDL |
+| `lifeos_ingest` | n8n | `SELECT` + `INSERT` on `raw` only. No DDL, no `DELETE`, no reach into `core`/`mart`/`sync` |
+| `lifeos_reader` | Grafana | `SELECT` on `core` and `mart`. **Nothing on `raw`, nothing on `sync`.** |
+| `lifeos_sync` | n8n (calendar apply) | `USAGE` on schema `sync` and `SELECT` on `sync.calendar_current` and `sync.calendar_status`, by name. Nothing else, and no default privileges, so a new view in `sync` is invisible until granted |
+
+`mcp_postgres` (the MCP server's role, managed by its own grants CronJob) mirrors
+`lifeos_reader`'s reach and likewise has nothing on `sync`.
 
 This wasn't the original design — n8n and the CronJob shared `lifeos_writer`
 until a review pass asked the obvious question: does the role that *writes
@@ -152,7 +183,7 @@ gets `core`/`mart` and cannot touch `raw` at all — the same principle applied 
 second time: the thing that reports on data cannot mutate it, and the thing
 that writes data cannot restructure it.
 
-None of the three roles is `SUPERUSER`, `CREATEDB` or `CREATEROLE`. The cluster
+None of the four roles is `SUPERUSER`, `CREATEDB` or `CREATEROLE`. The cluster
 has no superuser secret at all (`enableSuperuserAccess` is off), which is also
 why the database is created by a CNPG `Database` CR rather than by SQL —
 nothing in the cluster is able to issue `CREATE DATABASE`.
@@ -171,9 +202,12 @@ hosting a database with data that actually needs isolating from LifeOS.
 **Passwords exist in two namespaces today** — `database` for CNPG's
 `managed.roles`, and `lifeos` for the CronJob (`lifeos_writer`) and Grafana
 (`lifeos_reader`). `lifeos_ingest`'s password is *not* copied into `lifeos` —
-nothing there uses it. It needs a third copy in `default` once n8n's workflow
-exists, since that's where n8n runs. Whichever role's password you rotate,
-rotate every copy of it.
+nothing there uses it. n8n runs in `default`, but keeps its database
+credentials in its own store (typed into the UI), not in a Kubernetes Secret, so
+there is no `default`-namespace copy of `lifeos_ingest`'s password or of
+`lifeos_sync`'s (`lifeos-sync-credentials`, in `database`). The n8n credential
+is the other copy. Whichever role's password you rotate, rotate every copy of
+it.
 
 ---
 
@@ -538,4 +572,6 @@ and every daily count is quietly wrong at the edges.
 - **No purge path for a record that should never have existed.** The design
   handles *corrections* well — append a new observation, `core` starts
   returning it. It has no answer for "this row was bad test data and should be
-  gone," other than a manual `DELETE` outside these documented conventions.
+  gone," other than a manual `DELETE` outside these documented conventions. (The
+  work-calendar tables are the exception: they have a scheduled purge, see
+  *Append, don't update*.)

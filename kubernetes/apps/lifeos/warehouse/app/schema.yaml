@@ -60,6 +60,12 @@ data:
     CREATE SCHEMA IF NOT EXISTS raw;
     CREATE SCHEMA IF NOT EXISTS core;
     CREATE SCHEMA IF NOT EXISTS mart;
+    -- sync is not a layer of the medallion above. It holds the work-calendar
+    -- views, kept out of core/mart because lifeos_reader (Grafana) and
+    -- mcp_postgres (an LLM-driven client) are granted SELECT on everything in
+    -- those two, including objects added later. Its only grantee is
+    -- lifeos_sync, by name, with no default privileges. docs/lifeos-calendar.md.
+    CREATE SCHEMA IF NOT EXISTS sync;
 
     -- ---------------------------------------------------------------------
     -- raw: landing tables
@@ -154,6 +160,83 @@ data:
         payload     jsonb       NOT NULL
     );
 
+    -- Work calendar (Outlook), mirrored to Google by n8n. See
+    -- docs/lifeos-calendar.md. One row per observed *version* of an event, and
+    -- a version is a change in content_hash, not in payload bytes: n8n computes
+    -- the hash over the fields that matter, so cosmetic churn at the source
+    -- writes nothing.
+    --
+    -- natural_key is the iCalUId, upper-cased. It already encodes the series and
+    -- the occurrence's original date, and a moved occurrence keeps it.
+    --
+    -- Two grains, as the warehouse convention asks: a timed event is a pair of
+    -- instants (starts_at/ends_at), an all-day event is a pair of dates
+    -- (starts_on/ends_on, end exclusive). A time of day is never invented for
+    -- the latter. Exactly one pair is set per row.
+    --
+    -- observed_at is the taken_at of the snapshot that produced this version,
+    -- and "latest version of a key" means the highest observed_at, NOT the
+    -- highest ingested_at. Delivery from the queue is at-least-once and can be
+    -- out of order, so an older snapshot arriving late must never become the
+    -- latest version; the ingest statement refuses to write one, and every
+    -- reader orders by (observed_at, ingest_id) so they agree. ingested_at is
+    -- when we wrote the row and nothing orders by it.
+    --
+    -- payload holds the projected, already-redacted event (subject, location,
+    -- show_as, sensitivity, response, on_personal, cancelled, all_day). The
+    -- sync views read it, so a renamed field breaks one view and not ingestion.
+    --
+    -- Unlike every other raw table this one is purged (calendar-purge CronJob,
+    -- 90 days after the event's end): work-calendar titles are not kept forever.
+    CREATE TABLE IF NOT EXISTS raw.calendar_events (
+        ingest_id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        source       text        NOT NULL,
+        natural_key  text        NOT NULL,
+        starts_at    timestamptz,
+        ends_at      timestamptz,
+        starts_on    date,
+        ends_on      date,
+        content_hash text        NOT NULL,
+        observed_at  timestamptz NOT NULL,
+        ingested_at  timestamptz NOT NULL DEFAULT now(),
+        payload      jsonb       NOT NULL
+    );
+
+    -- One row per received *chunk* of a snapshot, carrying the keys present in
+    -- that chunk. An unchanged event inserts no row above, so without this there
+    -- would be no trace of an event having been seen, and "absent from the
+    -- latest snapshot" (the only way a delete is ever detected) could not be
+    -- derived. No CHECK on chunk/chunks: the ingest validates them before it
+    -- writes, and sync.calendar_status does not rely on the table for it.
+    CREATE TABLE IF NOT EXISTS raw.calendar_snapshots (
+        ingest_id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        source            text        NOT NULL,
+        snapshot_id       text        NOT NULL,
+        chunk             int         NOT NULL,
+        chunks            int         NOT NULL,
+        taken_at          timestamptz NOT NULL,
+        window_start      timestamptz NOT NULL,
+        window_end        timestamptz NOT NULL,
+        event_count_total int         NOT NULL,
+        truncated         boolean     NOT NULL DEFAULT false,
+        keys              text[]      NOT NULL,
+        ingested_at       timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (source, snapshot_id, chunk)
+    );
+
+    -- Messages a queue consumer gave up on, parked here so they are not lost to
+    -- the queue's own 24-hour retention. Not calendar-specific: the health
+    -- puller can adopt it. Purged after 30 days by calendar-purge.
+    CREATE TABLE IF NOT EXISTS raw.ingest_rejects (
+        ingest_id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        queue       text        NOT NULL,
+        message_id  text        NOT NULL,
+        attempts    int         NOT NULL,
+        error       text,
+        body        text,
+        ingested_at timestamptz NOT NULL DEFAULT now()
+    );
+
     -- Serves both the "has this changed since we last saw it" check on write
     -- and the DISTINCT ON in the core views on read.
     CREATE INDEX IF NOT EXISTS health_metrics_key_seen
@@ -162,6 +245,8 @@ data:
         ON raw.todoist_completed_tasks (source, natural_key, ingested_at DESC);
     CREATE INDEX IF NOT EXISTS todoist_lookups_key_seen
         ON raw.todoist_lookups (source, kind, natural_key, ingested_at DESC);
+    CREATE INDEX IF NOT EXISTS calendar_events_key_seen
+        ON raw.calendar_events (source, natural_key, observed_at DESC, ingest_id DESC);
 
     -- Dashboards filter by when things happened, not when we noticed them.
     CREATE INDEX IF NOT EXISTS health_metrics_observed
@@ -839,6 +924,141 @@ data:
                                    'NextTodoMinutesTrailing7d', 'NextTodoMinutesTrailing30d');
 
     -- ---------------------------------------------------------------------
+    -- sync: derived work-calendar state, readable only by lifeos_sync
+    --
+    -- Deletes are never written. An event is gone when it overlaps the window
+    -- of the latest *complete* snapshot and its key is not among that
+    -- snapshot's keys; everything else (outside the window, no complete
+    -- snapshot yet) is kept, because "unknown" must not turn into "delete".
+    -- Aging out of the window is therefore not a deletion.
+    --
+    -- Both views are new, so there is no column-order history to guard here;
+    -- if either is ever reshaped, follow "Reshaping a view that has already
+    -- shipped" in docs/lifeos-warehouse.md. Dollar-quoting is avoided, as
+    -- everywhere in this file.
+    -- ---------------------------------------------------------------------
+
+    -- Per source: the latest complete snapshot, plus the previous complete one
+    -- (apply's safety valve compares the two key counts).
+    --
+    -- Complete means every chunk 1..chunks is present, none was truncated, and
+    -- every chunk agrees on how many chunks there are. Chunk numbers outside
+    -- 1..chunks are ignored rather than trusted. The window and
+    -- event_count_total are repeated on every chunk, so max() just picks them.
+    --
+    -- It does NOT require the keys to add up to event_count_total. The ingest
+    -- skips and records one malformed event (say, one with no iCalUId) instead of
+    -- failing its chunk, so the two may legitimately differ; requiring equality
+    -- would let that one event make every snapshot incomplete and freeze all
+    -- deletions for as long as it stays in the window. The skip is loud
+    -- elsewhere (the ingest workflow alerts on each, the apply watchdog fires on
+    -- a stale snapshot). event_count_total is what the flow counted before
+    -- projection: informational. key_count is what actually landed, so the
+    -- apply workflow's safety valve compares key counts.
+    CREATE OR REPLACE VIEW sync.calendar_status AS
+    WITH complete AS (
+        SELECT source,
+               snapshot_id,
+               max(taken_at)          AS taken_at,
+               max(window_start)      AS window_start,
+               max(window_end)        AS window_end,
+               max(event_count_total) AS event_count_total,
+               coalesce(sum(cardinality(keys)) FILTER (WHERE chunk BETWEEN 1 AND chunks), 0)::int AS key_count
+        FROM raw.calendar_snapshots
+        GROUP BY source, snapshot_id
+        HAVING min(chunks) = max(chunks)
+           AND count(DISTINCT chunk) FILTER (WHERE chunk BETWEEN 1 AND chunks) = max(chunks)
+           AND NOT bool_or(truncated)
+    ), ranked AS (
+        SELECT c.*,
+               row_number() OVER (PARTITION BY source ORDER BY taken_at DESC, snapshot_id DESC) AS rn
+        FROM complete c
+    )
+    SELECT l.source,
+           l.snapshot_id,
+           l.taken_at,
+           l.window_start,
+           l.window_end,
+           l.event_count_total,
+           p.event_count_total AS previous_event_count_total,
+           p.taken_at          AS previous_taken_at,
+           l.key_count,
+           p.key_count         AS previous_key_count
+    FROM ranked l
+    LEFT JOIN ranked p ON p.source = l.source AND p.rn = 2
+    WHERE l.rn = 1;
+
+    -- What the mirror should contain now. One row per (source, natural_key).
+    --
+    -- Redaction is applied here a third time (the flow and the ingest workflow
+    -- already did it) and it fails closed: unless the sensitivity is 'normal'
+    -- (a missing value reads as normal) the event reads as "Busy" with no
+    -- location, whatever raw holds. So 'private', 'personal', 'confidential' and
+    -- any value Graph adds later are all hidden. This is the real protection: the
+    -- connector delivers private subjects unredacted. on_personal and response are columns, not
+    -- filters, so changing apply's skip policy needs no DDL. src_key is the
+    -- Google marker value, defined once: the first 32 hex characters of the
+    -- SHA-256 of natural_key.
+    --
+    -- All-day dates are turned into UTC midnights explicitly for the window
+    -- comparison. date::timestamptz would use the session's TimeZone setting,
+    -- which is not something a view should depend on.
+    --
+    -- The booleans are read through jsonb_typeof so a payload that sends a
+    -- string or omits the field degrades to false instead of raising and taking
+    -- the whole view down (the same rule as the casts in core).
+    CREATE OR REPLACE VIEW sync.calendar_current AS
+    WITH latest AS (
+        SELECT DISTINCT ON (e.source, e.natural_key)
+               e.source, e.natural_key, e.starts_at, e.ends_at, e.starts_on, e.ends_on,
+               e.content_hash, e.observed_at, e.payload
+        FROM raw.calendar_events e
+        ORDER BY e.source, e.natural_key, e.observed_at DESC, e.ingest_id DESC
+    ), typed AS (
+        SELECT l.*,
+               coalesce(l.starts_at, l.starts_on::timestamp AT TIME ZONE 'UTC') AS ev_start,
+               coalesce(l.ends_at,   l.ends_on::timestamp   AT TIME ZONE 'UTC') AS ev_end,
+               lower(coalesce(l.payload ->> 'sensitivity', 'normal')) <> 'normal' AS redacted,
+               CASE WHEN jsonb_typeof(l.payload -> 'all_day') = 'boolean'
+                    THEN (l.payload ->> 'all_day')::boolean ELSE false END AS all_day,
+               CASE WHEN jsonb_typeof(l.payload -> 'on_personal') = 'boolean'
+                    THEN (l.payload ->> 'on_personal')::boolean ELSE false END AS on_personal,
+               CASE WHEN jsonb_typeof(l.payload -> 'cancelled') = 'boolean'
+                    THEN (l.payload ->> 'cancelled')::boolean ELSE false END AS cancelled
+        FROM latest l
+    )
+    SELECT t.source,
+           t.natural_key,
+           left(encode(sha256(convert_to(t.natural_key, 'UTF8')), 'hex'), 32) AS src_key,
+           CASE WHEN t.redacted THEN 'Busy' ELSE coalesce(t.payload ->> 'subject', '') END AS subject,
+           CASE WHEN t.redacted THEN ''     ELSE coalesce(t.payload ->> 'location', '') END AS location,
+           t.starts_at,
+           t.ends_at,
+           t.starts_on,
+           t.ends_on,
+           t.all_day,
+           coalesce(t.payload ->> 'show_as', 'busy')   AS show_as,
+           coalesce(t.payload ->> 'sensitivity', 'normal') AS sensitivity,
+           coalesce(t.payload ->> 'response', '')      AS response,
+           t.on_personal,
+           t.content_hash,
+           t.observed_at
+    FROM typed t
+    LEFT JOIN sync.calendar_status s ON s.source = t.source
+    WHERE NOT t.cancelled
+      AND (
+            s.snapshot_id IS NULL
+         OR NOT coalesce(t.ev_start < s.window_end AND t.ev_end > s.window_start, false)
+         OR EXISTS (
+                SELECT 1
+                FROM raw.calendar_snapshots k
+                WHERE k.source = s.source
+                  AND k.snapshot_id = s.snapshot_id
+                  AND t.natural_key = ANY (k.keys)
+            )
+      );
+
+    -- ---------------------------------------------------------------------
     -- Grants
     --
     -- Three roles, three different reaches. lifeos_writer runs this whole file
@@ -888,6 +1108,17 @@ data:
         GRANT SELECT, INSERT ON TABLES TO lifeos_ingest;
     ALTER DEFAULT PRIVILEGES IN SCHEMA core, mart
         GRANT SELECT ON TABLES TO lifeos_reader;
+
+    -- lifeos_sync (n8n's calendar-apply workflow) reads the two sync views and
+    -- nothing else: no raw, no core, no mart. Granted by name and deliberately
+    -- WITHOUT ALTER DEFAULT PRIVILEGES for sync, so a view added there later is
+    -- invisible to everyone until someone grants it on purpose. lifeos_reader
+    -- and mcp_postgres get nothing on sync (no USAGE), which is the whole point
+    -- of the schema: they read core and mart wholesale and would otherwise see
+    -- employer meeting titles. Re-verify with has_schema_privilege after any
+    -- change to this block.
+    GRANT USAGE ON SCHEMA sync TO lifeos_sync;
+    GRANT SELECT ON sync.calendar_current, sync.calendar_status TO lifeos_sync;
   load-goals.sql: |
     -- Loads core.goals from goals.csv (mounted at /seed by
     -- cronjob-schema.yaml, from the warehouse-goals-seed ConfigMap). Run as
