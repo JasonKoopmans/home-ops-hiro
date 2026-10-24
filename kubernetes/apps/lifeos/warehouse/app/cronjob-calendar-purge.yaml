@@ -6,9 +6,11 @@
 # This is the one place the warehouse deletes from raw, and it is a deliberate
 # exception to "raw is append-only": work-calendar titles and locations carry a
 # 90-day TTL by the owner's decision. It is keyed on the EVENT's time, not on
-# ingested_at. Under the content-hash dedupe a stable event is inserted once
-# and never again, so a TTL on ingested_at would age out its only row while the
-# event is still current.
+# when a row was written or observed. Under the content-hash dedupe a stable
+# event is inserted once and never again, so a TTL on ingested_at or
+# observed_at would age out its only row while the event is still current.
+# Version order throughout is (observed_at, ingest_id), the same as the sync
+# views; see the note on raw.calendar_events in schema.yaml.
 #
 # Kept apart from the schema apply (cronjob-schema.yaml) on purpose: one bad
 # statement there fails the whole hourly apply, silently, and a bug in a purge
@@ -26,7 +28,7 @@ metadata:
 data:
   purge.sql: |
     -- 1) Every version of an event whose LATEST known end is older than 90
-    --    days. "Latest" is by ingested_at, then ingest_id for a tie. An
+    --    days. "Latest" is by observed_at, then ingest_id for a tie. An
     --    all-day event's end is a date; it is read as a UTC midnight
     --    explicitly, because date::timestamptz would use the session TimeZone.
     --    This is retention arithmetic only, to the day.
@@ -38,7 +40,7 @@ data:
                    source, natural_key,
                    coalesce(ends_at, ends_on::timestamp AT TIME ZONE 'UTC') AS ended
             FROM raw.calendar_events
-            ORDER BY source, natural_key, ingested_at DESC, ingest_id DESC
+            ORDER BY source, natural_key, observed_at DESC, ingest_id DESC
         ) latest
         WHERE latest.ended < now() - interval '90 days'
     ) old
@@ -47,11 +49,11 @@ data:
     -- 2) Superseded versions older than 90 days. Never the latest row of a
     --    key: the EXISTS requires a strictly newer row to be present.
     DELETE FROM raw.calendar_events e
-    WHERE e.ingested_at < now() - interval '90 days'
+    WHERE e.observed_at < now() - interval '90 days'
       AND EXISTS (
           SELECT 1 FROM raw.calendar_events n
           WHERE n.source = e.source AND n.natural_key = e.natural_key
-            AND (n.ingested_at, n.ingest_id) > (e.ingested_at, e.ingest_id)
+            AND (n.observed_at, n.ingest_id) > (e.observed_at, e.ingest_id)
       );
 
     -- 3) Snapshot key lists. Only the latest complete snapshot matters to
