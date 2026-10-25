@@ -12,6 +12,9 @@ on:
 
 jobs:
   claude-review:
+    # claude-code-action rejects bot-authored PRs, so every Renovate PR failed here.
+    # Dependency bumps are covered by Flux Local and the scan workflows.
+    if: github.actor != 'renovate[bot]'
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
