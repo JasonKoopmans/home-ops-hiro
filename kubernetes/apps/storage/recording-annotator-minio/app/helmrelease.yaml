@@ -63,7 +63,10 @@ spec:
       # additional protection against the threat that actually matters (ransomware/corruption).
       storageClass: longhorn-2-no-backup
       # Start small; grow as real recordings land rather than over-provisioning day one.
-      size: 2Gi
+      # 2Gi -> 5Gi 2026-10-25: bucket held 1.67Gi (75 objects) of real data, 88% full,
+      # no reclaimable space. The chart renders the PVC from this value, so editing it
+      # expands the live volume (storageclass allowVolumeExpansion).
+      size: 5Gi
 
     # Recreate, not the chart default RollingUpdate (maxSurge 100%, maxUnavailable
     # 0): one replica on a ReadWriteOnce volume deadlocks a rollout whenever the new
