@@ -46,9 +46,29 @@ data:
         replacement  = "loki.source.kubernetes.pods"
       }
 
+      // Directory uid on the node. Static pods (Talos runs kube-apiserver,
+      // -controller-manager and -scheduler this way) are discovered through
+      // their API *mirror* pod, whose metadata.uid is NOT what the kubelet names
+      // the log directory after: that is the static pod's own uid, which the
+      // mirror carries in the kubernetes.io/config.hash annotation. Using the
+      // mirror uid matched no files, so control-plane logs never reached Loki
+      // (checked 2026-10-25: no kube-system/kube-apiserver-* stream in 7d).
+      // Prefer the hash when present; ordinary pods have no such annotation, so
+      // the second rule does not match and the first value stands.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_uid"]
+        target_label  = "__tmp_log_uid"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_annotation_kubernetes_io_config_hash"]
+        regex         = "(.+)"
+        replacement   = "$1"
+        target_label  = "__tmp_log_uid"
+      }
+
       // /var/log/pods/<ns>_<pod>_<uid>/<container>/*.log
       rule {
-        source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+        source_labels = ["__tmp_log_uid", "__meta_kubernetes_pod_container_name"]
         separator     = "/"
         action        = "replace"
         replacement   = "/var/log/pods/*$1/*.log"
@@ -95,6 +115,19 @@ data:
       // label, which is never sent to Loki) -- harmless, and
       // stage.structured_metadata below skips empty values, so this doesn't
       // add a level to streams that never had one.
+      // klog (Kubernetes control plane and many operators) puts severity in a
+      // leading letter -- `E1026 01:16:16.291665       1 file.go:177] msg` --
+      // which neither the JSON path below nor Loki's heuristic reads, so every
+      // such line was detected_level "unknown". Map I/W/E/F onto the same
+      // extracted_level the JSON stage fills; non-klog lines leave it empty and
+      // the JSON stage (or nothing) decides, as before.
+      stage.regex {
+        expression = "^(?P<klog_level>[IWEF])[0-9]{4} "
+      }
+      stage.template {
+        source   = "extracted_level"
+        template = "{{ if eq .klog_level \"I\" }}info{{ else if eq .klog_level \"W\" }}warn{{ else if eq .klog_level \"E\" }}error{{ else if eq .klog_level \"F\" }}fatal{{ end }}"
+      }
       stage.json {
         expressions = {
           extracted_level = "level || Level || LEVEL || severity || Severity || LogLevel || lvl",
