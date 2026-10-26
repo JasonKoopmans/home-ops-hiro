@@ -202,14 +202,21 @@ spec:
         limits:
           cpu: 500m
 
+    # Top-level in chart 7.x and ON by default. This used to sit under
+    # `monitoring.lokiCanary`, a key the chart no longer has; Helm ignored it
+    # without error, so a DaemonSet canary ran on every node (checked
+    # 2026-10-25) and its queries wrote most of Loki's own log volume. Nothing
+    # scrapes its metrics. To use it as a pipeline-health signal, scrape it and
+    # alert on loki_canary_* first.
+    lokiCanary:
+      enabled: false
+
     # Disable self-monitoring to reduce resource usage
     monitoring:
       selfMonitoring:
         enabled: false
         grafanaAgent:
           installOperator: false
-      lokiCanary:
-        enabled: false
 
     test:
       enabled: false
