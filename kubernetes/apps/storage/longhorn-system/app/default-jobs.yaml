@@ -96,7 +96,16 @@ metadata:
   name: longhorn-tsdb-trim-job
   namespace: storage
 spec:
-  cron: "0 3 * * *" # every day at 3:00 AM — 75min BEFORE the 4:15 tsdb snapshot
+  # Every 6h (03/09/15/21). Daily left prometheus-db's actualSize sawtoothing
+  # 5.1 -> 14.0GiB of 15GiB between trims against ~5.4GiB of real filesystem
+  # use (7d, 2026-10-25), tripping LonghornVolumeUsageHigh each day. The 03:00
+  # run is still 75min BEFORE the 4:15 snapshot. Chain removal is enabled for
+  # this class, so each later run also collapses that snapshot: it now lives
+  # ~5h instead of ~23h. Checked live 2026-10-25: prometheus-db and loki's
+  # volume both have unmapMarkSnapChainRemoved=enabled. Loki (10Gi, 0.36GiB
+  # actual, on 2-CPU hiro-cmp-04) shares this group; its trim is small and
+  # concurrency 1 serialises the two.
+  cron: "0 3,9,15,21 * * *"
   task: "filesystem-trim"
   groups:
   - tsdb
