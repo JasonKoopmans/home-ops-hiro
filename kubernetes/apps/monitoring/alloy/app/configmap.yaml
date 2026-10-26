@@ -80,6 +80,23 @@ data:
         stage.cri {}
       }
 
+      // Drop Loki's own per-query chatter. Measured 2026-10-25: loki-0 was
+      // ~520MB/day and loki-gateway's nginx ~75MB/day of a ~700MB/day total
+      // (~85%), none of it diagnostic. Every query (the loki-canary alone issues
+      // one every few seconds) writes a ~1.3KB metrics.go query-stats line plus
+      // table_manager/engine/roundtrip/index_set bookkeeping, all level=info;
+      // the gateway logs one access line per canary push. Warn/error lines,
+      // compactor/ingester/ruler info and non-2xx gateway responses still flow.
+      // Dropped here, not in Loki, so Loki's own log_level stays at its default.
+      stage.match {
+        selector = "{instance=\"monitoring/loki-0:loki\"} |~ \"level=info .*caller=(metrics|table_manager|engine|roundtrip|index_set)[.]go\""
+        action   = "drop"
+      }
+      stage.match {
+        selector = "{instance=~\"monitoring/loki-gateway-.*:nginx\"} |~ \"[]] +2[0-9][0-9] \""
+        action   = "drop"
+      }
+
       // Loki's own detected_level heuristic only recognizes a fixed set of
       // JSON key names (level/severity/lvl) and, once a line parses as JSON
       // at all, never falls back to scanning the raw text for a level word.
