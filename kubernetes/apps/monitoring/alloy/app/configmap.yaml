@@ -229,6 +229,64 @@ data:
           job = "syslog",
         }
       }
+      forward_to = [loki.process.syslog.receiver]
+    }
+
+    // OPNsense filterlog (pf) lines are CSV with no app text in the line:
+    //   rule,sub,anchor,tracker,INTERFACE,reason,ACTION,DIR,IPVER,...
+    // Arrived 2026-10-25 once gw01 got a second remote destination limited to
+    // application filterlog at level info. Measured then: ~4000 lines per 30
+    // minutes, ~71% of them `pass` (outbound pass rules are logged), and almost
+    // all the blocks inbound on the LAN interface.
+    //
+    // Policy: keep the blocks as log lines (they are the events worth reading),
+    // count every action as a metric (rates, not lines, are what you alert on),
+    // and drop the passes after counting. Other syslog apps pass through
+    // untouched.
+    loki.process "syslog" {
+      stage.match {
+        selector = "{app_name=\"filterlog\"}"
+
+        stage.regex {
+          expression = "^(?:[^,]*,){4}(?P<fw_interface>[^,]*),[^,]*,(?P<fw_action>[^,]*),(?P<fw_dir>[^,]*),(?P<fw_ipver>[46]),"
+        }
+        // Low-cardinality labels so blocks can be filtered without a regexp.
+        // action must be one: a stage.metrics counter is labelled by the
+        // entry's label set, not by extracted values, so without it blocks and
+        // passes cannot be told apart. After the drop below the stream's
+        // action is always "block".
+        stage.labels {
+          values = {
+            interface = "fw_interface",
+            dir       = "fw_dir",
+            action    = "fw_action",
+          }
+        }
+        // source_ip is the Envoy pod the UDP route came through, not the
+        // firewall (hostname is); it only fragments the stream.
+        stage.label_drop {
+          values = ["source_ip"]
+        }
+        // Exposed on Alloy's own /metrics as
+        // loki_process_custom_opnsense_filterlog_lines_total.
+        stage.metrics {
+          metric.counter {
+            name        = "opnsense_filterlog_lines_total"
+            description = "OPNsense filterlog lines seen, by interface, direction and pf action."
+            source      = "fw_action"
+            prefix      = ""
+            action      = "inc"
+            match_all   = true
+          }
+        }
+      }
+
+      // Counted above, now discard. A `pass` is the 7th CSV field.
+      stage.match {
+        selector = "{app_name=\"filterlog\"} |~ \"^([^,]*,){6}pass,\""
+        action   = "drop"
+      }
+
       forward_to = [loki.write.default.receiver]
     }
 
