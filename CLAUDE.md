@@ -22,6 +22,7 @@ There is no unit-test suite; the manifests are the code. Verify with:
 - Read-only `kubectl`/`flux` commands are fine for diagnosis. **Never `kubectl apply`/`delete`/`edit` Flux-managed resources** — change Git instead. `task apply` exists for imperative testing but prefer letting Flux reconcile.
 - Before risky operations (node work, storage changes), run `task cluster:health`.
 - **What already alerts, and where it routes,** needs no cluster credentials through the Grafana MCP (`grafana_api_request`, GET only): `/api/datasources/proxy/uid/prometheus/api/v1/rules?type=alert` lists every loaded rule with its state, and `/api/datasources/proxy/uid/alertmanager/api/v2/alerts` lists firing alerts with their `receivers` (`.../telegram-warnings` is the digest, `null` is a blackhole). Datasource uids: `thanos` (default; raw 7d, then 5m/1h), `prometheus` (3d), `alertmanager`. Range queries through the MCP return raw JSON and can exceed the token limit, so prefer instant queries built on `count_over_time` / `max_over_time`.
+- **Control-plane logs and leader history** (kube-controller-manager, apiserver; who the leader is, when it changed) are in Loki and Thanos, with label and range-limit traps: `docs/runbook-control-plane-logs.md`. A once-a-minute `VerifyVolumesAreAttached ... nil spec for volume` line there is harmless and self-clears: `docs/runbook-kcm-nil-spec-volume.md`.
 
 ### Editing rules of thumb
 
