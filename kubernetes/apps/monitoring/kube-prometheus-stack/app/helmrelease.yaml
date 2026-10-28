@@ -382,6 +382,8 @@ spec:
                   # over-provisioning; no node had 45Gi free), leaving the volume
                   # permanently `degraded` on a single replica. Changing size or class
                   # here requires deleting the PVC so the StatefulSet reprovisions it.
+                  # Resolved: the PVC was recreated 2026-08-21 and is now 15Gi on
+                  # longhorn-tsdb with both replicas healthy (checked 2026-10-28).
                   storage: 15Gi
         # Thanos sidecar: uploads TSDB blocks to Minio (observability-thanos bucket) for
         # long-term storage.

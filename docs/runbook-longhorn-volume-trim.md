@@ -124,7 +124,11 @@ kubectl -n <namespace> logs <app>-pvc-fstrim
 kubectl -n <namespace> delete pod <app>-pvc-fstrim
 ```
 
-**Step 3 — verify and revert.** Confirm the shrink, then revert the setting
+**Step 3 — verify and revert.** *(Skip the revert on a volume whose class
+already sets `unmapMarkSnapChainRemoved: "enabled"` — `longhorn-tsdb`,
+`longhorn-scratch` and the `*-no-backup` classes, see `storageclasses.yaml`.
+There `enabled` is the intended steady state, and Step 1 is already done.)*
+Confirm the shrink, then revert the setting
 back to `ignored` — leaving it `enabled` gives Longhorn an ongoing background
 CPU cost (it has to actively track and coalesce trim-freed blocks on every
 write), which is exactly the kind of load this runbook exists to get rid of:

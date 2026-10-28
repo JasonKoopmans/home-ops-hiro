@@ -36,7 +36,6 @@ checkable, not aspirational — "once 14d of data exists" rather than "later".
 | 5 | Restore-drill script is ~230 lines of shell embedded in YAML — no shellcheck, no tests | It grows another meaningful step or needs branching logic → move to `containers/` + GHCR | `kubernetes/apps/database/postgres-restore-drill/app/cronjob.yaml` (header) |
 | 6 | Tenant databases inherit PostgreSQL's default `CONNECT` grant to `PUBLIC` | Each new tenant `Database` CR → pair it with `REVOKE CONNECT ... FROM PUBLIC` | [runbook-postgres-recovery.md](runbook-postgres-recovery.md) §5 |
 | 7 | `prometheusrule-recording-annotator.yaml` keeps a weaker failed-Job expression on a premise that is now false | Tracked in [#502](https://github.com/JasonKoopmans/home-ops-hiro/issues/502) — upgrade to the last-success-age shape | `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-recording-annotator.yaml` |
-| 8 | Longhorn `prometheus` volume left `ignored`/unpatched; 30Gi→15Gi resize never done | Next Longhorn maintenance window | [runbook-longhorn-volume-trim.md](runbook-longhorn-volume-trim.md) |
 | 9 | Cilium BGP peering never established — all LB Services actually served by L2announcement | Decision tracked in issue #498 | `kubernetes/apps/kube-system/cilium/` |
 | 10 | KEDA core + HTTP add-on resource values are unmeasured guesses (chart defaults cut from ~2050m to ~130m CPU requested) | ~14d of `container_memory_working_set_bytes` exists for the `keda` namespace | `kubernetes/apps/keda/*/app/helmrelease.yaml`; [ephemeral-apps-keda.md](ephemeral-apps-keda.md) |
 | 11 | freecad scale-to-zero assumes `scalingMetric.concurrency` holds a Selkies GUI session "active" — plausible mechanism, unproven | First real multi-minute freecad session left deliberately idle; if it scales down mid-use, fall back to `replicas.min: 1` | [ephemeral-apps-keda.md](ephemeral-apps-keda.md) |
@@ -53,6 +52,7 @@ checkable, not aspirational — "once 14d of data exists" rather than "later".
 | CNPG backups unproven (no base backup had ever fired) | Closed 2026-08-25 — first backup verified, restore drill passed, now automated weekly |
 | `cmp-05` undersized RAM | Closed 2026-08-23 — verified ~10.7Gi, matches the other nodes |
 | Longhorn "no-backup" storage classes silently opted *in* to backups | Fixed in #311 |
+| Longhorn `prometheus` volume left `ignored`/unpatched; 30Gi→15Gi resize never done | Closed 2026-10-28 — both premises were already false. The PVC was recreated 2026-08-21 at 15Gi on `longhorn-tsdb`, whose class sets `unmapMarkSnapChainRemoved: enabled` (live volume confirmed `enabled`, 2 replicas, healthy). Trim now runs every 6h (#889); 2-day peak `actualSize` 7.5Gi of 15Gi |
 
 ---
 
