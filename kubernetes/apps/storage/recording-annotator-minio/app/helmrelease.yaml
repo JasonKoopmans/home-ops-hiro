@@ -16,12 +16,45 @@ spec:
         name: recording-annotator-minio
         namespace: storage
   upgrade:
-    # Skip the chart's post-upgrade `post-job`: it needs quay.io/minio/mc, which answers
+    # Skip the chart's post-upgrade `post-job`: it needed quay.io/minio/mc, which answers
     # HTTP 401 to anonymous pulls as of 2026-10-04 and is cached on no node, so the hook
-    # hangs in ImagePullBackOff and Flux rolls the upgrade back. The bucket already
-    # exists and is never purged. See storage/minio.
+    # hung in ImagePullBackOff and Flux rolled the upgrade back. mcImage now points at
+    # docker.io/pgsty/mc, but keep this: the bucket already exists and is never purged,
+    # so the hook has nothing to do. See storage/minio.
+    #
+    # Note the chart's Deployment has NO liveness/readiness probe, so Helm's wait is satisfied by
+    # "container started": a Silo that starts and then crash-loops can still read as a successful
+    # upgrade. Verify with the runbook's checks, not with Ready=True.
     disableHooks: true
   values:
+    # Server: Silo (pgsty's maintained community fork of minio/minio, AGPL-3), still deployed with the official
+    # minio chart 5.4.0 — the last chart ever published. Upstream minio/minio is archived, quay.io/minio/* answers
+    # HTTP 401 to anonymous pulls and Docker Hub minio/minio:RELEASE.2024-12-18 is 404 (2026-10-28), so the old
+    # RELEASE.2024-12-18T13-15-44Z image survives only in the kubelet caches of hiro-cmp-03 and -05.
+    #
+    # The chart hardcodes `docker-entrypoint.sh minio server /export ...`; Silo's entrypoint rewrites a leading
+    # `minio` argument to `silo`, so only the image needs overriding. Silo keeps the MINIO_* env, the /minio/*
+    # routes (health, metrics), the minio_* metric names and the .minio.sys layout.
+    # Runbook: docs/runbook-minio-silo-swap-recording-annotator.md. Qualification: docs/silo-qualification.md.
+    #
+    # GATE: the pin below is the qualification candidate (release 2026-10-26); the final pin comes from the
+    # silo-qualify report. Do not merge until it is confirmed or replaced.
+    # Use the plain image, NOT the -distroless variant: the chart's command is `/bin/sh -ce '...'`.
+    #
+    # WARNING: rolling back to the original MinIO image is not supported once Silo has written .minio.sys
+    # (persistent IAM revocation metadata). See "Rollback ladder" in the runbook before reverting this block.
+    image:
+      repository: docker.io/pgsty/silo
+      # tag@digest (multi-arch index digest): a community fork's tag is not a promise, the digest is.
+      tag: RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7
+
+    # Client image the chart's hook/job containers use (bucket create, users, policies). Unused on upgrade
+    # because upgrade.disableHooks is true, but it must stay pullable: a fresh install runs it. Same release
+    # string as the server (the two are published together).
+    mcImage:
+      repository: docker.io/pgsty/mc
+      tag: RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8
+
     # Single-node deployment dedicated to RecordingAnnotator (spec section 9) — deliberately separate from
     # the shared storage/minio instance (Thanos/Loki), which is already capacity-constrained and unrelated
     # in purpose to this app's recordings.
@@ -57,10 +90,13 @@ spec:
 
     persistence:
       enabled: true
-      # No Longhorn backup: offsite protection for this bucket is MinIO server-side replication to an
-      # Object-Locked AWS S3 bucket (docs/backup-recovery.md §3 in the app repo), configured out-of-band
-      # per deploy/backup/RUNBOOK.md. A Longhorn backup here would just double the write cost for no
-      # additional protection against the threat that actually matters (ransomware/corruption).
+      # No recurring Longhorn backup: offsite protection for this bucket is the hourly `mc mirror` CronJob
+      # (recording-annotator-mirror-cronjob.yaml) into an Object-Locked AWS S3 bucket — see
+      # docs/backup-recovery.md §2. (MinIO server-side replication was tried and abandoned in #420: it cannot
+      # target AWS S3.) A recurring Longhorn backup would just double the write cost for no additional
+      # protection against the threat that actually matters (ransomware/corruption). The class's
+      # snapshot-only group takes a daily local snapshot, and its weekly trim collapses the whole snapshot
+      # chain (unmapMarkSnapChainRemoved) — so a local snapshot is a short-lived restore point, never a backup.
       storageClass: longhorn-2-no-backup
       # Start small; grow as real recordings land rather than over-provisioning day one.
       # 2Gi -> 5Gi 2026-10-25: bucket held 1.67Gi (75 objects) of real data, 88% full,

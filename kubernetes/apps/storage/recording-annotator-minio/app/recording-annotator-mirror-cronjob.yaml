@@ -30,6 +30,13 @@
 #
 # The trade-off versus server-side replication is RPO: this is hourly rather than continuous.
 #
+# Server and client changed after the above was verified: the source is now Silo (pgsty's fork of MinIO) and the
+# client is pgsty/mc, because upstream minio/mc is no longer pullable. The AWS-side behaviour that mattered — a
+# checksum on every PUT into an Object-Locked bucket — is the client's job, so `--md5` stays. After a client or
+# server swap, run the FIRST mirror by hand with `--dry-run` (docs/runbook-minio-silo-swap-recording-annotator.md):
+# if the new pair decides existing objects differ, a real run would write new versions into a COMPLIANCE-locked
+# bucket that nobody can delete for the retention period.
+#
 # --remove is deliberately ABSENT and must stay absent. It would propagate source deletions to the replica,
 # which inverts the threat model (docs/backup-recovery.md §3): accidental deletion and ransomware act on the
 # primary, and the replica exists precisely so those do not reach it. Without it a deleted recording simply stays
@@ -66,7 +73,11 @@ spec:
             runAsGroup: 1000
           containers:
             - name: mc
-              image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+              # pgsty/mc (the maintained fork's client) replaced quay.io/minio/mc, which answers HTTP 401 to
+              # anonymous pulls. GATE: tag per docs/silo-qualification.md; the command below needs /bin/sh in
+              # the image (UNVERIFIED for pgsty/mc until the qualification report says so — if it has none, this
+              # script must become a shell-free invocation or use an image that has one).
+              image: docker.io/pgsty/mc:RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8
               command:
                 - /bin/sh
                 - -c
