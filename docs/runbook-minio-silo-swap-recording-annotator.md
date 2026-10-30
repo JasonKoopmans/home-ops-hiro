@@ -3,7 +3,7 @@
 Instance: `kubernetes/apps/storage/recording-annotator-minio` (dedicated, holds the real recordings).
 Sibling: the shared Thanos/Loki instance has its own runbook, `runbook-minio-silo-swap-shared.md` (same section
 skeleton; written by another session, so check it for anything that must be done in lockstep: the Renovate rule and
-`kubernetes/flux/cluster/ks.yaml` are shared files).
+`kubernetes/flux/cluster/ks.yaml` is shared, and this PR no longer touches it: D1 uses `upgrade.disableWait` in the HelmRelease).
 Qualification evidence: [silo-qualification.md](silo-qualification.md) (written by the `silo-qualify` session).
 
 Legend. **GATE:** = a fact the qualification report must supply; do not start until it is filled in.
@@ -20,7 +20,7 @@ Verified read-only on 2026-10-28 (re-check anything load-bearing at T-0):
 | Volume | PVC `recording-annotator-minio` 5Gi, Longhorn `pvc-e31e063d-00ee-4679-8ca0-80338b9f737a`, class `longhorn-2-no-backup`, 2 replicas, actualSize 2.16 GiB, `unmapMarkSnapChainRemoved: enabled`, group `snapshot-only` |
 | Offsite | CronJob `recording-annotator-media-mirror`, `23 * * * *` (Chicago), last success 2026-10-29T01:23:04Z; AWS bucket `hiro-recording-annotator-media-backup`, Object Lock COMPLIANCE |
 | Pod memory | 14d peak working set 239 MB (limit 512Mi) |
-| HR | `spec.timeout` unset (5m), `upgrade.remediation: {remediateLastFailure: true, retries: 2}` from `cluster-apps`, `disableHooks: true` |
+| HR | `spec.timeout` unset (5m), `upgrade.remediation: {remediateLastFailure: true, retries: 2}` from `cluster-apps`, `disableHooks: true`, `disableWait: true` (D1 option (d), temporary) |
 
 ---
 
@@ -33,7 +33,7 @@ re-run (`ssa: IfNotPresent`), so editing its image in the PR changes nothing liv
 
 Why now: upstream `minio/minio` is archived, `quay.io/minio/*` answers HTTP 401 to anonymous pulls and Docker Hub
 `minio/minio:RELEASE.2024-12-18T13-15-44Z` is 404. The only copy of the running server image is in the kubelet cache
-of `hiro-cmp-03` and `hiro-cmp-05`; the old `mc` is cached only on `hiro-cmp-01`.
+of `hiro-cmp-03` and `hiro-cmp-05`; the old `mc` (`quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z`) is cached on `hiro-cmp-01` and `hiro-cmp-05` (CRI listing, 2026-10-30).
 
 Impact during the window (budget 90 min, expected 30-45; the server swap itself is seconds: 13-17 s on the clone rehearsal, quiesce, proofs and verification are what take time):
 
@@ -73,8 +73,8 @@ destroy the snapshot mid-soak.
 ## 2. Gates
 
 Qualification (PR #902, `docs/silo-qualification.md`, 2026-10-30) closed most gates; the table records what it proved
-and what is left. **Open before the window: G13, and the two things the harness could not test: the real AWS leg of
-the mirror (M11) and the playback path through Envoy (§B4/M13).** Do not start M1 until G13 is closed.
+and what is left. **Nothing blocks the start. Two things the harness could not test are verified live during the window: the real AWS leg of
+the mirror (M11, `--dry-run` first) and the playback path through Envoy (§B4/M13).**
 
 | # | GATE | Answer | Why it gates |
 |---|---|---|---|
@@ -89,7 +89,7 @@ the mirror (M11) and the playback path through Envoy (§B4/M13).** Do not start 
 | G9 | Memory | **CLOSED**: Silo idle 110 MiB with a seeded bucket vs the 512Mi limit (old 14d peak 239 MB) | OOM-kill |
 | G10 | Rollback after Silo has run on the volume | **PASS on the clone**: old 2024-12-18 image reopened Silo-touched data in 4 s, 79 sha256 and the listing identical, then Silo again identical. **Not exercised: IAM revocation metadata** (STS/service-account revocation); this instance has none and the swap creates none, but upstream calls rolling downgrades unsupported once it exists, so the formal rollback is still "restore the pre-swap copy" | decides how real R1 is |
 | G12 | App side | **CLOSED**: `ra-app-s3` (RecordingAnnotator PR #49, `docs/storage-compatibility.md`): the app's 8 MinIO integration tests plus 20+ new cases (multipart, range, expiry, scoped credential, chunk API) pass unchanged on this exact Silo pin. **No app change or release is needed for the swap.** | app compat |
-| G13 | Default region | **OPEN**: the app has no region option; a server with `MINIO_REGION` other than `us-east-1` returns 400 on every call. Check `region` in the §B3 export (it works today, so it should be the default) | app compat |
+| G13 | Default region | **CLOSED**: the live Deployment has no `MINIO_REGION` env (default `us-east-1`) and the app works today, so the swap keeps the region. The `region` field in the P8 `admin info` export is the live confirmation, and the M8 diff must show it unchanged. | app compat |
 | G11 | SN-2026-011 | **CLOSED**: fixed from 2026-09-16 (SN-2026-011…014); the 10-26 pin includes it. The old 2024-12-18 server is *older* than the fix, so the swap reduces exposure on the LAN-exposed S3 endpoint | security |
 
 ---
@@ -101,7 +101,7 @@ repo); the admin exports contain access-key names and must not be committed.
 
 ### T-3d (Thu 10-29)
 
-- **P1.** Read the PR and the qualification report. Close the open gate (G13) and read the rest. Decide D1-D8 (§8). If G10 says "no downgrade", R1 is
+- **P1.** Read the PR and the qualification report. Read the rest. Decide D1-D8 (§8). If G10 says "no downgrade", R1 is
   gone and the plan leans on R2/R3.
 - **P2. Helper block.** Define §A in your shell. Run the smoke script (§M10) **against the current MinIO**, as a
   rehearsal. It touches only the scratch bucket `silo-swap-smoke`, never `recordings`. This proves the script, the
@@ -118,7 +118,7 @@ repo); the admin exports contain access-key names and must not be committed.
 
   If your own identity cannot list, use the replication principal from inside a pod (§B2 fallback). **Never write**
   to this bucket: no `cp`, no `put-object`, no test objects. COMPLIANCE retention makes any stray object permanent.
-- **P4. Prove the retention claim.** Take a throwaway manual snapshot, confirm it survives the next daily
+- **P4. Prove the retention claim (optional).** The primary trim-proof restore point is the CSI clone from M5, which does not depend on this claim; P4 only decides whether the `pre-silo-swap` snapshot is trustworthy as a second layer. Run it today (Fri 10-30) and read the result **Sat 10-31 after 05:00Z**: take a throwaway manual snapshot, confirm it survives the next daily
   `snapshot-only` run (05:00Z), then delete it:
 
   ```sh
@@ -135,8 +135,9 @@ repo); the admin exports contain access-key names and must not be committed.
   snapshots.longhorn.io ra-retain-probe`. (Snapshot names must stay under 63 bytes; longer names create undeletable
   zombies, see memory `longhorn-snapshot-name-63-byte-zombie`.) The trim half of the claim is not testable without
   wiping the chain; it rests on the 2026-07-28 policy and the live volume field `unmapMarkSnapChainRemoved: enabled`.
-- **P5.** Decide D1 (HelmRelease remediation). If approved, open the `ks.yaml` PR now (patch in §A3) so it can sit
-  for review.
+- **P5.** Decide D1 (HelmRelease remediation). The PR already carries option (d): `upgrade.disableWait: true` in the
+  HelmRelease, marked TEMPORARY. No `ks.yaml` PR is needed. Confirm you accept the cost (HelmRelease reads Ready even if
+  the pod is not, so watch the pod and `RecordingAnnotatorMinioDown`).
 
 ### T-2d (Fri 10-30)
 
@@ -157,9 +158,9 @@ repo); the admin exports contain access-key names and must not be committed.
 - **P11. Offsite proof, run 1** (§B2): trigger a mirror by hand, compare counts and sizes against AWS.
 - **P12.** PR: final pin from the report, flux-local green, rendered Deployment shows the pinned image and the
   unchanged `/bin/sh -ce …docker-entrypoint.sh minio server …` command. Rebase on `origin/main`.
-- **P13.** If D1 = ks.yaml patch: merge that PR now and confirm
-  `kubectl -n storage get hr recording-annotator-minio -o jsonpath='{.spec.upgrade.remediation}'` shows
-  `remediateLastFailure:false`.
+- **P13.** Nothing to merge for D1 (option (d) lives in this PR). Only if you chose (c) instead: merge the `ks.yaml`
+  patch PR now and confirm `kubectl -n storage get hr recording-annotator-minio -o jsonpath='{.spec.upgrade.remediation}'`
+  shows `remediateLastFailure:false`.
 
 ### T-0 (Sun 10:00 CST, before touching anything)
 
@@ -292,15 +293,16 @@ kubectl -n storage get cronjob recording-annotator-media-mirror -o jsonpath='{.s
 ```
 
 Merge the PR (the user does this; sessions never merge). Confirm `flux -n storage get ks recording-annotator-minio`
-is reconciled to the merge commit and the HR shows the new image values, **and that the D1 `ks.yaml` patch is live**
-(P13). Only then:
+is reconciled to the merge commit and the HR shows the new image values **and `spec.upgrade.disableWait: true`**
+(`kubectl -n storage get hr recording-annotator-minio -o jsonpath='{.spec.upgrade}'`). Only then:
 
 ```sh
 flux -n storage resume hr recording-annotator-minio
 ```
 
-An override of `remediateLastFailure` inside the HelmRelease itself would be overwritten by the `cluster-apps` patch,
-which is why D1 is a `ks.yaml` change. Watch:
+An override of `remediateLastFailure` inside the HelmRelease itself would be overwritten by the `cluster-apps` patch;
+`disableWait` is not touched by it, and with the wait off Helm has nothing to time out, so no remediation can start.
+Watch:
 
 ```sh
 flux -n storage get ks recording-annotator-minio
@@ -316,8 +318,9 @@ Because the Deployment has no readiness probe, **Helm calls the upgrade a succes
 running**. Do not read `Ready=True` as "Silo works"; do M8.
 
 Abort criteria: the pod does not reach `Running` in 5 min (`ImagePullBackOff` means P6 was wrong; `CrashLoopBackOff`
-means Silo rejects the volume). With D1 = no patch, `remediateLastFailure: true` rolls back by itself at the 5-min
-Helm timeout, to the old image, on whatever node the scheduler picks: see §6 R1 and the D1 recommendation.
+means Silo rejects the volume). With D1 = (d) the broken pod stays broken in place and the HelmRelease still reads
+Ready: **you** pick the rollback rung (§6). Without any guard, `remediateLastFailure: true` would roll back by itself
+at the 5-min Helm timeout, to the old image, on whatever node the scheduler picks: see §6 R1.
 
 ### M8. Verify the server (before anything else comes back)
 
@@ -503,10 +506,10 @@ the old server image is in two node caches only).
 
 Notes that make R1 honest:
 
-- **Keeper pods (§B1b)** hold the old server image on `hiro-cmp-03` and `hiro-cmp-05` so image GC cannot evict it.
+- **Keeper pods (§B1b, label `app=silo-image-keeper-ra`)** hold the old server image on `hiro-cmp-03` and `hiro-cmp-05`, and the old `mc` on `-01` and `-05`, so image GC cannot evict them.
   The rollback PR must pin the pod there (`nodeSelector: kubernetes.io/hostname: hiro-cmp-05`, where the volume is
   attached). A rollback pod on `-01/-02/-04` stalls in `ImagePullBackOff`.
-- Prefer **not** to let Flux roll back on its own (D1). An automatic rollback to the old image on a volume Silo has
+- Prefer **not** to let Flux roll back on its own (D1; option (d) in this PR prevents it). An automatic rollback to the old image on a volume Silo has
   already modified is exactly the unsupported downgrade, and it happens at the Helm 5-minute timeout, on a random
   node, with no human looking.
 - Rollback staging (P9), R1 content: image block back to `quay.io/minio/minio` / tag
@@ -565,10 +568,14 @@ recording-annotator-minio` to recreate the scoped user and policy on the empty i
 |---|---|---|
 | (a) Accept the default | After 5 min Flux rolls back to the old image on a random node (works only on `-03`/`-05`), possibly onto a volume Silo already touched | none; the least safe for this data |
 | (b) `flux suspend hr` before merge, `flux resume hr` at M7 | The upgrade starts on your command, but remediation is unchanged: it still rolls back by itself | adds a manual trigger only |
-| **(c) Temporary scoped patch in `ks.yaml` (recommended)** | A failed upgrade **stays failed in place**: the broken pod keeps its logs and the volume is not touched by an old binary; you choose the rung. Flux still retries twice. Recover with `flux reconcile hr recording-annotator-minio --reset --force` after fixing | one extra small PR on `kubernetes/flux/cluster/ks.yaml` (a file the repo normally forbids touching) and a revert PR after the soak. Longhorn has the same exemption. |
+| **(c) Temporary scoped patch in `ks.yaml`** | A failed upgrade **stays failed in place** and Flux reports it truthfully (HelmRelease not Ready). Flux still retries twice. Recover with `flux reconcile hr recording-annotator-minio --reset --force` after fixing | one extra PR on `kubernetes/flux/cluster/ks.yaml` (a file the repo normally forbids touching, owner approval needed) and a revert PR after the soak. Pick this if you want Flux to report the failure |
+| **(d) `upgrade.disableWait: true` in the HelmRelease (recommended; in this PR)** | The upgrade is "done" once the Deployment is applied, so there is no failed action and nothing to remediate: a broken Silo pod stays broken **in place** (logs intact, the old binary never touches the volume) and you choose the rung. Same guard `runbook-minio-silo-swap-shared.md` uses for the shared instance (PR #900) | the HelmRelease reads Ready even if the pod is not (the Deployment has no probes anyway, so Ready was never proof): watch the pod, M8 and `RecordingAnnotatorMinioDown`. No `kubernetes/flux/` change. Remove the two lines after the soak |
 
-(c) patch, placed beside the Longhorn one and removed after the soak (the shared instance needs the same entry for
-`minio`; do both in one PR and one revert so they cannot conflict):
+The `cluster-apps` patch only sets `install`, `rollback` and `upgrade.{cleanupOnFail,crds,strategy,remediation}`;
+`disableWait` is not among them, which is why (d) survives while an in-HelmRelease `remediation:` override does not.
+
+(c), if you prefer it over (d), is a patch placed beside the Longhorn one and removed after the soak (the shared
+instance would need the same entry for `minio`; do both in one PR and one revert so they cannot conflict):
 
 ```yaml
             - # TEMPORARY: MinIO -> Silo swap window (docs/runbook-minio-silo-swap-recording-annotator.md D1).
@@ -590,7 +597,7 @@ recording-annotator-minio` to recreate the scoped user and policy on the empty i
                 name: recording-annotator-minio
 ```
 
-Not included in this PR: it needs your explicit approval (the file is the Flux entry point).
+Do not combine (c) and (d); (c) is not in this PR (it needs your explicit approval, the file is the Flux entry point).
 
 ---
 
@@ -606,8 +613,8 @@ objects = 80 + genuine uploads and equal to the AWS listing. On Mon 11-02 after 
 
 At the end of the soak:
 
-1. Revert the D1 patch (if used).
-2. Delete the keeper pods (§B1b) and any `prepull-*` pods; delete the `pre-silo-swap` snapshot, the clone PVC
+1. Remove `upgrade.disableWait: true` and its TEMPORARY comment from the HelmRelease (D1 option (d); or revert the `ks.yaml` patch if you chose (c)). Do it in a small PR, and expect one no-op reconcile.
+2. Delete the keeper pods (`kubectl -n storage delete pod -l app=silo-image-keeper-ra`; the shared instance's session may run its own keepers under another label, leave those) and any `prepull-*` pods; delete the `pre-silo-swap` snapshot, the clone PVC
    `recording-annotator-minio-preswap` (by explicit name; it is the swap's only trim-proof local copy, so keep it until
    you are sure) and (once happy, D5) the Longhorn backup; delete `~/ra-silo-swap/` exports that contain IAM data.
 3. Update this runbook's status line, add the date to `docs/backup-recovery.md` if you want it, and record the swap
@@ -624,15 +631,15 @@ At the end of the soak:
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | HelmRelease remediation (§6) | (c) scoped `ks.yaml` patch, merged at T-1d, reverted after soak |
+| D1 | HelmRelease remediation (§6) | (d) `upgrade.disableWait: true` in the HelmRelease (in this PR, same as the shared instance in #900), removed after the soak. (c) `ks.yaml` patch only if you want Flux to report the failure |
 | D2 | Window | Sunday 2026-11-01 from 10:00 CST |
 | D3 | Production write verification | A: next genuine upload; B only if you accept a permanent tiny artifact |
-| D4 | Mirror CronJob image if G3 fails (no `/bin/sh` in `pgsty/mc`) | Rewrite the script shell-free using `MC_HOST_*` env + `mc mirror` args, or build a tiny image in `containers/` (GHCR pattern); the cached old `mc` exists only on `hiro-cmp-01` |
+| D4 | Mirror CronJob image if G3 fails (no `/bin/sh` in `pgsty/mc`) | Rewrite the script shell-free using `MC_HOST_*` env + `mc mirror` args, or build a tiny image in `containers/` (GHCR pattern); the cached old `mc` exists only on `hiro-cmp-01` and `hiro-cmp-05` |
 | D5 | Longhorn backup to S3 in addition to the clone and snapshot | Optional now that the CSI clone is the primary restore point; take it if you want an off-cluster-node, off-disk copy (2.2 GiB, a few minutes) |
 | D6 | Keeper pods for the old server and `mc` images | Yes; delete at end of soak |
 | D7 | Alert silences | Narrow, 3h (M1) |
 | D8 | Pin by `tag@sha256` (as the PR does, as `silo-qualification.md` recommends) vs tag only | Digest; update tag and digest together, never the tag alone; manual bumps until the Renovate regex rule exists |
-| D9 | **Not caused by the swap, found by the app audit:** app 0.5.0 `DELETE /api/artifacts/{id}` issues `s3:DeleteObject`, which the scoped policy deliberately omits, so deleting an owned recording returns 500 **after** the artifact's comments/chapters/transcripts were already deleted (order: children, staging, blob, row). Grant `s3:DeleteObject` on `recordings/*` (a live `mc admin policy create`, the bootstrap Job will not re-run) or accept/avoid deletion in the UI. The mirror runs without `--remove`, so an enabled delete does not reach the offsite copy. Because `recordings` has versioning **Enabled**, a plain delete only adds a delete marker (old versions stay); permanent removal would need `s3:DeleteObjectVersion`, which nothing grants. Confirmed by the app audit (RecordingAnnotator PR #49/#50): the blob key is `recordings/{artifactId}`, so the existing Resource `arn:aws:s3:::recordings/*` already covers it and only the Action `s3:DeleteObject` is missing. Editing the bootstrap Job script would NOT apply it: the script skips a policy that already exists, and the Job does not re-run (`ssa: IfNotPresent`). It needs a one-off live `mc admin policy create` as root (same toolbox as §A) plus the script change for rebuilds. The CronJob has no `--remove` (checked), so an app-side delete never reaches the Object-Locked AWS copy. | Live today, independent of the swap: fix it in its own small PR plus a one-off live policy update, after the soak starts or before the window, **not inside it** (it would blur the M8 IAM diff). Until then do not delete recordings in the UI |
+| D9 | **Not caused by the swap, found by the app audit:** app 0.5.0 `DELETE /api/artifacts/{id}` issues `s3:DeleteObject`, which the scoped policy deliberately omits, so deleting an owned recording returns 500 **after** the artifact's comments/chapters/transcripts were already deleted (order: children, staging, blob, row). Grant `s3:DeleteObject` on `recordings/*` (a live `mc admin policy create`, the bootstrap Job will not re-run) or accept/avoid deletion in the UI. The mirror runs without `--remove`, so an enabled delete does not reach the offsite copy. Because `recordings` has versioning **Enabled**, a plain delete only adds a delete marker (old versions stay); permanent removal would need `s3:DeleteObjectVersion`, which nothing grants. Confirmed by the app audit (RecordingAnnotator PR #49/#50, both merged; the app-side half of the fix, deleting the blob first so a failed delete no longer strips the annotations, is open as RecordingAnnotator PR #52, green; PR #51, the dev stack on Silo, is also open): the blob key is `recordings/{artifactId}`, so the existing Resource `arn:aws:s3:::recordings/*` already covers it and only the Action `s3:DeleteObject` is missing. Editing the bootstrap Job script would NOT apply it: the script skips a policy that already exists, and the Job does not re-run (`ssa: IfNotPresent`). It needs a one-off live `mc admin policy create` as root (same toolbox as §A) plus the script change for rebuilds. The CronJob has no `--remove` (checked), so an app-side delete never reaches the Object-Locked AWS copy. | Live today, independent of the swap: fix it in its own small PR plus a one-off live policy update, after the soak starts or before the window, **not inside it** (it would blur the M8 IAM diff). Until then do not delete recordings in the UI |
 
 ---
 
@@ -686,7 +693,7 @@ EOF
 ```
 
 Notes: the old image `quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z` is a working fallback for `MC_IMAGE` **only on
-`hiro-cmp-01`** (add `nodeName: hiro-cmp-01` to the Pod). A pull of `docker.io/pgsty/mc` on a node without it is the
+`hiro-cmp-01` and `hiro-cmp-05`** (add `nodeName: hiro-cmp-01` to the Pod). A pull of `docker.io/pgsty/mc` on a node without it is the
 fallback's mirror image; P6 removes the problem.
 
 `MC_HOST_*`-style one-liners are intentionally not used for root: a generated root password can contain characters
@@ -715,28 +722,29 @@ EOF
 done
 ```
 
-Verify from the node image lists (the source of truth), expecting 5 lines each:
+Verify from the container runtime, not from `kubectl get nodes -o json`: the kubelet's `status.images` is capped at 50
+images, so a node with many images silently omits some. Talos' CRI listing is complete:
 
 ```sh
-kubectl get nodes -o json | python3 -c '
-import json,sys
-for n in json.load(sys.stdin)["items"]:
-    names=[x for i in n["status"]["images"] for x in i["names"]]
-    print(n["metadata"]["name"], "silo" , any("pgsty/silo" in x for x in names), "mc", any("pgsty/mc" in x for x in names))'
+for x in 1 2 3 4 5; do
+  echo "== 192.168.25.2$x"
+  talosctl --talosconfig talos/clusterconfig/talosconfig -n 192.168.25.2$x image list | grep -E 'pgsty/(silo|mc)'
+done
 kubectl -n storage delete pod -l app=silo-prepull --wait=false
 ```
 
-Expect `True True` for every node. If a pod sat in `ImagePullBackOff`, check Docker Hub rate limits (anonymous pull) and
+Expect one `pgsty/silo` and one `pgsty/mc` line (the pinned release) under every node. On 2026-10-30 the CRI state
+was: .21 `pgsty/mc` only, .22 none, .23 `pgsty/silo` only, .24 none, .25 both, so P6 has real work to do. If a pod sat in `ImagePullBackOff`, check Docker Hub rate limits (anonymous pull) and
 retry; do not proceed with a node missing.
 
 ### B1b. Keeper pods for the old images
 
 ```sh
-for spec in "hiro-cmp-05 quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-03 quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-01 quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"; do
+for spec in "hiro-cmp-05 quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-03 quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-01 quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z" "hiro-cmp-05 quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"; do
   set -- $spec; kubectl -n storage apply -f - <<EOF
 apiVersion: v1
 kind: Pod
-metadata: {name: keep-$(echo $2 | tr '/:.' '---' | cut -c1-40)-$1, namespace: storage, labels: {app: silo-image-keeper}}
+metadata: {name: keep-$(echo $2 | tr '/:.' '---' | cut -c1-40)-$1, namespace: storage, labels: {app: silo-image-keeper-ra}}
 spec:
   nodeName: $1
   containers:
@@ -747,7 +755,7 @@ spec:
       resources: {requests: {cpu: 1m, memory: 8Mi}, limits: {memory: 32Mi}}
 EOF
 done
-kubectl -n storage get pod -l app=silo-image-keeper -o wide      # three Running, or: the image is already gone
+kubectl -n storage get pod -l app=silo-image-keeper-ra -o wide      # four Running, or: the image is already gone
 ```
 
 A container in use is exempt from image GC. If one pod reports `ErrImageNeverPull`, that old image is already lost on
