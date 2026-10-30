@@ -287,6 +287,24 @@ data:
         action   = "drop"
       }
 
+      // Inbound blocks on the WAN interface are internet background scanning:
+      // ~24k lines/day of ~39k block lines (2026-10-27), none of them actionable
+      // one by one. They are already counted (interface/dir/action) above, so
+      // keep a 1-in-20 sample for "what are they probing" and drop the rest.
+      // Blocks on every internal interface, and outbound WAN blocks, are kept
+      // whole: those are the ones that mean a LAN device tried something.
+      // igb0 is the WAN port on gw01 (outbound passes appear there, inbound
+      // blocks carry the public address); if the port is renumbered, change it
+      // here or the sample silently applies to the wrong interface.
+      stage.match {
+        selector = "{app_name=\"filterlog\", interface=\"igb0\", dir=\"in\"}"
+
+        stage.sampling {
+          rate                = 0.05
+          drop_counter_reason = "wan_inbound_block_sample"
+        }
+      }
+
       forward_to = [loki.write.default.receiver]
     }
 
