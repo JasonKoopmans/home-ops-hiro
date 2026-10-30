@@ -247,7 +247,7 @@ kubectl -n storage get jobs | grep recording-annotator-media-mirror   # nothing 
 If a mirror Job is running at this moment (it runs :23 and takes seconds), wait for it. Writers of MinIO are exactly:
 the app (uploads) and nothing else; the mirror and the probe only read. Confirm no write traffic:
 
-```sh
+```promql
 # Prometheus (Grafana Explore or MCP): expect 0 after a couple of minutes
 sum(rate(minio_s3_requests_total{job=~"recording-annotator-minio.*",api=~"PutObject|CompleteMultipartUpload|NewMultipartUpload|PutObjectPart"}[5m]))
 ```
@@ -740,16 +740,17 @@ retry; do not proceed with a node missing.
 ### B1b. Keeper pods for the old images
 
 ```sh
-for spec in "hiro-cmp-05 quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-03 quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-01 quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z" "hiro-cmp-05 quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"; do
-  set -- $spec; kubectl -n storage apply -f - <<EOF
+for spec in "hiro-cmp-05 old-minio quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-03 old-minio quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-01 old-mc quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z" "hiro-cmp-05 old-mc quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"; do
+  read -r node name image <<< "$spec"      # not `set -- $spec`: zsh does not word-split
+  kubectl -n storage apply -f - <<EOF
 apiVersion: v1
 kind: Pod
-metadata: {name: keep-$(echo $2 | tr '/:.' '---' | cut -c1-40)-$1, namespace: storage, labels: {app: silo-image-keeper-ra}}
+metadata: {name: keep-$name-$node, namespace: storage, labels: {app: silo-image-keeper-ra}}
 spec:
-  nodeName: $1
+  nodeName: $node
   containers:
     - name: keep
-      image: $2
+      image: $image
       imagePullPolicy: Never          # fails fast if the image is no longer cached: a useful signal
       command: ["/bin/sh","-c","sleep 864000"]
       resources: {requests: {cpu: 1m, memory: 8Mi}, limits: {memory: 32Mi}}
