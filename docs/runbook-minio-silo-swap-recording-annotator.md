@@ -16,7 +16,7 @@ Verified read-only on 2026-10-28 (re-check anything load-bearing at T-0):
 |---|---|
 | Server image now | `quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z`, pod `recording-annotator-minio-*` on `hiro-cmp-05` |
 | Chart | `minio` 5.4.0, Deployment `recording-annotator-minio` (Recreate), **no liveness/readiness probe**, command `/bin/sh -ce '/usr/bin/docker-entrypoint.sh minio server /export ...'` |
-| Data | bucket `recordings`: 80 objects, 1,952,989,178 B (1.82 GiB) per `minio_bucket_usage_*` |
+| Data | bucket `recordings`: 80 objects, 1,952,989,178 B (1.82 GiB) per `minio_bucket_usage_*` (the clone rehearsal listed 79 current objects + versions/delete markers = 82 entries); **versioning Enabled**, no ILM, no quota, no Object Lock |
 | Volume | PVC `recording-annotator-minio` 5Gi, Longhorn `pvc-e31e063d-00ee-4679-8ca0-80338b9f737a`, class `longhorn-2-no-backup`, 2 replicas, actualSize 2.16 GiB, `unmapMarkSnapChainRemoved: enabled`, group `snapshot-only` |
 | Offsite | CronJob `recording-annotator-media-mirror`, `23 * * * *` (Chicago), last success 2026-10-29T01:23:04Z; AWS bucket `hiro-recording-annotator-media-backup`, Object Lock COMPLIANCE |
 | Pod memory | 14d peak working set 239 MB (limit 512Mi) |
@@ -35,7 +35,7 @@ Why now: upstream `minio/minio` is archived, `quay.io/minio/*` answers HTTP 401 
 `minio/minio:RELEASE.2024-12-18T13-15-44Z` is 404. The only copy of the running server image is in the kubelet cache
 of `hiro-cmp-03` and `hiro-cmp-05`; the old `mc` is cached only on `hiro-cmp-01`.
 
-Impact during the window (budget 90 min, expected 30-45):
+Impact during the window (budget 90 min, expected 30-45; the server swap itself is seconds: 13-17 s on the clone rehearsal, quiesce, proofs and verification are what take time):
 
 - RecordingAnnotator (`recordings.${SECRET_DOMAIN}`) is down for the whole window: no upload, no playback (presigned
   URLs point at the bucket, which is stopped for ~10 min of it).
@@ -71,24 +71,25 @@ destroy the snapshot mid-soak.
 
 ## 2. Gates
 
-Do not start M1 until every GATE is closed. Each one is a line in `silo-qualification.md`; paste its answer here
-before the window.
+Qualification (PR #902, `docs/silo-qualification.md`, 2026-10-30) closed most gates; the table records what it proved
+and what is left. **Open before the window: G13, and the two things the harness could not test: the real AWS leg of
+the mirror (M11) and the playback path through Envoy (§B4/M13).** Do not start M1 until G13 is closed.
 
 | # | GATE | Answer | Why it gates |
 |---|---|---|---|
-| G1 | Silo `RELEASE.…` pin and digest (candidate `RELEASE.2026-10-26T00-00-00Z`, index `sha256:7bb2aff6…`; the PR carries this pin) | GATE: | PR image values |
-| G2 | Silo boots on a **clone of this volume** with the chart command (`docker-entrypoint.sh minio server /export …` rewritten to `silo`), serves, reports `xl-single` in `.minio.sys/format.json` | GATE: | the swap premise |
-| G3 | `pgsty/mc` has `/bin/sh` (mirror CronJob, bootstrap Job and the toolbox in §A all use `/bin/sh -c`) | GATE: | else the CronJob must change shape or image (**D4**) |
-| G4 | `mc admin policy/user` commands in the bootstrap Job work unchanged; the policy (bucket ARN + `bucket/*` ARN) is accepted | GATE: | IAM |
-| G5 | Global default CORS (`MINIO_API_CORS_ALLOW_ORIGIN`) still answers for a bucket with no per-bucket rule (§M13 re-checks it live). Lower stakes than first thought: the `ra-app-s3` audit found the player is a plain `<video src=presigned>` with no `crossorigin`, so playback needs no CORS at all | GATE: | informational unless the player changes |
-| G6 | Presigned GET with `Range` -> 206 through Silo, **and** through Envoy with `Host` forwarded unchanged (the presigned URL signs the Host; `Storage__PublicEndpoint` must equal what the browser requests, a different name is 403) | GATE: | playback |
-| G7 | `mc mirror --md5 --dry-run` with `pgsty/mc` against Silo shows **no objects to copy** after the object mtimes carried over | GATE: | the locked bucket must not receive duplicate versions |
-| G8 | `/minio/health/*`, `/minio/v2/metrics/{cluster,node,bucket}` and `minio_bucket_usage_*`, `minio_s3_requests_total` unchanged | GATE: | probes, alerts, the post-swap count check |
-| G9 | Silo RSS on a 1.8 GiB / 80-object bucket fits the 512Mi limit (old peak 239 MB) | GATE: | OOM-kill on first start |
-| G10 | Can the **old** MinIO image reopen the volume after Silo started and served on it? "Rolling downgrades are unsupported" once persistent IAM revocation metadata exists. | GATE: | decides whether rung R1 in §6 is real |
-| G12 | App side: `ra-app-s3` reports the app's 8 MinIO integration tests plus 20+ new cases (multipart, range, expiry, scoped credential, chunk API) pass unchanged against Silo `RELEASE.2026-10-26T00-00-00Z` (digest `7bb2aff6…`). **No app change or app release is required for the swap.** (Interim note `app-storage-early-findings.md`; the final report may refine it.) | interim: closed | app compat |
-| G13 | The live server uses the default region (`us-east-1`): the app has no region option and a different `MINIO_REGION` makes every call 400. Check `region` in the §B3 export | GATE: | app compat |
-| G11 | Advisory SN-2026-011 does not apply to the pinned release, or the exposure is accepted (the S3 API is LAN-exposed through Envoy) | GATE: | security |
+| G1 | Pin | **CLOSED** (`silo-qualification.md`, PR #902): server `docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6…`, client `docker.io/pgsty/mc:RELEASE.2026-10-26T00-00-00Z@sha256:ce62c905…`; this PR carries exactly that. 10-26 chosen because SN-2026-011 is fixed from 2026-09-16 and 10-18 lacks a fix this fork line needs. | PR image values |
+| G2 | Silo boots on a **clone of this volume** with the chart command | **CLOSED (PASS)** on a CSI clone of this very PVC: clone Bound + old image Available in 77 s, swap to Silo 13-17 s (first pull on cmp-05 9.5 s), `format.json` byte-identical (xl-single), 79 objects sha256-identical, 82 listing entries (versions/delete markers) identical, user + policy JSON identical, two restarts clean | the swap premise |
+| G3 | `pgsty/mc` shell and tools | **CLOSED for the repo's scripts**: `/bin/sh` (bash), `cat`, `sleep`, `expr`, `tr` present; **no** `grep`/`sed`/`awk`/`tar`/`find`/`wget`. `dd`, `od`, `cksum`, `head`, `tail` are **not confirmed**, so the toolbox script and one-liners here use only shell builtins, `cat`, `tr` and `mc`; filtering happens on your workstation. `MC_CONFIG_DIR` must be set (the image has no default), which the CronJob and §A already do | CronJob, Job, toolbox |
+| G4 | IAM commands | **CLOSED (PASS)**: bootstrap Job replayed verbatim twice, idempotent; policy round-trips (bucket ARN + `bucket/*` ARN, no bare-prefix rejection) | IAM |
+| G5 | CORS | **CLOSED (informational)**: with `MINIO_API_CORS_ALLOW_ORIGIN` unset Silo echoes any `Origin` (preflight 204, exposes `Content-Range`/`ETag`/`Accept-Ranges`); setting it blocks other origins. **Leave it unset.** The app audit also found playback needs no CORS (plain `<video src>`) | informational |
+| G6 | Presigned GET + `Range` | **PASS direct** (206, `Content-Range`, expired URL 403). **Still to prove through Envoy** with `Host` forwarded unchanged (the presigned URL signs the Host; `Storage__PublicEndpoint` must equal what the browser requests): that is the §B4/M13 baseline diff | playback |
+| G7 | Mirror with the new `mc` | **PASS in a scratch Silo with a locked destination** (151 MiB, sha256 equal, COMPLIANCE set, second run 0 B, `--md5` sends `Content-Md5` on single-part and multipart PUTs, none without it). **The real AWS leg is UNTESTED**: hence M11's `--dry-run` first | the locked bucket must not receive duplicate versions |
+| G8 | Metrics/health | **CLOSED**: health live/ready/cluster 200; 10 of the 11 `minio_*` names the repo uses present, `minio_s3_requests_5xx_errors_total` appears only after the first 5xx (rule is `sum(rate()) > 0`, so quiet). Bucket-level usage only on `/minio/v2/metrics/bucket` (the Probe already scrapes it) | probes, alerts |
+| G9 | Memory | **CLOSED**: Silo idle 110 MiB with a seeded bucket vs the 512Mi limit (old 14d peak 239 MB) | OOM-kill |
+| G10 | Rollback after Silo has run on the volume | **PASS on the clone**: old 2024-12-18 image reopened Silo-touched data in 4 s, 79 sha256 and the listing identical, then Silo again identical. **Not exercised: IAM revocation metadata** (STS/service-account revocation); this instance has none and the swap creates none, but upstream calls rolling downgrades unsupported once it exists, so the formal rollback is still "restore the pre-swap copy" | decides how real R1 is |
+| G12 | App side | **CLOSED**: `ra-app-s3` (RecordingAnnotator PR #49, `docs/storage-compatibility.md`): the app's 8 MinIO integration tests plus 20+ new cases (multipart, range, expiry, scoped credential, chunk API) pass unchanged on this exact Silo pin. **No app change or release is needed for the swap.** | app compat |
+| G13 | Default region | **OPEN**: the app has no region option; a server with `MINIO_REGION` other than `us-east-1` returns 400 on every call. Check `region` in the §B3 export (it works today, so it should be the default) | app compat |
+| G11 | SN-2026-011 | **CLOSED**: fixed from 2026-09-16 (SN-2026-011…014); the 10-26 pin includes it. The old 2024-12-18 server is *older* than the fix, so the swap reduces exposure on the LAN-exposed S3 endpoint | security |
 
 ---
 
@@ -99,11 +100,11 @@ repo); the admin exports contain access-key names and must not be committed.
 
 ### T-3d (Thu 10-29)
 
-- **P1.** Read the PR and the qualification report. Close G1-G11. Decide D1-D8 (§8). If G10 says "no downgrade", R1 is
+- **P1.** Read the PR and the qualification report. Close the open gate (G13) and read the rest. Decide D1-D8 (§8). If G10 says "no downgrade", R1 is
   gone and the plan leans on R2/R3.
 - **P2. Helper block.** Define §A in your shell. Run the smoke script (§M10) **against the current MinIO**, as a
   rehearsal. It touches only the scratch bucket `silo-swap-smoke`, never `recordings`. This proves the script, the
-  toolbox image, `dd`/`cksum`, multipart and the scoped-user delete refusal on the old server. A failure here is a
+  toolbox image, shell-only helpers, multipart and the scoped-user delete refusal on the old server. A failure here is a
   script or image problem, found three days early.
 - **P3. AWS read access.** From the devcontainer (`bash script.sh`, `AWS_PAGER=""`; see memory
   `devcontainer-aws-cli-quirks`):
@@ -255,9 +256,11 @@ sum(rate(minio_s3_requests_total{job=~"recording-annotator-minio.*",api=~"PutObj
 
 1. Run the mirror by hand once and wait for it (§B2 steps 1-3). Expected: log ends `mirror complete`, Job
    `Complete`. Then compare source vs AWS (§B2 step 4): same key set, same sizes. **Abort on any mismatch.**
-2. Take the restore points (§B5): Longhorn snapshot `pre-silo-swap` and (D5, recommended) a Longhorn **backup** to
-   `s3://hiro-longhorn-backups@us-east-1/`. Expected: snapshot `readyToUse: true`; backup `state: Completed` (2.2 GiB
-   actual, a few minutes).
+2. Take the restore points (§B5), in this order: (i) a **CSI clone** of the PVC, `recording-annotator-minio-preswap`
+   (the method `silo-qualify` used on this exact volume: Bound and serving in 77 s; an independent volume, so the
+   weekly trim cannot touch it); (ii) the Longhorn snapshot `pre-silo-swap` (instant revert, dies in the next trim);
+   (iii) optionally (D5) a Longhorn **backup** to `s3://hiro-longhorn-backups@us-east-1/`. Expected: clone PVC
+   `Bound`; snapshot `readyToUse: true`; backup `state: Completed` (2.2 GiB actual, a few minutes).
 3. Offline checks on the idle volume:
 
    ```sh
@@ -268,8 +271,8 @@ sum(rate(minio_s3_requests_total{job=~"recording-annotator-minio.*",api=~"PutObj
    (`~/ra-silo-swap/before/format.json`); it contains the deployment id, not a secret.
 4. Final admin export and playback baseline (§B3, §B4) if not captured in the last hour.
 
-Abort: backup not `Completed` within 15 min and D5 says required -> do not proceed to M7 without another restore
-point (R2 snapshot alone is acceptable only if D2 = Sunday and you accept that R3 does not exist).
+Abort: the clone is not `Bound` within 5 min -> do not proceed to M7 without another independent restore point (a
+snapshot alone is acceptable only if D2 = Sunday and you accept that it expires at the next trim).
 
 ### M6. (optional but cheap) Last-minute re-read of the plan
 
@@ -309,14 +312,19 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:19000/minio/health/r
 kill %1
 ```
 
-Expected: `imageID` ends with the pinned digest; log shows the server online with no `ERROR`/`panic`/migration
+Expected (filter on your workstation, the image has no `tail`/`grep`): the summary equals the M5 pre-swap listing (79
+current objects on the 10-30 clone; the usage metric counts 80), and the `--versions` listing (82 entries on the clone,
+versions and delete markers, with version ids and mtimes) is **identical** to the pre-swap one. `recordings` has
+versioning **Enabled**, so use `mc ls --versions`, not only the current-object count, as the integrity baseline.
+`imageID` ends with the pinned digest; log shows the server online with no `ERROR`/`panic`/migration
 failure (GATE: paste the exact healthy start lines from the clone rehearsal here); `format` still `xl-single`; both
 health endpoints 200. Then verify data and IAM with the toolbox (§A):
 
 ```sh
 ra_mc ra-verify root '
 mc admin info local
-mc ls --recursive --summarize local/recordings | tail -3          # Total Objects: 80, Total Size: 1.8 GiB
+mc ls --recursive --summarize local/recordings
+mc ls --recursive --versions local/recordings
 mc admin user ls local ; mc admin policy ls local
 '
 ```
@@ -342,7 +350,7 @@ Abort/hold: `up` stays 0 > 5 min (probe path or metric rename: G8 was wrong) -> 
 ### M10. Write-path smoke that does not touch `recordings`
 
 Runs the script in §C: as root it creates scratch bucket `silo-swap-smoke`, puts a small object and a 40 MiB
-multipart object, verifies by checksum, creates a throwaway scoped user with the same policy shape as the app user
+multipart object, verifies the content, creates a throwaway scoped user with the same policy shape as the app user
 (but on the scratch bucket), shows it can read/write and **cannot delete**, then removes objects, bucket, user and
 policy (in a `trap`, so a failure still cleans up). Root credentials come from
 `recording-annotator-minio-root-credentials` via `secretKeyRef`; they are never printed.
@@ -351,7 +359,7 @@ policy (in a `trap`, so a failure still cleans up). Root credentials come from
 ra_mc ra-smoke root "$(cat ~/ra-silo-swap/smoke.sh)"
 ```
 
-Expected (last lines): `multipart etag ends in -3`, `cksum match`, `scoped delete refused`, `cleanup done`.
+Expected (last lines): `multipart etag ends in -N`, `content match`, `scoped delete refused`, `cleanup done`.
 The real `recording-annotator-rw` policy was already compared in M8's export diff; do not probe delete against
 `recordings`.
 
@@ -466,9 +474,10 @@ the old server image is in two node caches only).
 | Rung | What | Real? | RTO | RPO |
 |---|---|---|---|---|
 | R0 | Abort before M7: unsuspend what you suspended (M2-M4 in reverse), unsilence | Yes | 5 min | 0 |
-| R1 | Revert the PR; old image on the same volume | **Only if** (a) the old image is still cached on the node the pod lands on, (b) G10 says the old binary reopens a volume Silo has run on, or Silo never served/wrote | 5-10 min | 0 if Silo wrote nothing |
+| R1 | Revert the PR; old image on the same volume | **Real, with two conditions**: (a) the old image is still cached on the node the pod lands on (`-03`/`-05`; keeper pods + `nodeSelector`), (b) G10: the old image reopened Silo-touched data cleanly on the clone, but the IAM-revocation case is untested/unsupported (this instance has no revocations) | 5-10 min | 0 (nothing was written during the window; uploads after go-live stay on the volume) |
 | R2 | Longhorn revert-to-snapshot `pre-silo-swap` (then old image *or* a fixed Silo) | Yes while the snapshot exists (to Sat 11-07 21:00 CST if Sunday window; **gone Sat 22:00 CDT if Saturday**) | 20-30 min | 0 for the window; uploads after go-live are lost from the *volume* but are re-pullable from AWS (below) |
-| R3 | Restore the Longhorn **backup** to a new volume, re-point the claim | Yes (if D5 taken and Longhorn backups are healthy) | 45-90 min | 0 for the window |
+| R3 | Copy back from the pre-swap clone PVC `recording-annotator-minio-preswap` into the live PVC (volume-to-volume `cp -a`) | Yes; the clone mechanism is proven on this volume, the copy-back pod itself is not rehearsed | 20-30 min | 0 for the window |
+| R3b | Restore the optional Longhorn **backup** to a new volume and copy from it | Yes if D5 was taken and Longhorn backups are healthy | 45-90 min | 0 for the window |
 | R4 | Rebuild from the offsite mirror (`backup-recovery.md` §10) | Yes, data only; IAM must be re-bootstrapped | 30-60 min + 1.8 GiB download | <= 1h of uploads (last mirror), exactly the uploads not yet mirrored |
 | R5 | Pull the original MinIO image from the internet | **No** (quay 401, Hub 404) | n/a | n/a |
 | R6 | `pgsty/minio` (the fork's frozen `RELEASE.2026-08-04…`, index `sha256:b6bfe723…`) as a sideways fallback | Real only if G2/G10-style rehearsal passed; affected by SN-2026-011 | 10 min | 0 | 
@@ -494,9 +503,34 @@ R2 procedure (revert in place; reclaimPolicy is `Delete`, **never delete the PVC
 4. Re-run M8. Uploads made after go-live exist offsite only after the next `:23` mirror: pull them back with the
    forward mirror reversed (`backup-recovery.md` §10 step 3, `mc mirror` never `--remove`) before reopening the app.
 
-R3 procedure: Longhorn UI -> Backup -> `pre-silo-swap` backup -> Restore to a new volume (same size, name e.g.
-`ra-minio-restore`) -> create PV/PVC for it -> point `persistence.existingClaim` at it in a PR -> M8. The original
-PVC/volume is left alone (not deleted) until the soak ends.
+R3 procedure (the clone is a full independent copy including `.minio.sys`; trim cannot touch it). Do **not** switch the
+chart to `persistence.existingClaim` to use the clone: Helm would prune the chart-rendered PVC, and with
+`reclaimPolicy: Delete` that destroys the original volume. Copy data back instead:
+
+```sh
+flux -n storage suspend hr recording-annotator-minio
+kubectl -n storage scale deploy/recording-annotator-minio --replicas=0
+kubectl -n storage apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: ra-minio-restore, namespace: storage}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: cp
+      image: busybox:1.36      # same image backup-recovery.md section 8 uses; pre-pull it with the others if you want certainty
+      command: ["/bin/sh","-c","rm -rf /dst/* /dst/.[!.]* && cp -a /src/. /dst/ && echo copied"]
+      volumeMounts: [{name: src, mountPath: /src, readOnly: true}, {name: dst, mountPath: /dst}]
+  volumes:
+    - {name: src, persistentVolumeClaim: {claimName: recording-annotator-minio-preswap, readOnly: true}}
+    - {name: dst, persistentVolumeClaim: {claimName: recording-annotator-minio}}
+EOF
+kubectl -n storage logs -f pod/ra-minio-restore ; kubectl -n storage delete pod ra-minio-restore
+```
+
+then scale MinIO back to 1 (old image if R1 conditions hold, else the Silo pin once fixed), `flux resume`, M8.
+R3b is the same shape with a PVC restored from the Longhorn backup as `src` (Longhorn UI -> Backup -> Restore to a new
+volume, then a PV/PVC for it). The original PVC is never deleted.
 
 R4 procedure: `backup-recovery.md` §10. Extra step for this rebuild: the bootstrap Job is already `Complete` and
 `ssa: IfNotPresent` stops Flux from re-running it, so delete it (`kubectl -n storage delete job
@@ -554,13 +588,16 @@ objects = 80 + genuine uploads and equal to the AWS listing. On Mon 11-02 after 
 At the end of the soak:
 
 1. Revert the D1 patch (if used).
-2. Delete the keeper pods (§B1b) and any `prepull-*` pods; delete `pre-silo-swap` snapshot and (once happy, D5) the
-   Longhorn backup; delete `~/ra-silo-swap/` exports that contain IAM data.
+2. Delete the keeper pods (§B1b) and any `prepull-*` pods; delete the `pre-silo-swap` snapshot, the clone PVC
+   `recording-annotator-minio-preswap` (by explicit name; it is the swap's only trim-proof local copy, so keep it until
+   you are sure) and (once happy, D5) the Longhorn backup; delete `~/ra-silo-swap/` exports that contain IAM data.
 3. Update this runbook's status line, add the date to `docs/backup-recovery.md` if you want it, and record the swap
    in the revisit register if G10/G11 left anything open.
-4. Renovate: confirm `docker.io/pgsty/silo` and `docker.io/pgsty/mc` are tracked, with `automerge: false` (the swap
-   is one-way once Silo has written IAM metadata). That rule lives in `.renovaterc.json5`, owned by the
-   `minio-shared-silo` session; this PR does not touch it.
+4. Renovate: `silo-qualification.md` notes the helm-values manager does not recognise a `tag@sha256` string in
+   `image.tag` / `mcImage.tag`, so those two keys are bumped **by hand** until a `customManagers` regex rule exists in
+   `.renovaterc.json5` (owned by the `minio-shared-silo` session; this PR does not touch it). The mirror CronJob and
+   bootstrap Job `image:` lines are plain `repo:tag@digest` and are handled. Watch `github.com/pgsty/silo/releases`
+   and re-run `scripts/silo-qualify/` before bumping: the fork already shipped security fixes on 2026-09-16.
 
 ---
 
@@ -572,11 +609,11 @@ At the end of the soak:
 | D2 | Window | Sunday 2026-11-01 from 10:00 CST |
 | D3 | Production write verification | A: next genuine upload; B only if you accept a permanent tiny artifact |
 | D4 | Mirror CronJob image if G3 fails (no `/bin/sh` in `pgsty/mc`) | Rewrite the script shell-free using `MC_HOST_*` env + `mc mirror` args, or build a tiny image in `containers/` (GHCR pattern); the cached old `mc` exists only on `hiro-cmp-01` |
-| D5 | Longhorn backup to S3 in addition to the snapshot | Yes (2.2 GiB; the snapshot alone dies in the trim) |
+| D5 | Longhorn backup to S3 in addition to the clone and snapshot | Optional now that the CSI clone is the primary restore point; take it if you want an off-cluster-node, off-disk copy (2.2 GiB, a few minutes) |
 | D6 | Keeper pods for the old server and `mc` images | Yes; delete at end of soak |
 | D7 | Alert silences | Narrow, 3h (M1) |
-| D8 | Pin by `tag@sha256` (as the PR does) vs tag only | Digest; update tag and digest together, never the tag alone |
-| D9 | **Not caused by the swap, found by the app audit:** app 0.5.0 `DELETE /api/artifacts/{id}` issues `s3:DeleteObject`, which the scoped policy deliberately omits, so deleting an owned recording returns 500 **after** the artifact's comments/chapters/transcripts were already deleted (order: children, staging, blob, row). Grant `s3:DeleteObject` on `recordings/*` (a live `mc admin policy create`, the bootstrap Job will not re-run) or accept/avoid deletion in the UI. The mirror runs without `--remove`, so an enabled delete does not reach the offsite copy. | Decide separately from the swap; until then do not delete recordings in the UI. Do not mix a policy change into the window |
+| D8 | Pin by `tag@sha256` (as the PR does, as `silo-qualification.md` recommends) vs tag only | Digest; update tag and digest together, never the tag alone; manual bumps until the Renovate regex rule exists |
+| D9 | **Not caused by the swap, found by the app audit:** app 0.5.0 `DELETE /api/artifacts/{id}` issues `s3:DeleteObject`, which the scoped policy deliberately omits, so deleting an owned recording returns 500 **after** the artifact's comments/chapters/transcripts were already deleted (order: children, staging, blob, row). Grant `s3:DeleteObject` on `recordings/*` (a live `mc admin policy create`, the bootstrap Job will not re-run) or accept/avoid deletion in the UI. The mirror runs without `--remove`, so an enabled delete does not reach the offsite copy. Because `recordings` has versioning **Enabled**, a plain delete only adds a delete marker (old versions stay); permanent removal would need `s3:DeleteObjectVersion`, which nothing grants. | Decide separately from the swap; until then do not delete recordings in the UI. Do not mix a policy change into the window |
 
 ---
 
@@ -783,7 +820,27 @@ EOF
 kubectl -n storage get snapshots.longhorn.io pre-silo-swap -o jsonpath='{.status.readyToUse}{" "}{.status.size}{"\n"}'   # true
 ```
 
-Backup (D5): in the Longhorn UI (route `longhorn-dashboard`, namespace `storage`): Volume `pvc-e31e063d…` -> snapshot
+CSI clone (the verified restore point; run after M4, adds one snapshot to the source volume):
+
+```sh
+kubectl -n storage apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: recording-annotator-minio-preswap, namespace: storage}
+spec:
+  storageClassName: longhorn-2-no-backup
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 5Gi}}
+  dataSource: {kind: PersistentVolumeClaim, name: recording-annotator-minio}
+EOF
+kubectl -n storage get pvc recording-annotator-minio-preswap -w      # Bound within ~1-2 min
+```
+
+The clone is not mounted by anything (so it stays detached) and costs 5 Gi x 2 replicas (disk headroom checked by
+`silo-qualify`: fits on every node). The class still puts it in the `snapshot-only` group, which only collapses
+*snapshots*, never the clone's data. Do not name it in any Flux-managed manifest.
+
+Backup (D5, optional second layer): in the Longhorn UI (route `longhorn-dashboard`, namespace `storage`): Volume `pvc-e31e063d…` -> snapshot
 `pre-silo-swap` -> **Create Backup** (target `default` = `s3://hiro-longhorn-backups@us-east-1/`). Check
 `kubectl -n storage get backups.longhorn.io -l backup-volume=$VOL` for `state: Completed`. (Creating a `Backup` CR by
 hand is not verified here; use the UI.) Manual snapshots and backups are not pruned by the recurring jobs (P4 proves the
@@ -803,20 +860,25 @@ cleanup() {
 trap cleanup EXIT
 set -e
 mc mb --ignore-existing "local/$B"
-dd if=/dev/urandom of=/tmp/small bs=1024 count=1 2>/dev/null
-dd if=/dev/urandom of=/tmp/big   bs=1048576 count=40 2>/dev/null
+# Only shell builtins, cat, tr and mc: the pgsty/mc image has no grep/sed/awk/tar/find (dd/od/cksum/head unconfirmed).
+blk=x; i=1; while [ $i -lt 1023 ]; do blk="${blk}x"; i=$((i+1)); done        # 1023 chars + newline = 1 KiB
+echo "$blk" > /tmp/small
+: > /tmp/big; i=0; while [ $i -lt 40960 ]; do echo "$blk" >> /tmp/big; i=$((i+1)); done   # 40 MiB
 mc cp /tmp/small "local/$B/small.bin" >/dev/null
 mc cp /tmp/big   "local/$B/big.bin"   >/dev/null
-E=$(mc stat --json "local/$B/big.bin" | grep -o '"etag":"[^"]*"')
-echo "big etag: $E"; case "$E" in *-[0-9]*) echo "multipart etag ends in -N";; *) echo "WARN: not multipart"; exit 1;; esac
+ST=$(mc stat "local/$B/big.bin"); E=
+while IFS= read -r l; do case "$l" in ETag*) E="$l";; esac; done <<EOT
+$ST
+EOT
+echo "big $E"; case "$E" in *-[0-9]*) echo "multipart etag ends in -N";; *) echo "WARN: not multipart"; exit 1;; esac
 mc cp "local/$B/big.bin" /tmp/big2 >/dev/null
-[ "$(cksum < /tmp/big)" = "$(cksum < /tmp/big2)" ] && echo "cksum match"
+[ "$(cat /tmp/big)" = "$(cat /tmp/big2)" ] && echo "content match"
 cat > /tmp/p.json <<POLICY
 {"Version":"2012-10-17","Statement":[
  {"Effect":"Allow","Action":["s3:ListBucket","s3:GetBucketLocation"],"Resource":["arn:aws:s3:::$B"]},
  {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject"],"Resource":["arn:aws:s3:::$B/*"]}]}
 POLICY
-SK=$(dd if=/dev/urandom bs=20 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+SK=$(cat /proc/sys/kernel/random/uuid | tr -d '-')
 mc admin policy create local silo-smoke-rw /tmp/p.json >/dev/null
 mc admin user add local "$U" "$SK" >/dev/null
 mc admin policy attach local silo-smoke-rw --user "$U" >/dev/null
@@ -828,6 +890,6 @@ if mc rm "smoke/$B/small2.bin" >/dev/null 2>&1; then echo "FAIL: scoped delete a
 ```
 
 Run it at P2 against the old server and at M10 against Silo. It never references `recordings`. It assumes `mc` uses
-multipart for a 40 MiB object (16 MiB parts); if the P2 rehearsal prints `WARN: not multipart`, raise `count=40` to
-`count=140`. It also assumes `dd`, `od`, `cksum` and `cmp`-free shell builtins exist in the image; P2 is where that is
-found out (G3).
+multipart for a 40 MiB object (16 MiB parts); if the P2 rehearsal prints `WARN: not multipart`, raise `40960` to
+`143360` (140 MiB). The 40 MiB file is built with a shell loop (slow but dependency-free, ~tens of seconds); P2 is where
+any remaining image-tool surprise is found (G3).
