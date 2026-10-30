@@ -41,7 +41,7 @@ Not affected: Prometheus itself, Grafana, anything not using these two buckets. 
 
 | # | Gate | How to check | Status |
 |---|---|---|---|
-| G1 | Qualification PASS for the final pin; pin in PR #900 equals it | **Met** (report merged in #902): report pins `RELEASE.2026-10-26T00-00-00Z` + index `7bb2aff6...` / mc `ce62c905...`, identical to #900; SN-2026-011 is fixed from 2026-09-16. Re-compare at merge time; the report's PR #902 should be merged first | met (re-check) |
+| G1 | Qualification PASS for the final pin; pin in PR #900 equals it | **Met** (report merged in #902): report pins `RELEASE.2026-10-26T00-00-00Z` + index `7bb2aff6...` / mc `ce62c905...`, identical to #900; SN-2026-011 is fixed from 2026-09-16. The report is on `main` (#902, merged 2026-10-30T17:31Z); re-compare the pins at merge time | met (re-check) |
 | G2 | Silo's entrypoint maps the chart's `minio server ...` command to `silo` | Report section 1: PASS (verbatim chart command, `-S` accepted, uid 1000, health 200). report ran on arm64; amd64 is covered by the section 9 rehearsal on cmp-03 | met |
 | G3 | Silo opens a **real copy** of this instance's volume | **Met 2026-10-30** (section 9): 120Gi clone of the live volume, old image then Silo 10-26 (amd64, digest-pinned): 255 + 21,892 version-listing entries identical, 339 content hashes identical, IAM/quota/ILM/versioning identical, 2 restarts clean | met |
 | G4 | Whether the old binary can reopen a directory Silo has written (rung R1) | **Not clean** (section 9): the 2024 binary served identical data after Silo, but its background scanner logged `decodeXLHeaders: Unknown xl meta version 3` (8 times at start). R1 is **unsupported**; use R2 | met (R1 ruled out) |
@@ -235,7 +235,7 @@ kubectl -n storage get backups.longhorn.io -l backup-volume=$VOL            # a 
 prom 'thanos_compact_halted'; prom 'ALERTS{alertstate="firing"}'            # 0, and nothing unexpected firing
 ```
 
-Renovate sweep (G7b), unless you paused Renovate and no Renovate PR was created in the last hour:
+Renovate sweep (G7b), unless you paused Renovate and no Renovate PR was created in the last hour. **Pausing Renovate is the reliable form.** The sweep is best-effort: Renovate can re-attempt platform automerge after it rebases a PR (renovatebot/renovate#26567), and whether it re-enables auto-merge after `gh pr merge --disable-auto` is unconfirmed. Run it at T-0, again **immediately before M6** (the merge that triggers the swap) and again before M9:
 
 ```sh
 gh pr list --repo JasonKoopmans/home-ops-hiro --author 'app/renovate' --state open --json number,title,createdAt,autoMergeRequest
@@ -291,7 +291,7 @@ EOF
 Check `readyToUse: true`. The T-1d backup is the offsite copy; this one is the fast local revert target (R2).
 
 **M5. Last look.** `kubectl -n storage get pod -l app=silo-image-keeper-shared` Running; pre-pull present on all nodes (P3 list); PR #900 checks green
-(`gh pr checks 900`; the `claude-review` job failed on 2026-10-29 for a reason unrelated to the diff, it is not a gate; `Flux Local Success` is).
+(`gh pr checks 900`; the `claude-review` job failed on 2026-10-29 for a reason unrelated to the diff, it is not a gate; `Flux Local Success` is). **Re-run the Renovate sweep and the merged-in-the-last-30-minutes check (T-0 section) now, immediately before M6.**
 
 **M6. TRIGGER: merge PR #900** (you, in the GitHub UI or `gh pr merge 900 --squash`; this runbook never merges it for you).
 
@@ -323,7 +323,7 @@ kubectl -n monitoring rollout status deploy/thanos-compactor --timeout=120s
 kubectl -n monitoring get deploy thanos-compactor -o jsonpath='{.spec.replicas}{"\n"}'          # 1
 ```
 
-**M9. Verify** (section 5), including the admin diff.
+**M9. Verify** (section 5), including the admin diff. Re-run the Renovate sweep and the merged-in-the-last-30-minutes check first.
 
 **M10. Un-silence**: `amtool ... silence expire <id>` (or UI).
 
