@@ -185,13 +185,16 @@ rd $M
 python3 -I -c "import json;d=json.load(open('$O/blobs/sha256/$M'));print(d['config']['digest'].split(':')[1]);[print(l['digest'].split(':')[1]) for l in d['layers']]" | while read h; do rd $h; done
 echo '{"imageLayoutVersion":"1.0.0"}' > $O/oci-layout
 printf '{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:%s","size":%s}]}' $M $(wc -c < $O/blobs/sha256/$M) > $O/index.json
-docker run --rm -v $O:/o -v ~/.docker:/root/.docker quay.io/skopeo/stable copy oci:/o docker://ghcr.io/jasonkoopmans/old-minio:RELEASE.2024-12-18T13-15-44Z
+printf 'token: '; read -rs GHCR_TOKEN; echo; export GHCR_TOKEN        # PAT with write:packages; env var only, never in a file
+docker run --rm -e GHCR_TOKEN -v $O:/o:ro --entrypoint sh quay.io/skopeo/stable -c 'skopeo copy --dest-creds "JasonKoopmans:$GHCR_TOKEN" oci:/o docker://ghcr.io/jasonkoopmans/old-minio:RELEASE.2024-12-18T13-15-44Z'
+# verify while the package is still private (digest must be sha256:34c8e2f5..., amd64); after it is made public `docker buildx imagetools inspect` needs no login
+docker run --rm -e GHCR_TOKEN --entrypoint sh quay.io/skopeo/stable -c 'skopeo inspect --creds "JasonKoopmans:$GHCR_TOKEN" docker://ghcr.io/jasonkoopmans/old-minio:RELEASE.2024-12-18T13-15-44Z' | grep -E '"Digest"|"Architecture"'
 ```
 
 Expected: 11 `ok` lines (manifest, config, 9 layers). A local `registry:2` push preserved the manifest digest
 `sha256:34c8e2f5...` exactly. The **index** digest `1dce27c4...` cannot be pushed (its arm64/ppc64le children are not in the
-store), so pin the copy by the amd64 manifest digest: `ghcr.io/jasonkoopmans/old-minio@sha256:34c8e2f52a59...`. Needs `docker login ghcr.io`
-(write:packages); the package must be public (no `imagePullSecrets` in this repo, `ghcr-container-pattern`) or you add a pull secret to the
+store), so pin the copy by the amd64 manifest digest: `ghcr.io/jasonkoopmans/old-minio@sha256:34c8e2f52a59...`. Needs a GitHub token with
+`write:packages`, passed through the `GHCR_TOKEN` env var as above (no `docker login`: Docker Desktop's `credsStore: desktop` keeps the login in the keychain, where the container cannot read it); the package must be public (no `imagePullSecrets` in this repo, `ghcr-container-pattern`) or you add a pull secret to the
 rollback. The binary is AGPL-3: publishing a copy is allowed, say so in the package description (decision D4). Do the same
 for `mc:RELEASE.2025-08-13...` from cmp-01 only if you want the old Jobs runnable; not needed for rollback.
 
@@ -380,14 +383,22 @@ Run immediately (M9), again after the next odd-hour upload, and again at T+24h.
 | S3 errors | `prom 'sum by (api) (rate(minio_s3_requests_errors_total[10m]))'` and `prom 'sum(rate(minio_s3_requests_5xx_errors_total[10m]))'` | 5xx empty or 0; 4xx not higher than baseline mix |
 | Next Thanos upload | `kubectl -n monitoring logs prometheus-kube-prometheus-stack-prometheus-0 -c thanos-sidecar --tail=400 \| grep -i 'upload new block'` after the next odd hour `:00:33` | a new line; `prom 'thanos_shipper_upload_failures_total'` unchanged |
 | Compactor | `prom 'increase(thanos_compact_iterations_total[1h])'` after an hour; `prom 'thanos_compact_halted'` | about 12 per hour; halted 0 |
-| Store gateway | `prom 'thanos_bucket_store_blocks_loaded'` after the next 15m sync; `tq 'count(up offset 4d)'` (the P7 helper; thanos-query, **not** `prom`, because Prometheus holds only 3d) | blocks loaded >= 20 (baseline) and the offset query returns data (baseline **119**; older than Prometheus' 3d, so it is read from the bucket) |
+| Store gateway | `prom 'thanos_bucket_store_blocks_loaded'` after the next 15m sync; `tq 'count(up offset 4d)'` (thanos-query, **not** `prom`, because Prometheus holds only 3d). `prom` (helper block near the top) and `tq` (P7 block) are shell functions: copy both into a fresh shell first | blocks loaded >= 20 (baseline) and the offset query returns data (baseline **119**; older than Prometheus' 3d, so it is read from the bucket) |
 | Loki write | `prom 'sum by (status_code) (increase(loki_write_request_duration_seconds_count[10m]))'` | 2xx only, still increasing |
 | Loki read-back | Grafana Explore, Loki: `sum by (job) (count_over_time({job=~".+"}[1h] offset 2d))` | non-empty (chunks older than the ingester's memory come from the bucket) |
 | Alerts | `prom 'ALERTS{alertname=~"Minio.*\|Thanos.*\|FluxResourceNotReady",alertstate="firing"}'` | empty |
-| Config diff | redo the P7 export (`bash mcpod.sh after`), sort the `admin policy ls` section of both files (its order is not stable between calls; identical once sorted), then `diff <(grep -v -E 'uptime\|time\|version\|commit\|deploymentID\|"id"\|Uptime\|Version\|Commit\|Deployment' before/admin.txt) <(same for after)` | versioning Suspended, quotas 100GiB/20GiB, ILM rules, users and both policies unchanged; Silo additionally lists extra built-in policies (`consolereadonly`, `iamAdmin`, `infraAdmin`, `tablesAdmin`, `tablesReadOnly`, `tablesReadWrite`), expected diff noise. Silo caveats from the fork notes: new/updated policies reject bare ARN prefixes (these policies use `arn:aws:s3:::bucket` and `bucket/*`, fine), explicit version deletes need `s3:DeleteObjectVersion`, per-bucket CORS is new |
+| Config diff | redo the P7 export (`bash mcpod.sh after`), then run the diff block below (both sides sorted inside the diff) | versioning Suspended, quotas 100GiB/20GiB, ILM rules, users and both policies unchanged; Silo additionally lists extra built-in policies (`consolereadonly`, `iamAdmin`, `infraAdmin`, `tablesAdmin`, `tablesReadOnly`, `tablesReadWrite`), expected diff noise. Silo caveats from the fork notes: new/updated policies reject bare ARN prefixes (these policies use `arn:aws:s3:::bucket` and `bucket/*`, fine), explicit version deletes need `s3:DeleteObjectVersion`, per-bucket CORS is new |
 | Bootstrap Jobs | `kubectl -n storage get jobs` | the five Jobs still `Complete` and **unchanged** (`ssa: IfNotPresent`) |
 | Memory / OOM | `prom 'max_over_time(container_memory_working_set_bytes{namespace="storage",pod=~"minio-[a-z0-9]+-[a-z0-9]+",container="minio"}[1h])'` after the first scanner cycle (about an hour) and again at T+24h; `prom 'kube_pod_container_status_last_terminated_reason{namespace="storage",pod=~"minio-.*",reason="OOMKilled"}'` | well under the **2Gi** limit (PR #900 raises it from 1408Mi; old binary's 14d peak 1051Mi, Silo rehearsal peak 428Mi at low load); no OOMKilled series; restart count 0. With `disableWait` Flux will not show an OOM crash-loop: this row and `MinioDown` are the only signals |
 | Flux | `flux get hr minio -n storage; flux get ks minio -n storage` | Ready (this proves little with `disableWait`; the rows above do) |
+
+Config diff (copy-paste; sorting inside the diff because the `admin policy ls` order is not stable between calls and is identical once sorted):
+
+```sh
+cd ~/silo-swap-shared
+F='uptime|time|version|commit|deploymentID|"id"|Uptime|Version|Commit|Deployment'
+diff <(grep -v -E "$F" before/admin.txt | sort) <(grep -v -E "$F" after/admin.txt | sort)
+```
 
 ## 6. Rollback ladder
 
