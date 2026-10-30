@@ -35,7 +35,7 @@ func rep(ok bool, name, detail string) {
 	fmt.Printf("%s %s: %s\n", s, name, detail)
 }
 
-func blob(n int) []byte { b := make([]byte, n); rand.Read(b); return b }
+func blob(n int) []byte   { b := make([]byte, n); rand.Read(b); return b }
 func sum(b []byte) string { h := sha256.Sum256(b); return fmt.Sprintf("%x", h[:6]) }
 func env(k string) string { return os.Getenv(k) }
 
