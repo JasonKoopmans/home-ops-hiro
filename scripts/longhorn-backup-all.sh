@@ -16,6 +16,9 @@
 #      name — the Backup CR has no volume field of its own, the controller
 #      resolves the volume from the referenced snapshot.
 #   4. Wait for status.state == Completed.
+# Both CRs share one name, which must stay within 63 bytes (see snap_name below):
+# Longhorn's validating webhook builds a label selector from the Snapshot name,
+# so a longer one can be created but never again updated or deleted.
 # Both CRs are left behind afterward, same as the recurring job leaves them:
 # the snapshot becomes a normal rung in the volume's snapshot chain (subject
 # to the usual retain/trim policy), not something this script cleans up.
@@ -121,6 +124,35 @@ TARGETS="$(resolve_targets | sort -u)"
 [ -n "$TARGETS" ] || die "no volumes matched (groups:${RJ_GROUPS:- none}, volumes:${VOLUMES:- none}, all-volumes: $ALL_VOLUMES)"
 TOTAL="$(printf '%s\n' "$TARGETS" | grep -c .)"
 
+# --- snapshot / backup CR naming -------------------------------------------------
+# The name must be <= 63 bytes. Longhorn's validator webhook turns a Snapshot
+# name into a label value (linked-clone check), and a label value over 63 bytes
+# makes every UPDATE/DELETE of that CR fail with a 500 ("must be no more than 63
+# bytes") while CREATE still succeeds. The CR is then undeletable through the
+# API: longhorn-manager's syncSnapshotCRs retried one such delete ~3.7 times a
+# minute for 12 days. The old `<volume>-manual-<run>` was 70 bytes for every
+# `pvc-<uuid>` volume (40 + 30), which left 15 of them behind on 2026-10-09.
+# Longhorn labels the CR with longhornvolume=<volume>, so the name does not need
+# to carry the whole volume name: pvc-<first 8 hex of the uuid> is enough.
+SNAP_NAME_MAX=63
+RUN_ID="$(date +%s)-$$-$RANDOM"
+snap_name() {
+  local vol="$1" tag
+  case "$vol" in
+    pvc-*) tag="${vol:0:12}" ;;
+    *)     tag="$vol" ;;
+  esac
+  printf '%s-manual-%s' "$tag" "$RUN_ID"
+}
+
+# Refuse before any CR exists: too long, or two volumes shortened to the same name.
+for v in $TARGETS; do
+  n="$(snap_name "$v")"
+  [ "${#n}" -le "$SNAP_NAME_MAX" ] || die "snapshot name for volume $v would be ${#n} bytes (max $SNAP_NAME_MAX): $n"
+done
+dups="$(for v in $TARGETS; do snap_name "$v"; printf '\n'; done | sort | uniq -d)"
+[ -z "$dups" ] || die "two volumes map to the same snapshot name: $dups"
+
 log "Longhorn namespace : $LH_NS"
 if [ "$ALL_VOLUMES" -eq 1 ]; then
   log "Target             : ALL volumes (ignoring backup policy)"
@@ -143,14 +175,13 @@ fi
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
-RUN_ID="$(date +%s)-$$-$RANDOM"
 # Runs in its own backgrounded subshell -- `set +e` so one failing kubectl call
 # can't abort the subshell before it writes its .status marker (bash background
 # jobs inherit the parent's shell options, including errexit).
 backup_one() {
   set +e
   local vol="$1" snap out log_f deadline ready err state progress
-  snap="${vol}-manual-${RUN_ID}"
+  snap="$(snap_name "$vol")"
   out="$WORKDIR/$vol.status"
   log_f="$WORKDIR/$vol.log"
 
