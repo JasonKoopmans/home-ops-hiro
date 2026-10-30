@@ -50,7 +50,7 @@ Not affected: Prometheus itself, Grafana, anything not using these two buckets. 
 | G7 | Flux clean: `minio` HR Ready, no Stalled HRs, no pending Renovate PR on `kubernetes/apps/storage/minio/**` or `.renovaterc.json5` | P1 | open |
 | G8 | Baselines captured to `~/silo-swap-shared/before/` | P7 | open |
 | G9 | Decision D1 made (rollback behaviour); PR #900 matches it | section 8 | open |
-| G10 | Not inside a Thanos upload window: start between `hh:20` and `hh:40` of an **odd** UTC hour (so the swap ends before `hh+1:00:33`) | clock | at the time |
+| G10 | Not inside a Thanos upload window: start between `hh:20` and `hh:40` of an **even** UTC hour, just after that hour's upload at `hh:00:33` (so the swap ends well before the next upload at `hh+2:00:33`) | clock | at the time |
 
 ## 3. Preflight
 
@@ -208,7 +208,7 @@ if the `--overrides` quoting fights you, `kubectl -n storage run` an interactive
 ### T-0 (start of the window)
 
 ```sh
-date -u                                  # odd UTC hour, minute 20-40 (G10)
+date -u                                  # even UTC hour, minute 20-40 (G10)
 kubectl -n storage get pod -l app=minio,release=minio -o wide               # 1/1, cmp-03
 kubectl -n storage get volumes.longhorn.io $VOL -o jsonpath='{.status.robustness}{"\n"}'   # healthy
 kubectl -n storage get backups.longhorn.io -l backup-volume=$VOL            # a Completed backup exists
