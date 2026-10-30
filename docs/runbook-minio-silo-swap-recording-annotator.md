@@ -147,7 +147,7 @@ repo); the admin exports contain access-key names and must not be committed.
   window or during the soak. Without this, R1 can silently stop being real.
 - **P8. Baselines**, saved to `~/ra-silo-swap/before/`: admin export (§B3), playback headers (§B4), object list
   (§B2).
-- **P9.** Stage the rollback branch (§6, R1 diff) so a revert is one click, not an edit under pressure. Do not merge
+- **P9.** Stage the rollback branch (§6, R1 diff) so a revert is one click, not an edit under pressure. Also stage the unsuspend PR (delete the `suspend: true` line and its TEMPORARY comment from `recording-annotator-mirror-cronjob.yaml`, nothing else) for M11. Do not merge
   or push it to `main`.
 
 ### T-1d (Sat 10-31)
@@ -186,7 +186,7 @@ go to the matching rung in §6 for what is already done.
 | `recording-annotator-index-backup` (hourly, UTC) | `POST /internal/backup/index` on the app (quiesces writes, writes the AWS index bucket) | one manual run then suspend (M3) | after the app, run once by hand |
 | `recording-annotator-reconciliation` (daily 03:17Z) | `POST /internal/reconcile` (reads MinIO) | suspend (M3) | after the app, run once by hand |
 | `recording-annotator-restore-drill` (monthly, Nov 1 04:00Z) | none (AWS index bucket only) | leave running | n/a |
-| `recording-annotator-media-mirror` (hourly `:23` Chicago) | reads MinIO as the scoped user, writes AWS | suspend (M4); run by hand after (M11) | right after MinIO verified |
+| `recording-annotator-media-mirror` (hourly `:23` Chicago) | reads MinIO as the scoped user, writes AWS | suspend (M4; also `suspend: true` in Git); dry-run by hand, then a follow-up PR removes the line (M11) | right after MinIO verified |
 | Console route `recording-annotator-minio.${SECRET_DOMAIN}` and `mc` by hand | root | do not use during the window | n/a |
 | Longhorn recurring jobs | volume level; snapshot at 05:00Z, trim Sun 03:00Z | not paused; both fall outside a Sunday-morning window | n/a |
 
@@ -285,7 +285,9 @@ rollback branch staged. Read G10's answer aloud: it tells you which rung you wil
 
 State, not discipline, must hold the swap back. In M4 you suspended the mirror CronJob; **also suspend the
 HelmRelease now**, so the merge is inert and `flux resume` is the real trigger (the mirror CronJob's new `mc` image
-also lands at merge, and an unsuspended `:23` run would start a real mirror before the M11 dry-run):
+also lands at merge; the PR therefore also carries `suspend: true` on that CronJob, so Git itself keeps an
+unsuspended `:23` run from starting a real mirror before the M11 dry-run. The live suspend from M4 stays as the
+belt to that braces):
 
 ```sh
 flux -n storage suspend hr recording-annotator-minio
@@ -416,10 +418,12 @@ kubectl -n storage wait --for=condition=complete job/$RJ --timeout=15m ; kubectl
 kubectl -n storage get job $RJ -o jsonpath='{.status.succeeded}{"\n"}'                                          # 1
 ```
 
-Then re-do the §B2 step 4 comparison (counts/sizes still equal), unsuspend the CronJob, and check the alert signal:
+Then re-do the §B2 step 4 comparison (counts/sizes still equal), then unsuspend the CronJob. `suspend: true` is in Git and Flux owns the field, so a live
+`kubectl patch ... suspend false` is reverted at the next reconcile: merge the staged follow-up PR (P9) that removes
+that one line, wait for Flux (~1-2 min) and check the alert signal:
 
 ```sh
-kubectl -n storage patch cronjob recording-annotator-media-mirror -p '{"spec":{"suspend":false}}'
+kubectl -n storage get cronjob recording-annotator-media-mirror -o jsonpath='{.spec.suspend}{"\n"}'   # false (empty is also unsuspended)
 # Prometheus: time() - kube_cronjob_status_last_successful_time{cronjob="recording-annotator-media-mirror"}  -> < 3600
 # and RecordingAnnotatorMediaMirrorNotSucceeding is not pending/firing
 ```

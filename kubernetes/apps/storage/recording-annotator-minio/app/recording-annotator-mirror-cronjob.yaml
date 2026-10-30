@@ -50,6 +50,14 @@ metadata:
   name: recording-annotator-media-mirror
   namespace: storage
 spec:
+  # TEMPORARY, for the MinIO -> Silo swap (docs/runbook-minio-silo-swap-recording-annotator.md, M7/M11). The new
+  # pgsty/mc client has never run against the COMPLIANCE-locked AWS bucket, so the first run must be a by-hand
+  # `--dry-run` (M11); a real `:23` run that disagrees with the old copy about which objects differ would write new
+  # versions into a bucket nobody can delete from. Keep the safety in Git, not in an operator's memory: the merge
+  # lands the new image already suspended. Flux owns this field, so a live `kubectl patch` back to false is
+  # reverted at the next reconcile; the unsuspend is a one-line follow-up PR removing this line, after the dry-run
+  # is clean. Until then RecordingAnnotatorMediaMirrorNotSucceeding fires after 3h, which is the reminder.
+  suspend: true
   # Offset from the top of the hour so this does not contend with the app's own index-backup run.
   schedule: "23 * * * *"
   timeZone: ${TIMEZONE}
