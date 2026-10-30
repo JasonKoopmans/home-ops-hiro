@@ -161,7 +161,7 @@ func main() {
 	rs, err = http.Get(u2.String())
 	if err == nil {
 		b, _ := io.ReadAll(rs.Body)
-		rep(rs.StatusCode == 403 && strings.Contains(string(b), "ExpiredToken") || strings.Contains(string(b), "expired"), "expired presigned URL rejected", fmt.Sprintf("status=%d body=%.120s", rs.StatusCode, strings.ReplaceAll(string(b), "\n", " ")))
+		rep(rs.StatusCode == 403 && (strings.Contains(string(b), "ExpiredToken") || strings.Contains(string(b), "expired")), "expired presigned URL rejected", fmt.Sprintf("status=%d body=%.120s", rs.StatusCode, strings.ReplaceAll(string(b), "\n", " ")))
 	}
 	// ---- (e) mc rm is exercised by the shell wrapper
 	if failed {
