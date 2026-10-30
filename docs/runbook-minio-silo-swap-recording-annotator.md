@@ -796,14 +796,20 @@ done
 kubectl -n storage delete pod -l app=silo-prepull --wait=false
 ```
 
-Expect one `pgsty/silo` and one `pgsty/mc` line (the pinned release) under every node. On 2026-10-30 the CRI state
-was: .21 `pgsty/mc` only, .22 none, .23 `pgsty/silo` only, .24 none, .25 both, so P6 has real work to do. If a pod sat in `ImagePullBackOff`, check Docker Hub rate limits (anonymous pull) and
+Expect one `pgsty/silo` and one `pgsty/mc` line (the pinned release) under every node. Check the CRI state
+and pull only what is missing (morning of 2026-10-30: .21 `pgsty/mc` only, .22 none, .23 `pgsty/silo` only, .24 none,
+.25 both; by 18:03 CDT the Friday prep had put both pinned images on all five nodes). If a pod sat in `ImagePullBackOff`, check Docker Hub rate limits (anonymous pull) and
 retry; do not proceed with a node missing.
 
 ### B1b. Keeper pods for the old images
 
+Keeper pod names must stay unique across the two runbooks, in the shared namespace `storage`: the shared runbook's P5
+owns `keep-old-minio-<node>` (label `app=silo-image-keeper-shared`); this runbook owns `keep-ra-old-minio-<node>` and
+`keep-old-mc-<node>` (label `app=silo-image-keeper-ra`; the shared runbook has no `mc` keepers). Cleanup here deletes by
+label `app=silo-image-keeper-ra` only. A pod spec is immutable, so a name clash would be a confusing no-op or error.
+
 ```sh
-for spec in "hiro-cmp-05 old-minio quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-03 old-minio quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-01 old-mc quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z" "hiro-cmp-05 old-mc quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"; do
+for spec in "hiro-cmp-05 ra-old-minio quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-03 ra-old-minio quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z" "hiro-cmp-01 old-mc quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z" "hiro-cmp-05 old-mc quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z"; do
   read -r node name image <<< "$spec"      # not `set -- $spec`: zsh does not word-split
   kubectl -n storage apply -f - <<EOF
 apiVersion: v1
