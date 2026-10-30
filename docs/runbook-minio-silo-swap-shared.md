@@ -68,6 +68,8 @@ Not affected: Prometheus itself, Grafana, anything not using these two buckets. 
 Do P3 (pre-pull, cmp-05 first and alone; it is already done), P5 (keepers on .23 and .25) and **start the P4 Longhorn backup** (hours) before about **20:30 CDT Friday (01:30Z)**,
 before the Renovate Saturday wave starts at about 01:50Z, so a wave of image pulls does not land on cmp-05 on top of yours. Re-run the `image list` loop in P3 to confirm.
 
+**Done Friday 2026-10-30 (prep session; evidence in `~/silo-swap-shared/before/prep-evidence/`):** silo and mc pre-pulled on all five nodes (3-7 s each, no rate limit); keeper pods Running on cmp-03 and cmp-05; snapshot `pre-silo-20261030` (volume `pvc-ea7e79e5...`) `readyToUse` at 23:01Z (1.35 GB); `unmapMarkSnapChainRemoved` set to `disabled` at 23:29Z; Longhorn backup `backup-5aacdcb8cb5e438d` started 23:31Z from the cmp-03 replica (about 0.4 %/min, ETA about 03:30-04:00Z Saturday, i.e. well before the T-1h mark of 16:20Z); P7 baselines taken (14 admin sections). Not done: P6 old-image export to ghcr.io (needs your own `docker login` with `write:packages`). Revert `unmapMarkSnapChainRemoved` to `enabled` after day 3.
+
 ### Renovate runs in the window (measured from PR history)
 
 `.renovaterc.json5`: `schedule: ["on Saturday"]`, no timezone (UTC), `prHourlyLimit: 4`, platform automerge. Saturdays 2026-10-10, 10-17, 10-24 opened
@@ -150,7 +152,7 @@ Cost: the snapshot pins its blocks. Measured 2026-10-28: actualSize 72 GB of 120
 about 72h, not 7d (section 7). Revert with `"enabled"` when you delete it. The S3 backup is the 7-day asset.
 
 **P5. Keep the old image alive** (kubelet GC can drop the only copies; verified 2026-10-28: server image `quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z`
-on cmp-03 and cmp-05 only; `mc:RELEASE.2025-08-13T08-35-41Z` on cmp-01 and cmp-05). Keeper pods (a container in use is exempt from GC):
+on cmp-03 and cmp-05 only; `mc:RELEASE.2025-08-13T08-35-41Z` on cmp-01 and cmp-05). Keeper pods (a container in use is exempt from GC). Note: pod names `keep-old-minio-<node>` are **this** runbook's; the RA runbook's keepers are `keep-ra-old-minio-*` and `keep-old-mc-*` with label `app=silo-image-keeper-ra`. If RA's runbook still says `keep-old-minio-<node>`, do not apply it: the name is taken in namespace `storage` with a different command and the apply is rejected.
 
 ```sh
 for n in hiro-cmp-03 hiro-cmp-05; do kubectl -n storage apply -f - <<EOF
@@ -200,7 +202,10 @@ mkdir -p ~/silo-swap-shared/before && cd ~/silo-swap-shared/before
 for q in 'minio_bucket_usage_total_bytes' 'minio_bucket_usage_object_total' 'up{job=~"minio.*"}' 'minio_cluster_health_status' \
          'sum by (api) (minio_s3_requests_errors_total)' 'sum by (api) (minio_s3_requests_4xx_errors_total)' \
          'thanos_shipper_uploads_total' 'thanos_shipper_upload_failures_total' 'thanos_compact_iterations_total' \
-         'thanos_compact_halted' 'thanos_bucket_store_blocks_loaded' 'count(up offset 4d)'; do echo "## $q"; prom "$q"; done > prom.txt
+         'thanos_compact_halted' 'thanos_bucket_store_blocks_loaded'; do echo "## $q"; prom "$q"; done > prom.txt
+# Prometheus keeps only 3d, so an offset-4d query is empty there by construction: ask thanos-query (reads the bucket)
+tq() { kubectl get --raw "/api/v1/namespaces/monitoring/services/thanos-query:10902/proxy/api/v1/query?query=$(python3 -I -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$1")" | python3 -I -c 'import sys,json;[print(x["metric"],x["value"][1]) for x in json.load(sys.stdin)["data"]["result"]]'; }
+echo '## (thanos-query) count(up offset 4d)' >> prom.txt; tq 'count(up offset 4d)' >> prom.txt     # baseline 119 on 2026-10-30
 cat prom.txt | head -40
 ```
 
@@ -211,19 +216,53 @@ The Loki server is not scraped; Loki baselines are LogQL (section 5).
 Admin/config export through a throwaway pod (root credentials via `secretKeyRef`, never printed). Report Phase B confirms the new `pgsty/mc` (2026-10-26) works against the old 2024-12-18 server (admin API user/policy/ilm/quota/version, list, cat: PASS), and section 9 here ran it against a clone of this instance; the before and after exports use the same client so the diff is clean:
 
 ```sh
-cat > ~/silo-swap-shared/mcrun.sh <<'EOF'
-# usage: mcrun.sh <podname> '<sh script, alias "local" preset>' ; needs MC_IMG
-n=$1; s=$2
-kubectl -n storage run "$n" --rm -i --restart=Never --image="$MC_IMG" --env=X=1 --overrides='{"spec":{"containers":[{"name":"'"$n"'","image":"'"$MC_IMG"'","stdin":true,"command":["/bin/sh","-c","mc alias set local http://minio.storage.svc.cluster.local:9000 \"$MINIO_ROOT_USER\" \"$MINIO_ROOT_PASSWORD\" >/dev/null && sh -c \"$SCRIPT\""],"env":[{"name":"SCRIPT","value":"'"$(printf '%s' "$s" | sed 's/"/\\"/g')"'"},{"name":"MINIO_ROOT_USER","valueFrom":{"secretKeyRef":{"name":"minio-root-credentials","key":"rootUser"}}},{"name":"MINIO_ROOT_PASSWORD","valueFrom":{"secretKeyRef":{"name":"minio-root-credentials","key":"rootPassword"}}}]}]}}' 2>/dev/null
+cat > ~/silo-swap-shared/mcpod.sh <<'SCRIPT'
+# usage: bash mcpod.sh before|after  -> ~/silo-swap-shared/<before|after>/admin.txt ; needs MC_IMG, KUBECONFIG.
+# A Pod manifest + `kubectl logs`: `kubectl run -i --rm` loses the output of a short-lived pod (2026-10-30: the file held only 'pod deleted').
+# Root credentials only via secretKeyRef, never printed. Validated 2026-10-30: 14 sections.
+w="${1:?usage: mcpod.sh before|after}"
+out="$HOME/silo-swap-shared/$w/admin.txt"; mkdir -p "$(dirname "$out")"
+pod="mc-export-$w"
+kubectl -n storage delete pod "$pod" --ignore-not-found >/dev/null
+kubectl -n storage apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata: {name: $pod, namespace: storage, labels: {app: silo-swap-toolbox}}
+spec:
+  restartPolicy: Never
+  securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000}
+  containers:
+    - name: mc
+      image: $MC_IMG
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          mc alias set local http://minio.storage.svc.cluster.local:9000 "\$AK" "\$SK" >/dev/null
+          for c in "admin info local --json" "admin policy ls local" "admin user ls local --json" "admin config export local" "version info local/observability-thanos" "version info local/observability-loki" "quota info local/observability-thanos" "quota info local/observability-loki" "ilm rule ls local/observability-thanos" "ilm rule ls local/observability-loki" "stat local/observability-thanos" "stat local/observability-loki"; do echo "### mc \$c"; mc \$c 2>&1 || true; done
+          for p in thanos-observability-rw loki-observability-rw; do echo "### policy \$p"; mc admin policy info local \$p 2>&1; done
+      env:
+        - {name: MC_CONFIG_DIR, value: /tmp/mc}
+        - {name: AK, valueFrom: {secretKeyRef: {name: minio-root-credentials, key: rootUser}}}
+        - {name: SK, valueFrom: {secretKeyRef: {name: minio-root-credentials, key: rootPassword}}}
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+      volumeMounts: [{name: tmp, mountPath: /tmp}]
+      resources: {requests: {cpu: 10m, memory: 64Mi}, limits: {memory: 256Mi}}
+  volumes: [{name: tmp, emptyDir: {sizeLimit: 512Mi}}]
 EOF
+for i in $(seq 1 60); do p=$(kubectl -n storage get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null); case "$p" in Succeeded|Failed) break;; esac; sleep 3; done
+echo "phase=$p"
+kubectl -n storage logs "$pod" > "$out" 2>&1
+echo "sections: $(grep -c '###' "$out") (expect 14)  bytes: $(wc -c < "$out")  -> $out"
+kubectl -n storage delete pod "$pod" --wait=false >/dev/null
+SCRIPT
 export MC_IMG; cd ~/silo-swap-shared
-bash mcrun.sh mc-export-before 'for c in "admin info local --json" "admin policy ls local" "admin user ls local --json" "admin config export local" "version info local/observability-thanos" "version info local/observability-loki" "quota info local/observability-thanos" "quota info local/observability-loki" "ilm rule ls local/observability-thanos" "ilm rule ls local/observability-loki" "stat local/observability-thanos" "stat local/observability-loki"; do echo "### mc $c"; mc $c 2>&1 || true; done; for p in thanos-observability-rw loki-observability-rw; do echo "### policy $p"; mc admin policy info local $p 2>&1; done' > before/admin.txt
-grep -c '###' before/admin.txt; grep -E 'Suspended|100GiB|20GiB|noncurrent|thanos-observability-rw|loki-observability-rw' before/admin.txt | head
+bash mcpod.sh before
+grep -E 'Suspended|100 GiB|20 GiB|Noncurrent|thanos-observability-rw|loki-observability-rw' before/admin.txt | head
 ```
 
-Expected from the repo: versioning Suspended on both buckets, quotas 100GiB/20GiB, ILM `--noncurrent-expire-days 1 --expire-delete-marker`
-on both, users for the two scoped keys, policies `thanos-observability-rw` and `loki-observability-rw`. The script is a draft:
-if the `--overrides` quoting fights you, `kubectl -n storage run` an interactive pod instead and paste the loop.
+Expected from the repo: versioning Suspended on both buckets, quotas `100 GiB` / `20 GiB` (the output has a space), ILM `Noncurrent` expiry 1 day plus expired delete marker
+on both (`--noncurrent-expire-days 1 --expire-delete-marker`), users for the two scoped keys, policies `thanos-observability-rw` and `loki-observability-rw`.
+Baseline taken 2026-10-30 22:57Z with this script: 14 sections, contents as expected. `admin policy ls` order is **not stable** between calls: sort that section before the M9 diff (section 5, Config diff).
 
 ### T-0 (start of the window)
 
@@ -341,11 +380,11 @@ Run immediately (M9), again after the next odd-hour upload, and again at T+24h.
 | S3 errors | `prom 'sum by (api) (rate(minio_s3_requests_errors_total[10m]))'` and `prom 'sum(rate(minio_s3_requests_5xx_errors_total[10m]))'` | 5xx empty or 0; 4xx not higher than baseline mix |
 | Next Thanos upload | `kubectl -n monitoring logs prometheus-kube-prometheus-stack-prometheus-0 -c thanos-sidecar --tail=400 \| grep -i 'upload new block'` after the next odd hour `:00:33` | a new line; `prom 'thanos_shipper_upload_failures_total'` unchanged |
 | Compactor | `prom 'increase(thanos_compact_iterations_total[1h])'` after an hour; `prom 'thanos_compact_halted'` | about 12 per hour; halted 0 |
-| Store gateway | `prom 'thanos_bucket_store_blocks_loaded'` after the next 15m sync; `prom 'count(up offset 4d)'` | blocks loaded >= 20 (baseline) and the offset query returns data (older than Prometheus' 3d, so it is read from the bucket) |
+| Store gateway | `prom 'thanos_bucket_store_blocks_loaded'` after the next 15m sync; `tq 'count(up offset 4d)'` (the P7 helper; thanos-query, **not** `prom`, because Prometheus holds only 3d) | blocks loaded >= 20 (baseline) and the offset query returns data (baseline **119**; older than Prometheus' 3d, so it is read from the bucket) |
 | Loki write | `prom 'sum by (status_code) (increase(loki_write_request_duration_seconds_count[10m]))'` | 2xx only, still increasing |
 | Loki read-back | Grafana Explore, Loki: `sum by (job) (count_over_time({job=~".+"}[1h] offset 2d))` | non-empty (chunks older than the ingester's memory come from the bucket) |
 | Alerts | `prom 'ALERTS{alertname=~"Minio.*\|Thanos.*\|FluxResourceNotReady",alertstate="firing"}'` | empty |
-| Config diff | redo the P7 export into `after/admin.txt` and `diff <(grep -v -E 'uptime\|time\|version\|commit\|deploymentID\|"id"\|Uptime\|Version\|Commit\|Deployment' before/admin.txt) <(same for after)` | versioning Suspended, quotas 100GiB/20GiB, ILM rules, users and both policies unchanged; Silo additionally lists extra built-in policies (`consolereadonly`, `iamAdmin`, `infraAdmin`, `tablesAdmin`, `tablesReadOnly`, `tablesReadWrite`), expected diff noise. Silo caveats from the fork notes: new/updated policies reject bare ARN prefixes (these policies use `arn:aws:s3:::bucket` and `bucket/*`, fine), explicit version deletes need `s3:DeleteObjectVersion`, per-bucket CORS is new |
+| Config diff | redo the P7 export (`bash mcpod.sh after`), sort the `admin policy ls` section of both files (its order is not stable between calls; identical once sorted), then `diff <(grep -v -E 'uptime\|time\|version\|commit\|deploymentID\|"id"\|Uptime\|Version\|Commit\|Deployment' before/admin.txt) <(same for after)` | versioning Suspended, quotas 100GiB/20GiB, ILM rules, users and both policies unchanged; Silo additionally lists extra built-in policies (`consolereadonly`, `iamAdmin`, `infraAdmin`, `tablesAdmin`, `tablesReadOnly`, `tablesReadWrite`), expected diff noise. Silo caveats from the fork notes: new/updated policies reject bare ARN prefixes (these policies use `arn:aws:s3:::bucket` and `bucket/*`, fine), explicit version deletes need `s3:DeleteObjectVersion`, per-bucket CORS is new |
 | Bootstrap Jobs | `kubectl -n storage get jobs` | the five Jobs still `Complete` and **unchanged** (`ssa: IfNotPresent`) |
 | Memory / OOM | `prom 'max_over_time(container_memory_working_set_bytes{namespace="storage",pod=~"minio-[a-z0-9]+-[a-z0-9]+",container="minio"}[1h])'` after the first scanner cycle (about an hour) and again at T+24h; `prom 'kube_pod_container_status_last_terminated_reason{namespace="storage",pod=~"minio-.*",reason="OOMKilled"}'` | well under the **2Gi** limit (PR #900 raises it from 1408Mi; old binary's 14d peak 1051Mi, Silo rehearsal peak 428Mi at low load); no OOMKilled series; restart count 0. With `disableWait` Flux will not show an OOM crash-loop: this row and `MinioDown` are the only signals |
 | Flux | `flux get hr minio -n storage; flux get ks minio -n storage` | Ready (this proves little with `disableWait`; the rows above do) |
