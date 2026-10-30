@@ -89,7 +89,7 @@ the mirror (M11, `--dry-run` first) and the playback path through Envoy (§B4/M1
 | G9 | Memory | **CLOSED**: Silo idle 110 MiB with a seeded bucket vs the 512Mi limit (old 14d peak 239 MB) | OOM-kill |
 | G10 | Rollback after Silo has run on the volume | **PASS on the clone**: old 2024-12-18 image reopened Silo-touched data in 4 s, 79 sha256 and the listing identical, then Silo again identical. **Not exercised: IAM revocation metadata** (STS/service-account revocation); this instance has none and the swap creates none, but upstream calls rolling downgrades unsupported once it exists, so the formal rollback is still "restore the pre-swap copy" | decides how real R1 is |
 | G12 | App side | **CLOSED**: `ra-app-s3` (RecordingAnnotator PR #49, `docs/storage-compatibility.md`): the app's 8 MinIO integration tests plus 20+ new cases (multipart, range, expiry, scoped credential, chunk API) pass unchanged on this exact Silo pin. **No app change or release is needed for the swap.** | app compat |
-| G13 | Default region | **CLOSED**: the live Deployment has no `MINIO_REGION` env (default `us-east-1`) and the app works today, so the swap keeps the region. The `region` field in the P8 `admin info` export is the live confirmation, and the M8 diff must show it unchanged. | app compat |
+| G13 | Default region | **CLOSED**: the live Deployment has no `MINIO_REGION` env (default `us-east-1`) and the app works today, so the swap keeps the region. `admin info --json` carries **no** `region` field: the live confirmation is `Location` in the `mc stat local/recordings` section of the P8 export (read `us-east-1` on 2026-10-30), plus `site name= region=` (empty = default) in `admin config export`; the M8 diff must show both unchanged. | app compat |
 | G11 | SN-2026-011 | **CLOSED**: fixed from 2026-09-16 (SN-2026-011…014); the 10-26 pin includes it. The old 2024-12-18 server is *older* than the fix, so the swap reduces exposure on the LAN-exposed S3 endpoint | security |
 
 ---
@@ -146,7 +146,9 @@ repo); the admin exports contain access-key names and must not be committed.
 - **P7. Pin the old images** with keeper pods (§B1b) so kubelet image GC cannot evict the only copies before the
   window or during the soak. Without this, R1 can silently stop being real.
 - **P8. Baselines**, saved to `~/ra-silo-swap/before/`: admin export (§B3), playback headers (§B4), object list
-  (§B2).
+  (§B2). Taken 2026-10-30 23:35Z by the Friday prep: `admin.txt`, `src.tsv`, `src-summary.txt` (83 objects, 2,030,030,689 B).
+  **Playback headers (§B4) were not taken** (they need an artifact id and likely app auth): take them before T-0. The bucket
+  gains objects, so re-take the object list (§B2 step 1) at T-0 (P14/M5) and diff against that, not against Friday's.
 - **P9.** Stage the rollback branch (§6, R1 diff) so a revert is one click, not an edit under pressure. Also stage the unsuspend PR (delete the `suspend: true` line and its TEMPORARY comment from `recording-annotator-mirror-cronjob.yaml`, nothing else) for M11. Do not merge
   or push it to `main`.
 
@@ -182,7 +184,7 @@ repo); the admin exports contain access-key names and must not be committed.
 
 ### T-0 (Sun 10:00 CST, before touching anything)
 
-- **P14.** Re-run P10 and P10a (no Renovate PR merged in the last 2 hours, none open with auto-merge on), §B1 verification (images still on all nodes, keepers Running), §B2 offsite proof (run 2).
+- **P14.** Re-take the object list (§B2 step 1; Friday's has 83 objects and will be stale), re-run P10 and P10a (no Renovate PR merged in the last 2 hours, none open with auto-merge on), §B1 verification (images still on all nodes, keepers Running), §B2 offsite proof (run 2).
 - **P15.** `date` on your workstation matches the cluster (the DST change is behind you).
 - **P16.** Open three views: Grafana alert list, `flux get hr -A -w`, `kubectl -n storage get pod -w`.
 
@@ -875,8 +877,9 @@ for c in "admin info local --json" "admin policy ls local" "admin user ls local 
 done
 for p in $(mc admin policy ls local 2>/dev/null); do echo "### policy $p"; mc admin policy info local "$p" 2>&1 || true; done
 ' > ~/ra-silo-swap/before/admin.txt        # use after/ after the swap
-diff <(grep -v -E '"(uptime|time|version|commit|deploymentID|id)"|Uptime|Version|Commit|Deployment' ~/ra-silo-swap/before/admin.txt) \
-     <(grep -v -E '"(uptime|time|version|commit|deploymentID|id)"|Uptime|Version|Commit|Deployment' ~/ra-silo-swap/after/admin.txt)
+# `admin policy ls` order is not stable between calls (identical once sorted), so compare sorted lines
+diff <(grep -v -E '"(uptime|time|version|commit|deploymentID|id)"|Uptime|Version|Commit|Deployment' ~/ra-silo-swap/before/admin.txt | sort) \
+     <(grep -v -E '"(uptime|time|version|commit|deploymentID|id)"|Uptime|Version|Commit|Deployment' ~/ra-silo-swap/after/admin.txt | sort)
 ```
 
 Commands that do not exist on one side print an error line (`|| true`); a line that is an error before and a value
