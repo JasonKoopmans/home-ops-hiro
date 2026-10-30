@@ -211,8 +211,8 @@ None found that blocks the swap. Conditions the runbooks must carry:
    or set `upgrade.remediation.remediateLastFailure: false` for the window.
 3. **No readiness probe on the chart's Deployment:** verify with `curl http://<svc>:9000/minio/health/ready` and the bucket/metrics checks, not pod Ready.
 4. **Real-data migration is proven for the RA instance only** (Phase B). The shared instance (Thanos/Loki, 46 GiB + 22k objects, suspended-versioning buckets with ILM and quotas) was not cloned: rehearse it, or at least take the offline PVC copy first and be ready to restore it.
-6. **Versioning state differs between instances:** the real RA bucket `recordings` has versioning **Enabled** (not suspended), no ILM, no quota, no Object Lock; the harness assumed suspended for the shared buckets only. Silo's suspended-bucket ILM fix (#252/#253) does not apply to RA.
 5. Pre-pull both digests on hiro-cmp-03 and -05 (and on the node that will run the Jobs) before the window; cmp-05's disk collapses under parallel pulls.
+6. **Versioning state differs between instances:** the real RA bucket `recordings` has versioning **Enabled** (not suspended), no ILM, no quota, no Object Lock; the harness assumed suspended for the shared buckets only. Silo's suspended-bucket ILM fix (#252/#253) does not apply to RA.
 
 ## Phase B results (RA clone, executed)
 
