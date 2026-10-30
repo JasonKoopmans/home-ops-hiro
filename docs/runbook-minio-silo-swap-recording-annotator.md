@@ -152,6 +152,19 @@ repo); the admin exports contain access-key names and must not be committed.
 
 ### T-1d (Sat 10-31)
 
+- **P10a. Renovate cannot race the swap.** Renovate runs on Saturdays (UTC) with `prHourlyLimit: 4` and automerge, and
+  the last three Saturdays opened 26-33 PRs, most merged within 15 minutes, the latest creations around 21:23Z-22:33Z.
+  The window (Sun 10:00 CST = 16:00Z) is outside that, but a Renovate PR touching `kubernetes/apps/storage/**` or
+  `kubernetes/apps/default/recording-annotator` that merges mid-swap would race it. Check now **and again at T-0 (P14)**:
+
+  ```sh
+  gh pr list --repo JasonKoopmans/home-ops-hiro --author 'app/renovate' --state open --json number,title,autoMergeRequest,files \
+    --jq '.[] | select(.autoMergeRequest != null) | "\(.number) \(.title) auto-merge ON"'
+  # for any that touch storage/** or default/recording-annotator, or when in doubt:
+  # gh pr merge <n> --disable-auto
+  gh pr list --repo JasonKoopmans/home-ops-hiro --state merged --search 'author:app/renovate merged:>=2026-11-01T14:00:00Z'   # none in the 2 h before T-0
+  ```
+
 - **P10.** Cluster is quiet: `task cluster:health`; `flux get ks -A | grep -v True` empty; no firing alerts for
   `RecordingAnnotator*`, `Minio*`, `Longhorn*` (Grafana MCP recipe in `CLAUDE.md`); Longhorn volume `healthy`, 2
   replicas.
@@ -164,7 +177,7 @@ repo); the admin exports contain access-key names and must not be committed.
 
 ### T-0 (Sun 10:00 CST, before touching anything)
 
-- **P14.** Re-run P10, §B1 verification (images still on all nodes, keepers Running), §B2 offsite proof (run 2).
+- **P14.** Re-run P10 and P10a (no Renovate PR merged in the last 2 hours, none open with auto-merge on), §B1 verification (images still on all nodes, keepers Running), §B2 offsite proof (run 2).
 - **P15.** `date` on your workstation matches the cluster (the DST change is behind you).
 - **P16.** Open three views: Grafana alert list, `flux get hr -A -w`, `kubectl -n storage get pod -w`.
 
@@ -340,9 +353,23 @@ Expected (filter on your workstation, the image has no `tail`/`grep`): the summa
 current objects on the 10-30 clone; the usage metric counts 80), and the `--versions` listing (82 entries on the clone,
 versions and delete markers, with version ids and mtimes) is **identical** to the pre-swap one. `recordings` has
 versioning **Enabled**, so use `mc ls --versions`, not only the current-object count, as the integrity baseline.
-`imageID` ends with the pinned digest; log shows the server online with no `ERROR`/`panic`/migration
-failure (GATE: paste the exact healthy start lines from the clone rehearsal here); `format` still `xl-single`; both
-health endpoints 200. Then verify data and IAM with the toolbox (§A):
+`imageID` ends with the pinned digest; the log passes the start-line criteria below (the clone rehearsal kept no verbatim log: `silo-qualification.md` records only
+"`Silo … go1.27.3 linux/amd64`", and Loki held none of the scratch pods' output on 2026-10-30, so the criteria are
+explicit instead of a pasted sample); `format` still `xl-single`; both
+health endpoints 200. Start-line criteria (save the whole log to `~/ra-silo-swap/after/start.log` on the night; the pre-swap shape, read from the
+live pod on 2026-10-30, is `MinIO Object Storage Server` / `Copyright` / `License: GNU AGPLv3` /
+`Version: RELEASE.2024-12-18T13-15-44Z (go1.23.4 linux/amd64)` / `API: http://<podIP>:9000  http://127.0.0.1:9000` /
+`WebUI: http://<podIP>:9001 …` / `Docs: https://docs.min.io`, and nothing else):
+
+- **Pass:** a banner naming Silo (the rehearsal printed `Silo … go1.27.3 linux/amd64`; the exact wording is unverified, so
+  a differently worded banner is fine as long as the version is `RELEASE.2026-10-26…`), an `API:` line on port 9000 and a
+  `WebUI:` line on 9001, then silence.
+- **Fail (go to §6, do not "wait and see"):** any line containing `ERROR`, `FATAL`, `panic`, `unable to`, `corrupt`,
+  `format`, `migrat`, `Unable to initialize`, or a restart count above 0; or no `API:` line within 30 s.
+- A line you cannot classify: keep the pod, do not proceed to M9, and ask. Nothing is lost by pausing here (the app and
+  every writer are still stopped).
+
+Then verify data and IAM with the toolbox (§A):
 
 ```sh
 ra_mc ra-verify root '
@@ -420,7 +447,24 @@ kubectl -n storage get job $RJ -o jsonpath='{.status.succeeded}{"\n"}'          
 
 Then re-do the §B2 step 4 comparison (counts/sizes still equal), then unsuspend the CronJob. `suspend: true` is in Git and Flux owns the field, so a live
 `kubectl patch ... suspend false` is reverted at the next reconcile: merge the staged follow-up PR (P9) that removes
-that one line, wait for Flux (~1-2 min) and check the alert signal:
+that one line, wait for Flux (~1-2 min) and check the alert signal.
+
+Field-ownership trap: M4 suspends the CronJob with a live `kubectl patch`, so the field manager `kubectl-patch` also
+owns `spec.suspend` (read-only check on 2026-10-30 before any of this: only `kustomize-controller` (Apply) and
+`kube-controller-manager` (status) appear in `managedFields`, `suspend` is `false`, nobody owns it yet). At merge Flux
+applies `suspend: true` as well, so both own it. When the follow-up PR deletes the line Flux releases its claim, but
+`kubectl-patch` still owns the field and server-side apply does not reset it, so **`spec.suspend` can stay `true` and the
+mirror stays off**. Check right after Flux applied the follow-up; if it still reads `true`, patch once (Git no longer
+carries the field, so Flux does not revert it):
+
+```sh
+kubectl -n storage get cronjob recording-annotator-media-mirror -o jsonpath='{.spec.suspend}{"\n"}'
+# only if this printed true AND `flux -n storage get ks recording-annotator-minio` shows the follow-up commit applied:
+kubectl -n storage patch cronjob recording-annotator-media-mirror -p '{"spec":{"suspend":false}}'
+```
+
+I kept the M4 live patch rather than dropping it: M4 has to stop `:23` runs *before* the merge, when the manifest in Git
+does not yet say `suspend: true`, and the final proof mirror in M5 is run by hand against a stable source. Then:
 
 ```sh
 kubectl -n storage get cronjob recording-annotator-media-mirror -o jsonpath='{.spec.suspend}{"\n"}'   # false (empty is also unsuspended)
@@ -643,7 +687,7 @@ At the end of the soak:
 | D6 | Keeper pods for the old server and `mc` images | Yes; delete at end of soak |
 | D7 | Alert silences | Narrow, 3h (M1) |
 | D8 | Pin by `tag@sha256` (as the PR does, as `silo-qualification.md` recommends) vs tag only | Digest; update tag and digest together, never the tag alone; manual bumps until the Renovate regex rule exists |
-| D9 | **Not caused by the swap, found by the app audit:** app 0.5.0 `DELETE /api/artifacts/{id}` issues `s3:DeleteObject`, which the scoped policy deliberately omits, so deleting an owned recording returns 500 **after** the artifact's comments/chapters/transcripts were already deleted (order: children, staging, blob, row). Grant `s3:DeleteObject` on `recordings/*` (a live `mc admin policy create`, the bootstrap Job will not re-run) or accept/avoid deletion in the UI. The mirror runs without `--remove`, so an enabled delete does not reach the offsite copy. Because `recordings` has versioning **Enabled**, a plain delete only adds a delete marker (old versions stay); permanent removal would need `s3:DeleteObjectVersion`, which nothing grants. Confirmed by the app audit (RecordingAnnotator PR #49/#50, both merged; the app-side half of the fix, deleting the blob first so a failed delete no longer strips the annotations, is open as RecordingAnnotator PR #52, green; PR #51, the dev stack on Silo, is also open): the blob key is `recordings/{artifactId}`, so the existing Resource `arn:aws:s3:::recordings/*` already covers it and only the Action `s3:DeleteObject` is missing. Editing the bootstrap Job script would NOT apply it: the script skips a policy that already exists, and the Job does not re-run (`ssa: IfNotPresent`). It needs a one-off live `mc admin policy create` as root (same toolbox as §A) plus the script change for rebuilds. The CronJob has no `--remove` (checked), so an app-side delete never reaches the Object-Locked AWS copy. | Live today, independent of the swap: fix it in its own small PR plus a one-off live policy update, after the soak starts or before the window, **not inside it** (it would blur the M8 IAM diff). Until then do not delete recordings in the UI |
+| D9 | **Not caused by the swap, found by the app audit:** app 0.5.0 `DELETE /api/artifacts/{id}` issues `s3:DeleteObject`, which the scoped policy deliberately omits, so deleting an owned recording returns 500 **after** the artifact's comments/chapters/transcripts were already deleted (order: children, staging, blob, row). Grant `s3:DeleteObject` on `recordings/*` (a live `mc admin policy create`, the bootstrap Job will not re-run) or accept/avoid deletion in the UI. The mirror runs without `--remove`, so an enabled delete does not reach the offsite copy. Because `recordings` has versioning **Enabled**, a plain delete only adds a delete marker (old versions stay); permanent removal would need `s3:DeleteObjectVersion`, which nothing grants. Confirmed by the app audit (RecordingAnnotator PR #49/#50, both merged; the app-side half of the fix, deleting the blob first so a failed delete no longer strips the annotations, is open as RecordingAnnotator PR #52, green, and reaches the cluster only with the next release tag: the deployed app is `ghcr.io/jasonkoopmans/recordingannotator` `0.5.0` (semver), so the missing `s3:DeleteObject` on the scoped user matters in production only from that release on, and the policy change is independent of the swap; PR #51, the dev stack on Silo, is also open): the blob key is `recordings/{artifactId}`, so the existing Resource `arn:aws:s3:::recordings/*` already covers it and only the Action `s3:DeleteObject` is missing. Editing the bootstrap Job script would NOT apply it: the script skips a policy that already exists, and the Job does not re-run (`ssa: IfNotPresent`). It needs a one-off live `mc admin policy create` as root (same toolbox as §A) plus the script change for rebuilds. The CronJob has no `--remove` (checked), so an app-side delete never reaches the Object-Locked AWS copy. | Live today, independent of the swap: fix it in its own small PR plus a one-off live policy update, after the soak starts or before the window, **not inside it** (it would blur the M8 IAM diff). Until then do not delete recordings in the UI |
 
 ---
 
