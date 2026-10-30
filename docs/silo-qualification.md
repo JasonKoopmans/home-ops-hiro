@@ -194,7 +194,7 @@ image: docker.io/pgsty/mc:RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a5
 
 No command, env, securityContext, probe, mount, or `Recreate`/`disableHooks` change is needed (all verified above). Keep
 `--md5` in the mirror. Do **not** set `MINIO_API_CORS_ALLOW_ORIGIN`. Renovate: the chart template concatenates repository and
-tag, so Renovate will not recognise the `tag@digest` string unless a regex manager is added; expect to bump by hand.
+tag, so the helm-values manager will not recognise the `tag@digest` string in `image.tag`/`mcImage.tag` (the seven Job/CronJob `image:` lines are plain `repo:tag@digest` and are handled). Until a `customManagers` regex rule for `pgsty/silo` and `pgsty/mc` exists in `.renovaterc.json5`, these two keys are bumped by hand; see *Post-swap follow-ups*.
 The completed Jobs have `ssa: IfNotPresent`, so changing their image does nothing for existing Jobs; it only matters on a rebuild.
 
 Fallback (if Silo 10-26 misbehaves live): `repository: docker.io/pgsty/minio`, `tag: "RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372"`
@@ -213,6 +213,12 @@ None found that blocks the swap. Conditions the runbooks must carry:
 4. **Real-data migration is proven for the RA instance only** (Phase B). The shared instance (Thanos/Loki, 46 GiB + 22k objects, suspended-versioning buckets with ILM and quotas) was not cloned: rehearse it, or at least take the offline PVC copy first and be ready to restore it.
 5. Pre-pull both digests on hiro-cmp-03 and -05 (and on the node that will run the Jobs) before the window; cmp-05's disk collapses under parallel pulls.
 6. **Versioning state differs between instances:** the real RA bucket `recordings` has versioning **Enabled** (not suspended), no ILM, no quota, no Object Lock; the harness assumed suspended for the shared buckets only. Silo's suspended-bucket ILM fix (#252/#253) does not apply to RA.
+
+## Post-swap follow-ups
+
+- **Updates are manual for `image.tag` / `mcImage.tag` until a Renovate rule exists.** The fork has already shipped security fixes (SN-2026-011…014 on 2026-09-16), so a missed release is a real exposure on a LAN S3 endpoint. Owner: the repo owner (Jason). Watch `https://github.com/pgsty/silo/releases` (subscribe to releases/security advisories) and re-run `scripts/silo-qualify/` against the new digest before bumping.
+- **Recommended follow-up (separate PR, not done here):** add a `customManagers` regex rule in `.renovaterc.json5` matching `image.repository: docker.io/pgsty/silo|mc` + `tag: "RELEASE…@sha256:…"` in the two minio HelmReleases, so bumps arrive as PRs. Untested in this work.
+- Re-qualify the shared `minio` instance migration (clone rehearsal) if it was not rehearsed before the cutover.
 
 ## Phase B results (RA clone, executed)
 
