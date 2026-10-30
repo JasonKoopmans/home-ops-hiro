@@ -16,6 +16,8 @@ for j in bucket-bootstrap-job loki-user-bootstrap-job; do
     --entrypoint /bin/sh "$MC_IMG" -c "$(extract_script "$SH/$j.yaml")" >/dev/null
 done
 log "## loki image $LOKI_IMG ($(docker pull -q "$LOKI_IMG" >/dev/null 2>&1; docker image inspect "$LOKI_IMG" --format '{{index .RepoDigests 0}}'))"
+git -C "$REPO_ROOT" show "$MANIFEST_REF:kubernetes/apps/monitoring/loki/app/helmrelease.yaml" |
+  python3 -I -c 'import sys,yaml; print(yaml.safe_dump(yaml.safe_load(sys.stdin)["spec"]["values"]))' >"$SQ_OUT/values-loki.yaml"
 helm template loki loki --repo https://grafana.github.io/helm-charts --version 7.3.0 -n monitoring \
   -f "$SQ_OUT/values-loki.yaml" --set loki.storage.s3.accessKeyId="$LOKI_AK" --set loki.storage.s3.secretAccessKey="$LOKI_SK" \
   --set chunksCache.enabled=false --set resultsCache.enabled=false >"$SQ_OUT/rendered-loki.yaml"
