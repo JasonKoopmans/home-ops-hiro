@@ -162,7 +162,7 @@ policy; 19 objects + one 40 MiB multipart; Object-Lock bucket (COMPLIANCE defaul
 
 | Item | Status |
 |---|---|
-| Real 2024-12-18 → Silo data migration, incl. `.minio.sys` IAM of the real instances | **UNTESTED** (needs Phase B or the real cutover; take the offline PVC copy first) |
+| Real 2024-12-18 → Silo data migration | **PASS for the RA instance** (Phase B, below). **UNTESTED for the shared `minio` instance** (120 Gi clone not made; its IAM holds the Thanos/Loki users, quotas, ILM) |
 | amd64 (prod arch) | **UNTESTED**: tests ran arm64. Same release, same source; reproduce with `SQ_PLATFORM=linux/amd64` on a host whose Docker can hold both manifests of one digest (here the shared daemon refused to overwrite the arm64 copy) |
 | Noncurrent-version expiry deleting data after 1 day | **UNTESTED** (24 h clock) |
 | `mc mirror` against real AWS Object Lock with the new `mc` | **UNTESTED**; watch the first hourly run (`RecordingAnnotatorMediaMirror…` alerts) |
@@ -210,12 +210,37 @@ None found that blocks the swap. Conditions the runbooks must carry:
 2. **The old image is unpullable: a Flux rollback to it fails** (`remediateLastFailure`, retries 2). Treat the swap as roll-forward; suspend the HelmRelease
    or set `upgrade.remediation.remediateLastFailure: false` for the window.
 3. **No readiness probe on the chart's Deployment:** verify with `curl http://<svc>:9000/minio/health/ready` and the bucket/metrics checks, not pod Ready.
-4. **The real 2024-12-18 → Silo data migration is untested** (fork report started at 2025-10-15). Run Phase B (below) or a clone rehearsal before the cutover.
+4. **Real-data migration is proven for the RA instance only** (Phase B). The shared instance (Thanos/Loki, 46 GiB + 22k objects, suspended-versioning buckets with ILM and quotas) was not cloned: rehearse it, or at least take the offline PVC copy first and be ready to restore it.
+6. **Versioning state differs between instances:** the real RA bucket `recordings` has versioning **Enabled** (not suspended), no ILM, no quota, no Object Lock; the harness assumed suspended for the shared buckets only. Silo's suspended-bucket ILM fix (#252/#253) does not apply to RA.
 5. Pre-pull both digests on hiro-cmp-03 and -05 (and on the node that will run the Jobs) before the window; cmp-05's disk collapses under parallel pulls.
 
-## Phase B — in-cluster rehearsal on a copy of real data (NOT executed)
+## Phase B results (RA clone, executed)
 
-Creates objects in the live cluster, so it was not run without the user's explicit yes. Plan (all `storage` namespace; names
+Prechecks (read-only): Longhorn lives in namespace `storage` (not `longhorn-system`); over-provisioning 150 %; `longhorn-2-no-backup`
+is `driver.longhorn.io` with 2 replicas, so CSI PVC clone works. Disk StorageScheduled/Max (GiB): cmp-01 33/100, cmp-02 63/100, cmp-03 195/300,
+cmp-04 60/100, cmp-05 259/300 (limit 150 % of max): the 5 Gi × 2 clone fits everywhere. The source volume
+(`pvc-e31e063d…`, replicas on cmp-05 and cmp-04) gained one snapshot from the clone.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Clone of PVC `recording-annotator-minio` → `silo-rehearsal-ra`, old image `quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z` on it (cached on cmp-05) | **PASS** | clone Bound + Deployment Available in **77 s** |
+| New `pgsty/mc` (2026-10-26) client against the OLD 2024-12-18 server (admin API: user/policy/ilm/quota/version, list, cat) | **PASS** | baseline dump complete; first pull of `pgsty/mc` on cmp-05 **7.7 s** |
+| Swap clone to Silo 10-26 digest (Recreate): pull + start | **PASS** | first Silo pull on **cmp-05 9.5 s**; scale-up to Available **17 s** including the pull; later swaps **13 s** without a pull. Log: `Silo … go1.27.3 linux/amd64`. `.minio.sys/format.json` byte-identical before/after (xl-single) |
+| Data fidelity | **PASS** | 82 listing entries (79 current objects + delete markers/versions: ETag, size, versionId, isDeleteMarker) identical; sha256 of all **79 objects identical** old vs Silo; user `recording-annotator-rw` + policy JSON identical; versioning **Enabled** unchanged; quota 0 (none); no ILM; no Object Lock |
+| Only difference | note | Silo lists extra built-in policies: `consolereadonly`, `iamAdmin`, `infraAdmin`, `tablesAdmin`, `tablesReadOnly`, `tablesReadWrite` |
+| Two further restarts (`rollout restart`) | **PASS** | listing/IAM unchanged, 0 container restarts, no `error`/`warn` lines in the server log |
+| **Rollback** Silo → 2024-12-18 on the same (already Silo-opened, restarted) clone, then Silo again | **PASS** | old image started in 4 s, all 79 sha256 and listing identical, then Silo again identical. Does not cover IAM revocation metadata (none created) |
+
+Real-data finding for the runbooks: the 2024-12-18 → Silo open of a real 2 Gi RA volume is clean and fast. Window sizing from this run: RA swap is
+seconds of server downtime (plus pull on a cold node, ~10 s on cmp-05). The shared instance is larger (120 Gi PVC, 22k small objects) and its
+startup scan time is **UNTESTED**.
+
+Test caveat: the scratch server used the same root-credentials Secret as the live instance (needed for IAM-at-rest decryption); no
+secret value was read or printed, and the live RA instance was never modified (the clone only added a Longhorn snapshot to its volume).
+
+## Phase B — in-cluster rehearsal on a copy of real data (RA instance executed 2026-10-30; shared instance not)
+
+Ran with the user's explicit yes in-session, RA clone only. Results first, then the plan/commands as run (all `storage` namespace; names
 `silo-rehearsal-*`; kubeconfig exported; sandbox disabled):
 
 ```sh
