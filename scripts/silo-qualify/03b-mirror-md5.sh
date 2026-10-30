@@ -65,7 +65,7 @@ mcr '
   for o in obj-1MiB obj-20MiB obj-130MiB; do printf "%s  %s\n" "$(mc cat d/locked-verbatim/$o | sha256sum | cut -d" " -f1)" $o; done
   mc ls d/locked-verbatim
   mc retention info d/locked-verbatim/obj-1MiB; mc retention info d/locked-verbatim/obj-130MiB
-  mc stat d/locked-verbatim/obj-20MiB | grep -iE "etag|retention|lock|size"
+  mc stat d/locked-verbatim/obj-20MiB
 ' 2>&1 | tee -a "$R"
 log "## idempotent second run (should transfer nothing)"
 docker run --rm --network "$SQ_NET" --user 1000:1000 --read-only --tmpfs /tmp:size=1g --cap-drop ALL \
@@ -81,16 +81,16 @@ hdr() { # hdr <dest-bucket> <extra mirror flag>
     --entrypoint /bin/sh "$JOB_IMG" -c '
       mc alias set src http://$SRC:9000 "$RA_AK" "$RA_SK" >/dev/null
       mc alias set dst http://dst-s3:9000 "$R" "$P" --api S3v4 >/dev/null
-      mc --debug mirror --quiet $F src/recordings dst/$B 2>/tmp/debug.log; echo "mirror exit=$?"
-      echo "-- PUT requests and checksum headers (per object/part)"
-      grep -E "^(PUT|POST) /|Content-Md5|X-Amz-Checksum|Content-Length" /tmp/debug.log | grep -vE "^PUT /dst-s3|HEAD" | head -80
-      echo "-- counts: PUT=$(grep -c "^PUT /" /tmp/debug.log) Content-Md5=$(grep -ci "^Content-Md5" /tmp/debug.log) multipart-part-PUT=$(grep -c "^PUT /.*partNumber" /tmp/debug.log)"
+      mc --debug mirror --quiet $F src/recordings dst/$B 2>&1 >/dev/null; echo "mirror-exit=$?"
     ' 2>&1
 }
+summarize() { # host-side: only request lines and checksum headers (mc's image has no grep)
+  grep -E "^mirror-exit|^(PUT|POST) /dst|^Content-Md5|^X-Amz-Checksum|^Content-Length: [0-9]{6,}" | sed -E 's/(partNumber=[0-9]+).*/\1/' | sort | uniq -c | sort -rn | head -40
+}
 log "## B1. mc --debug mirror --md5  (what the CronJob does)"
-hdr locked-md5 --md5 | tee -a "$R"
+hdr locked-md5 --md5 >"$SQ_OUT/03b-debug-md5.log"; summarize <"$SQ_OUT/03b-debug-md5.log" | tee -a "$R"
 log "## B2. mc --debug mirror WITHOUT --md5 (to a COMPLIANCE-locked bucket)"
-hdr locked-nomd5 "" | tee -a "$R"
+hdr locked-nomd5 "" >"$SQ_OUT/03b-debug-nomd5.log"; summarize <"$SQ_OUT/03b-debug-nomd5.log" | tee -a "$R"
 log "## destination contents after B2"
 mcr 'mc alias set d http://dst-s3:9000 "$R" "$P" >/dev/null; mc ls d/locked-nomd5' 2>&1 | tee -a "$R"
 log "DONE"

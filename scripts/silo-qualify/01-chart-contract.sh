@@ -43,10 +43,10 @@ docker run --rm --network "$SQ_NET" -e ROOT_USER="$ROOT_USER" -e ROOT_PASS="$ROO
   mc admin info t | head -12
 ' 2>&1 | tee -a "$R"
 
-log "## metrics: poll up to 240s for all names to appear on at least one endpoint"
+log "## metrics: poll up to ${SQ_METRIC_WAIT:-90}s for all names to appear on at least one endpoint"
 NEED=(); while IFS= read -r l; do NEED+=("$l"); done < <("$SQ_DIR/metric-names.sh")
 log "needed (${#NEED[@]}): ${NEED[*]}"
-end=$(( $(date +%s) + 240 ))
+end=$(( $(date +%s) + ${SQ_METRIC_WAIT:-90} ))
 while :; do
   : >"$SQ_OUT/metrics-$LABEL.all"
   for ep in cluster node bucket; do

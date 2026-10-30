@@ -17,7 +17,7 @@ SILO_IMG="${SILO_IMG:-docker.io/pgsty/silo@sha256:7bb2aff6b89efe1cb1303c10fc21d5
 MC_IMG="${MC_IMG:-docker.io/pgsty/mc@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8}"
 FALLBACK_IMG="${FALLBACK_IMG:-docker.io/pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372}"  # RELEASE.2026-08-04T00-00-00Z
 # Upgrade-proxy source image (resolved to a digest by 05-upgrade-proxy.sh and recorded in its report).
-PROXY_SRC_IMG="${PROXY_SRC_IMG:-docker.io/pgsty/minio:RELEASE.2026-04-17T00-00-00Z}"
+PROXY_SRC_IMG="${PROXY_SRC_IMG:-docker.io/pgsty/minio@sha256:83885c27b3b5b673049e33ddf4029afe2c134fd51ce4309e65e4f39d3b9ca282}"  # RELEASE.2026-04-17T00-00-00Z
 THANOS_IMG="${THANOS_IMG:-quay.io/thanos/thanos:v0.42.4}"
 GO_IMG="${GO_IMG:-docker.io/library/golang:1.24}"
 SQ_PLATFORM="${SQ_PLATFORM:-}"   # e.g. linux/amd64 to run the emulated prod architecture
