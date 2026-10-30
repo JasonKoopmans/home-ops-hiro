@@ -4,8 +4,7 @@ Instance `storage/minio` (Deployment `minio`, PVC `minio`, 120Gi, class `longhor
 RecordingAnnotator instance has its own runbook, `docs/runbook-minio-silo-swap-recording-annotator.md`; nothing here
 touches it. Manifest changes: draft PR #900. **Merging that PR is the trigger** (section 4, M6).
 
-Qualification results live in `docs/silo-qualification.md` (not duplicated here). Every place that needs one of its
-results is marked `GATE:`. Times are **UTC**; Longhorn's recurring jobs run in UTC too. Written 2026-10-29, unexecuted:
+Qualification results live in `docs/silo-qualification.md` (PR #902, not duplicated here; updated 2026-10-30 from its results). Where a result is still missing the text says `GATE:`. Times are **UTC**; Longhorn's recurring jobs run in UTC too. Written 2026-10-29, unexecuted:
 treat every command as a draft until you have run its read-only half.
 
 Setup for every shell block below:
@@ -42,10 +41,10 @@ Not affected: Prometheus itself, Grafana, anything not using these two buckets. 
 
 | # | Gate | How to check | Status |
 |---|---|---|---|
-| G1 | `docs/silo-qualification.md` PASS for the final pin; pin in PR #900 equals it | read the report; compare `helmrelease.yaml` tag and digest | GATE: open |
-| G2 | Silo's entrypoint maps the chart's `minio server ...` command to `silo` (the chart hardcodes it) | qualification report | GATE: open |
-| G3 | Silo reads a **copy** of this 2024-12-18 data directory (format, IAM, buckets, quota, ILM) | qualification report; if it only tested fresh dirs, rehearse on a Longhorn clone of the snapshot | GATE: open |
-| G4 | Whether the old 2024 binary can reopen a directory Silo has written (decides rollback rung R1) | qualification report | GATE: open |
+| G1 | Qualification PASS for the final pin; pin in PR #900 equals it | **Met on paper**: report pins `RELEASE.2026-10-26T00-00-00Z` + index `7bb2aff6...` / mc `ce62c905...`, identical to #900; SN-2026-011 is fixed from 2026-09-16. Re-compare at merge time; the report's PR #902 should be merged first | met (re-check) |
+| G2 | Silo's entrypoint maps the chart's `minio server ...` command to `silo` | Report section 1: PASS (verbatim chart command, `-S` accepted, uid 1000, health 200). arm64 host; amd64 not run | met |
+| G3 | Silo opens a **real copy** of a volume written by the 2024-12-18 server | Proven for the **RA** instance (report Phase B: 79 objects sha256-identical, IAM identical, 2 restarts clean, old image reopens it). **Not proven for this instance** (120Gi, suspended-versioning buckets, ILM, quotas, 22k objects): needs a clone rehearsal, decision D8 | GATE: open |
+| G4 | Whether the old binary can reopen a directory Silo has written (rung R1) | Passed on the RA clone and on a newer-format proxy, **but** IAM revocation metadata was never created in either, which is the case the release notes warn about. Treat R1 as unsupported; R2 is the dependable undo | partially met |
 | G5 | Silo and `pgsty/mc` image **pre-pulled on all five nodes** | section 3, P3 | open |
 | G6 | Rollback assets: Longhorn snapshot protected from the Sunday trim, Longhorn **backup to S3 Completed**, old image kept (keeper pods) and exported to a registry you control | P4, P5, P6 | open |
 | G7 | Flux clean: `minio` HR Ready, no Stalled HRs, no pending Renovate PR on `kubernetes/apps/storage/minio/**` or `.renovaterc.json5` | P1 | open |
@@ -277,10 +276,10 @@ healthy**: judge by the pod. Flux applies `origin/main` within 1-2 minutes on it
 ```sh
 kubectl -n storage get pod -l app=minio,release=minio -o jsonpath='{.items[0].status.containerStatuses[0].imageID}{"\n"}{.items[0].spec.nodeName}{"\n"}'
 kubectl -n storage logs deploy/minio --tail=60                  # online, no ERROR/panic/"unsupported"/migration failure
-kubectl -n storage exec deploy/minio -- sh -c 'wget -qO- http://localhost:9000/minio/health/ready; echo rc=$?'      # rc=0
+kubectl -n storage exec deploy/minio -- curl -s -o /dev/null -w '%{http_code}\n' http://localhost:9000/minio/health/ready      # 200 (the Silo image has curl; it has no wget/grep/sed/awk)
 ```
 
-`imageID` must end with the pinned index digest (`sha256:7bb2aff6...`). Abort criteria: CrashLoopBackOff, `ImagePullBackOff` (pre-pull gap),
+`imageID` must end with the pinned index digest (`sha256:7bb2aff6...`). The chart's Deployment has **no readiness/liveness probes**, so pod Ready only means "container started": the `/minio/health/ready` 200 is the real check. Abort criteria: CrashLoopBackOff, `ImagePullBackOff` (pre-pull gap),
 or a format/IAM error: stop here, section 6.
 
 **M8. Bring consumers back (this order).**
@@ -314,7 +313,7 @@ Run immediately (M9), again after the next even-hour upload, and again at T+24h.
 | Loki write | `prom 'sum by (status_code) (increase(loki_write_request_duration_seconds_count[10m]))'` | 2xx only, still increasing |
 | Loki read-back | Grafana Explore, Loki: `sum by (job) (count_over_time({job=~".+"}[1h] offset 2d))` | non-empty (chunks older than the ingester's memory come from the bucket) |
 | Alerts | `prom 'ALERTS{alertname=~"Minio.*\|Thanos.*\|FluxResourceNotReady",alertstate="firing"}'` | empty |
-| Config diff | redo the P7 export into `after/admin.txt` and `diff <(grep -v -E 'uptime\|time\|version\|commit\|deploymentID\|"id"\|Uptime\|Version\|Commit\|Deployment' before/admin.txt) <(same for after)` | versioning Suspended, quotas 100GiB/20GiB, ILM rules, users and both policies unchanged. Silo caveats from the fork notes: new/updated policies reject bare ARN prefixes (these policies use `arn:aws:s3:::bucket` and `bucket/*`, fine), explicit version deletes need `s3:DeleteObjectVersion`, per-bucket CORS is new |
+| Config diff | redo the P7 export into `after/admin.txt` and `diff <(grep -v -E 'uptime\|time\|version\|commit\|deploymentID\|"id"\|Uptime\|Version\|Commit\|Deployment' before/admin.txt) <(same for after)` | versioning Suspended, quotas 100GiB/20GiB, ILM rules, users and both policies unchanged; Silo additionally lists extra built-in policies (`consolereadonly`, `iamAdmin`, `infraAdmin`, `tablesAdmin`, `tablesReadOnly`, `tablesReadWrite`), expected diff noise. Silo caveats from the fork notes: new/updated policies reject bare ARN prefixes (these policies use `arn:aws:s3:::bucket` and `bucket/*`, fine), explicit version deletes need `s3:DeleteObjectVersion`, per-bucket CORS is new |
 | Bootstrap Jobs | `kubectl -n storage get jobs` | the five Jobs still `Complete` and **unchanged** (`ssa: IfNotPresent`) |
 | Flux | `flux get hr minio -n storage; flux get ks minio -n storage` | Ready (this proves little with `disableWait`; the rows above do) |
 
@@ -358,4 +357,5 @@ Watch for 7 days (a Thanos compaction + retention cycle is raw 7d):
 | D4 | Old-image registry and visibility | `ghcr.io/jasonkoopmans/old-minio`, public (no pull secrets), note AGPL-3 |
 | D5 | Silence | Skip for a clean run; add only if you plan to sit in a failed state |
 | D6 | Final pin | Whatever `docs/silo-qualification.md` approves; keep tag and digest together, never the tag alone |
+| D8 | Rehearse this instance on a Longhorn clone first (closes G3) | Yes, if clone headroom allows: only hiro-cmp-03 and -05 can take a 120Gi clone (2026-10-30: sched 194/299 and 258/299 GiB vs cap 449; cmp-01/02/04 cap 149 and would exceed it). A 1-replica clone class on cmp-03 avoids hammering cmp-05's slow disk. The clone adds a snapshot to the live volume and reads from it. Otherwise rely on the offline copy + R2 |
 | D7 | Order with the RA swap | Independent. Shared first is fine; never both windows overlapping (both volumes have replicas on cmp-05's slow disk) |
