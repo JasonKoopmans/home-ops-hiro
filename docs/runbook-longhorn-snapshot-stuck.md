@@ -35,19 +35,22 @@ delete it (about 10 s), then remove the exemption. Needs Kubernetes 1.30+
 
 ```bash
 SNAP=<snapshot name>
-kubectl get validatingwebhookconfiguration longhorn-webhook-validator -o json > /tmp/lh-webhook-before.json
-kubectl patch validatingwebhookconfiguration longhorn-webhook-validator --type=json -p \
+LH=longhorn-webhook-validator
+
+# 1. Stop unless index 0 is the right webhook: the exemption goes on /webhooks/0.
+[ "$(kubectl get validatingwebhookconfiguration $LH -o jsonpath='{.webhooks[0].name}')" = "validator.longhorn.io" ] || { echo "webhooks[0] is not validator.longhorn.io"; exit 1; }
+
+# 2. Save the config, add the one-name exemption, wait for the CR to go.
+kubectl get validatingwebhookconfiguration $LH -o json > /tmp/lh-webhook-before.json
+kubectl patch validatingwebhookconfiguration $LH --type=json -p \
   '[{"op":"add","path":"/webhooks/0/matchConditions","value":[{"name":"skip-one-snapshot","expression":"request.name != \"'"$SNAP"'\""}]}]'
 kubectl -n storage get snapshots.longhorn.io "$SNAP" -w        # until NotFound
-kubectl patch validatingwebhookconfiguration longhorn-webhook-validator --type=json -p \
+
+# 3. Remove the exemption and compare with the saved copy (empty diff = restored).
+kubectl patch validatingwebhookconfiguration $LH --type=json -p \
   '[{"op":"remove","path":"/webhooks/0/matchConditions"}]'
-```
-
-Check first that index 0 is the right webhook (the output must be
-`validator.longhorn.io`), and compare the config with the saved copy afterwards:
-
-```bash
-kubectl get validatingwebhookconfiguration longhorn-webhook-validator -o jsonpath='{.webhooks[0].name}'
+diff <(jq -S 'del(.metadata.resourceVersion, .metadata.managedFields, .metadata.generation)' /tmp/lh-webhook-before.json) \
+     <(kubectl get validatingwebhookconfiguration $LH -o json | jq -S 'del(.metadata.resourceVersion, .metadata.managedFields, .metadata.generation)') && echo restored
 ```
 
 longhorn-manager owns this configuration and may rewrite it when it restarts, so
