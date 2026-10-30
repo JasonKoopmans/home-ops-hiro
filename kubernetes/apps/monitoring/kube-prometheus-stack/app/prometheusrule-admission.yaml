@@ -1,0 +1,54 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: admission-webhook-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: admission.rules
+      rules:
+        # A webhook that keeps denying requests is a stuck client, not a user
+        # typo. On 2026-10-16 longhorn-manager began retrying the DELETE of a
+        # Snapshot CR whose 70-byte name validator.longhorn.io cannot check; it
+        # was denied ~3.7 times a minute for 12 days and nothing alerted. The only
+        # trace was one warning per attempt on a single apiserver (which is why one
+        # control-plane node looked 10-20x chattier than its peers).
+        #
+        # Source: apiserver_admission_webhook_rejection_count, already scraped
+        # from every kube-apiserver; the series only exists once a webhook has
+        # rejected something. Seen over 7d on 2026-10-29: 31,539 for the loop
+        # above, 1 for a one-off 422 and 2 for a transient 503 from
+        # mutator.longhorn.io. The last two must not page.
+        #
+        # sum by (name): the same loop is seen by whichever apiserver the client
+        # is connected to, and rejection_code / operation / error_type can flip
+        # while the fault persists, which would restart `for:` (it is tracked per
+        # label set). The webhook name is what a human needs, and `name` is one of
+        # the labels the warning digest prints.
+        #
+        # The 20m window (not 5m) covers a client whose retries back off to
+        # minutes apart; for: 30m is longer than the window, so a single burst
+        # (true for 20m) never fires but a rejection every few minutes does.
+        #
+        # No ...MetricsMissing twin: the series is legitimately absent whenever
+        # nothing has been rejected, so absence cannot be told from health.
+        # A webhook that is down entirely shows up as calling_webhook_error
+        # rejections here for a failurePolicy: Fail webhook, and as TargetDown /
+        # LonghornManagerDown for the Longhorn one.
+        #
+        # severity warning -> telegram-warnings digest. No `namespace` label, so
+        # it lands in the namespace-less digest with the other cluster-wide ones.
+        - alert: AdmissionWebhookRejectingContinuously
+          expr: |
+            sum by (name) (
+              increase(apiserver_admission_webhook_rejection_count[20m])
+            ) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Admission webhook {{ $$labels.name }} keeps rejecting requests
+            description: Webhook {{ $$labels.name }} has rejected at least one request in every 20-minute window for 30 minutes. A client is retrying something it can never get through. Find it with the denial text in the apiserver logs (Loki, {instance=~"kube-system/kube-apiserver-.*"} |= "{{ $$labels.name }}") or the controller's own logs; for validator.longhorn.io see docs/runbook-longhorn-snapshot-stuck.md.

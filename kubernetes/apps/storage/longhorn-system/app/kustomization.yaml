@@ -11,3 +11,4 @@ resources:
 - ./default-backup-target.yaml
 - ./default-jobs.yaml
 - ./storageclasses.yaml
+- ./admissionpolicy-snapshot-name.yaml

@@ -30,6 +30,7 @@ resources:
   - ./prometheusrule-etcd.yaml
   - ./prometheusrule-k8s-gateway.yaml
   - ./prometheusrule-jobs.yaml
+  - ./prometheusrule-admission.yaml
   - ./httproute.yaml
   - ./httproute-prometheus.yaml
   - ./grafana-secret.sops.yaml
