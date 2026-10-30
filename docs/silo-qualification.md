@@ -312,6 +312,7 @@ spec:
 5. Optional: clone `minio` (120 Gi, 40 % used) only if the Longhorn precheck shows scheduled-capacity headroom for ≈ 48 GiB more on 2 replicas
    (the volume is 120 Gi nominal; StorageScheduled counts nominal size, so verify per-disk `storageScheduled + 120Gi` stays under `storageMaximum × 1.5`).
 6. Cleanup (ask first): delete by explicit name only, e.g. `kubectl -n storage delete deploy/silo-rehearsal-ra svc/silo-rehearsal-ra pvc/silo-rehearsal-ra` (and the `silo-rehearsal-shared` equivalents if created).
+   **Outcome: cleaned up 2026-10-30 with the user's approval.** `silo-rehearsal-ra` Deployment, Service and PVC (and the dump pod) were deleted by name; a follow-up `kubectl -n storage get deploy,svc,pvc,pod` showed no `silo-rehearsal-*` objects, the clone's Longhorn volume was gone, and the live `recording-annotator-minio` pod was untouched (Running, 0 restarts). Residue: one extra Longhorn snapshot on the live RA volume. The shared-instance clone (step 5) was never created.
    The clone's source volume keeps the extra snapshot until trimmed.
 
 Timings to report: first Silo pull on cmp-05, startup to ready, time for the dump on the clone.
