@@ -28,7 +28,7 @@ prom() { kubectl get --raw "/api/v1/namespaces/monitoring/services/kube-promethe
 |---|---|
 | S3 API (`minio.storage.svc:9000`) | Down for one pod restart: Recreate stops the old pod, Longhorn detaches and attaches the volume, Silo starts. Measured for this chart: 15-60s. **First Silo start on a 2024 data directory is unmeasured** (loads `.minio.sys`, 22k Loki objects): allow minutes. |
 | Console HTTPRoute | Down the same time. |
-| Thanos sidecar (in the Prometheus pod) | Retries uploads every 30s. Blocks upload at `hh:00:33` of every even UTC hour. A failed attempt is retried, nothing is lost; Prometheus keeps 3d locally. |
+| Thanos sidecar (in the Prometheus pod) | Retries uploads every 30s. Blocks upload at `hh:00:33` of every **odd** UTC hour (verified in the sidecar log 2026-10-30: 13:00:33, 15:00:33, 17:00:33). A failed attempt is retried, nothing is lost; Prometheus keeps 3d locally. |
 | Thanos store gateway | Keeps serving blocks it has index-cached; block syncs run every 15m and just fail once. Queries older than 3d may error during the gap. |
 | Thanos compactor | The risk. A failed bucket operation is normally retriable, but it can latch `thanos_compact_halted=1` (only a restart clears it). The procedure **stops it first** and restarts it after. |
 | Loki | Singlebinary, `flush_on_shutdown`, WAL on its own volume. Flushes fail and retry; Alloy retries pushes. Reads of old chunks fail during the gap. |
@@ -50,9 +50,22 @@ Not affected: Prometheus itself, Grafana, anything not using these two buckets. 
 | G7 | Flux clean: `minio` HR Ready, no Stalled HRs, no pending Renovate PR on `kubernetes/apps/storage/minio/**` or `.renovaterc.json5` | P1 | open |
 | G8 | Baselines captured to `~/silo-swap-shared/before/` | P7 | open |
 | G9 | Decision D1 made (rollback behaviour); PR #900 matches it | section 8 | open |
-| G10 | Not inside a Thanos upload window: start between `hh:20` and `hh:40` of an **even** UTC hour, just after that hour's upload at `hh:00:33` (so the swap ends well before the next upload at `hh+2:00:33`) | clock | at the time |
+| G10 | Not inside a Thanos upload window: start between `hh:20` and `hh:40` of an **odd** UTC hour, just after that hour's upload at `hh:00:33` (so the swap ends well before the next upload at `hh+2:00:33`, two hours later) | clock | at the time |
 
 ## 3. Preflight
+
+### Friday evening checklist (state at 2026-10-30 17:48Z, `talosctl image list`)
+
+| Node | `pgsty/silo` | `pgsty/mc` | Old server image | To do |
+|---|---|---|---|---|
+| .21 cmp-01 | no | yes | no | pull silo |
+| .22 cmp-02 | no | no | no | pull silo + mc |
+| .23 cmp-03 | yes | no | **yes** (keeper needed) | pull mc; keeper pod |
+| .24 cmp-04 | no | no | no | pull silo + mc |
+| .25 cmp-05 | yes | yes | **yes** (keeper needed) | keeper pod |
+
+Do P3 (pre-pull, cmp-05 already done) and P5 (keepers on .23 and .25) tonight; start the P4 Longhorn backup tonight too (hours). Re-run
+the `image list` loop in P3 to confirm before bed.
 
 ### T-3d .. T-2d
 
@@ -114,7 +127,7 @@ kubectl -n storage get snapshots.longhorn.io pre-silo-$DATE -o jsonpath='{.statu
 
 Then **offsite**: Longhorn UI (route `longhorn-dashboard`, namespace `storage`) -> volume -> snapshot `pre-silo-$DATE` ->
 Create Backup (target `default` = `s3://hiro-longhorn-backups@us-east-1/`, available). Poll
-`kubectl -n storage get backups.longhorn.io -l backup-volume=$VOL` until `Completed`. First backup of ~50 GB: hours, and
+`kubectl -n storage get backups.longhorn.io -l backup-volume=$VOL` until `Completed`. First backup of ~80 GB (actualSize 80.3 GB at 2026-10-30 17:48Z): hours, and
 the volume's replicas sit on cmp-03 and **cmp-05 (slow disk)**; start it the day before, not the morning of. Creating a
 `Backup` CR by hand is not verified; use the UI.
 
@@ -135,7 +148,7 @@ on cmp-03 and cmp-05 only; `mc:RELEASE.2025-08-13T08-35-41Z` on cmp-01 and cmp-0
 for n in hiro-cmp-03 hiro-cmp-05; do kubectl -n storage apply -f - <<EOF
 apiVersion: v1
 kind: Pod
-metadata: {name: keep-old-minio-$n, namespace: storage, labels: {app: silo-image-keeper}}
+metadata: {name: keep-old-minio-$n, namespace: storage, labels: {app: silo-image-keeper-shared}}
 spec:
   nodeName: $n
   containers:
@@ -145,7 +158,7 @@ spec:
       command: ["/bin/sh","-c","sleep 1209600"]
       resources: {requests: {cpu: 1m, memory: 8Mi}, limits: {memory: 32Mi}}
 EOF
-done; kubectl -n storage get pod -l app=silo-image-keeper -o wide
+done; kubectl -n storage get pod -l app=silo-image-keeper-shared -o wide
 ```
 
 The image has `/bin/sh` (the chart's own command is `/bin/sh -ce ...`). If a keeper reports `ErrImageNeverPull`, that node already lost the image: say so in D1 and rely on P6. Delete the keepers at the end of the soak.
@@ -208,7 +221,7 @@ if the `--overrides` quoting fights you, `kubectl -n storage run` an interactive
 ### T-0 (start of the window)
 
 ```sh
-date -u                                  # even UTC hour, minute 20-40 (G10)
+date -u                                  # odd UTC hour, minute 20-40 (G10)
 kubectl -n storage get pod -l app=minio,release=minio -o wide               # 1/1, cmp-03
 kubectl -n storage get volumes.longhorn.io $VOL -o jsonpath='{.status.robustness}{"\n"}'   # healthy
 kubectl -n storage get backups.longhorn.io -l backup-volume=$VOL            # a Completed backup exists
@@ -258,7 +271,7 @@ EOF
 
 Check `readyToUse: true`. The T-1d backup is the offsite copy; this one is the fast local revert target (R2).
 
-**M5. Last look.** `kubectl -n storage get pod -l app=silo-image-keeper` Running; pre-pull present on all nodes (P3 list); PR #900 checks green
+**M5. Last look.** `kubectl -n storage get pod -l app=silo-image-keeper-shared` Running; pre-pull present on all nodes (P3 list); PR #900 checks green
 (`gh pr checks 900`; the `claude-review` job failed on 2026-10-29 for a reason unrelated to the diff, it is not a gate; `Flux Local Success` is).
 
 **M6. TRIGGER: merge PR #900** (you, in the GitHub UI or `gh pr merge 900 --squash`; this runbook never merges it for you).
@@ -297,7 +310,7 @@ kubectl -n monitoring get deploy thanos-compactor -o jsonpath='{.spec.replicas}{
 
 ## 5. Verification
 
-Run immediately (M9), again after the next even-hour upload, and again at T+24h.
+Run immediately (M9), again after the next odd-hour upload, and again at T+24h.
 
 | Check | Command / query | Must hold |
 |---|---|---|
@@ -307,7 +320,7 @@ Run immediately (M9), again after the next even-hour upload, and again at T+24h.
 | Metric names | `prom 'count by (__name__)({__name__=~"minio_(s3_requests\|bucket_usage).*"})'` | same names as `before/prom.txt` (`minio_*` are preserved by design; `GATE:` qualification) |
 | Buckets intact | `prom 'minio_bucket_usage_object_total'` | Thanos 247 (+ new blocks only), Loki about 21,943 and growing; bytes within a few percent of `before` |
 | S3 errors | `prom 'sum by (api) (rate(minio_s3_requests_errors_total[10m]))'` and `prom 'sum(rate(minio_s3_requests_5xx_errors_total[10m]))'` | 5xx empty or 0; 4xx not higher than baseline mix |
-| Next Thanos upload | `kubectl -n monitoring logs prometheus-kube-prometheus-stack-prometheus-0 -c thanos-sidecar --tail=400 \| grep -i 'upload new block'` after the next even hour `:00:33` | a new line; `prom 'thanos_shipper_upload_failures_total'` unchanged |
+| Next Thanos upload | `kubectl -n monitoring logs prometheus-kube-prometheus-stack-prometheus-0 -c thanos-sidecar --tail=400 \| grep -i 'upload new block'` after the next odd hour `:00:33` | a new line; `prom 'thanos_shipper_upload_failures_total'` unchanged |
 | Compactor | `prom 'increase(thanos_compact_iterations_total[1h])'` after an hour; `prom 'thanos_compact_halted'` | about 12 per hour; halted 0 |
 | Store gateway | `prom 'thanos_bucket_store_blocks_loaded'` after the next 15m sync; `prom 'count(up offset 4d)'` | blocks loaded >= 20 (baseline) and the offset query returns data (older than Prometheus' 3d, so it is read from the bucket) |
 | Loki write | `prom 'sum by (status_code) (increase(loki_write_request_duration_seconds_count[10m]))'` | 2xx only, still increasing |
@@ -345,7 +358,7 @@ Watch for 7 days (a Thanos compaction + retention cycle is raw 7d):
 - Memory: working-set peak vs the 2Gi limit (see the Memory row in section 5); after 7 days resize to about 2x the Silo peak and note it in `helmrelease.yaml`.
 - Disk: volume actualSize (`kubectl -n storage get volumes.longhorn.io $VOL -o jsonpath='{.status.actualSize}'`) vs the 120Gi PVC while the snapshot pins blocks.
 - **Day 3:** delete `pre-silo-*` snapshots (UI), then `kubectl -n storage patch volumes.longhorn.io $VOL --type merge -p '{"spec":{"unmapMarkSnapChainRemoved":"enabled"}}'`. Keep the Longhorn **backup** and the exported old image until day 7.
-- **Day 7:** delete keeper pods (`kubectl -n storage delete pod -l app=silo-image-keeper`), then a small PR removing `upgrade.disableWait: true` from `helmrelease.yaml` (and the `ks.yaml` patch if D1c was used).
+- **Day 7:** delete keeper pods (`kubectl -n storage delete pod -l app=silo-image-keeper-shared`), then a small PR removing `upgrade.disableWait: true` from `helmrelease.yaml` (and the `ks.yaml` patch if D1c was used).
 - Optional after the soak: re-run the bootstrap Jobs one at a time (delete, reconcile) to prove they work under `pgsty/mc` against Silo; they are idempotent, and `ilm rule add` is the only one to look at twice (it can add a duplicate rule).
 - Docs/memory to update: `minio-exit-assessment-2026-08` (swap done), `quay-minio-mc-image-401` (closed for this instance), `docs/revisit-register.md` if it lists MinIO, `docs/incident-thanos-compactor-disk-pressure.md` comments that name `quay.io/minio/*`, and the repo shared instructions that name MinIO images, if any.
 
@@ -353,9 +366,9 @@ Watch for 7 days (a Thanos compaction + retention cycle is raw 7d):
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D1 | Rollback behaviour: (a) default (Flux rolls back to the unpullable quay image on a Silo-touched volume); (b) suspend/resume (no effect on remediation); (c) temporary patch in `kubernetes/flux/cluster/ks.yaml` beside the Longhorn one (`remediateLastFailure: false`, `retries: 2`; the YAML is in the RA runbook D1, do both instances in one PR and one revert); (d) `upgrade.disableWait: true` in the HR (in PR #900) | **(d)**, no `ks.yaml` change needed. Use (c) instead only if you also want Flux to report a truthful failure; then drop the `disableWait` lines from #900 |
-| D2 | Window | Sat 2026-10-31, start 16:20 UTC (11:20 CDT): 20 minutes after an upload, ends before 18:00:33, before the Sunday 03:00 UTC trim, away from the Sunday DST change |
-| D3 | Restore-point protection | Backup to S3 the day before **and** `unmapMarkSnapChainRemoved: disabled` for 72h |
+| D1 | Rollback behaviour: (a) default (Flux rolls back to the unpullable quay image on a Silo-touched volume); (b) suspend/resume (no effect on remediation); (c) temporary patch in `kubernetes/flux/cluster/ks.yaml` beside the Longhorn one (`remediateLastFailure: false`, `retries: 2`; the YAML is in the RA runbook D1, do both instances in one PR and one revert); (d) `upgrade.disableWait: true` in the HR (in PR #900) | **(d)**, no `ks.yaml` change needed. Both HelmReleases (this one and the RA one) carry `upgrade.disableWait: true`; both lines come out together after both soaks. Use (c) instead only if you also want Flux to report a truthful failure; then drop the `disableWait` lines from #900 |
+| D2 | Window | Sat 2026-10-31, start 17:20 UTC (12:20 CDT): 20 minutes after the 17:00:33 upload, 100 minutes before the 19:00:33 one, before the Sunday 03:00 UTC trim, away from the Sunday DST change |
+| D3 | Restore-point protection. **Go/no-go rule:** the Longhorn backup is `Completed` by T-1h, **or** the window slides until it is, **or** you consciously accept R2-only and say so. Options: (1) backup + `unmapMarkSnapChainRemoved: disabled` for 72h (recommended): RPO for R3 is the backup's age (about 1 day of Thanos/Loki data; Thanos blocks younger than Prometheus' 3d re-upload, Loki loses up to a day), and it survives loss of the volume or a node; (2) R2-only (local snapshot at T-0, chain removal disabled, no S3 copy): RPO about 0 minutes for R2, but no offsite copy, so a volume or both-replica loss during the soak is unrecoverable, and the replicas share cmp-03/cmp-05 | Option 1; start the backup tonight (80 GB over the slow cmp-05 disk) |
 | D4 | Old-image registry and visibility | `ghcr.io/jasonkoopmans/old-minio`, public (no pull secrets), note AGPL-3 |
 | D5 | Silence | Skip for a clean run; add only if you plan to sit in a failed state |
 | D6 | Final pin | Whatever `docs/silo-qualification.md` approves; keep tag and digest together, never the tag alone |
