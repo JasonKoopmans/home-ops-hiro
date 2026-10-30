@@ -4,7 +4,7 @@ Instance `storage/minio` (Deployment `minio`, PVC `minio`, 120Gi, class `longhor
 RecordingAnnotator instance has its own runbook, `docs/runbook-minio-silo-swap-recording-annotator.md`; nothing here
 touches it. Manifest changes: draft PR #900. **Merging that PR is the trigger** (section 4, M6).
 
-Qualification results live in `docs/silo-qualification.md` (PR #902, not duplicated here; updated 2026-10-30 from its results). Where a result is still missing the text says `GATE:`. Times are **UTC**; Longhorn's recurring jobs run in UTC too. Written 2026-10-29, unexecuted:
+Qualification results live in `docs/silo-qualification.md` (PR #902, not duplicated here; updated 2026-10-30 from its results). The pin is final (report, Recommendation). What the report left untested for this instance is closed by section 9 (clone rehearsal) or is named where it applies. Times are **UTC**; Longhorn's recurring jobs run in UTC too. Written 2026-10-29, unexecuted:
 treat every command as a draft until you have run its read-only half.
 
 Setup for every shell block below:
@@ -14,7 +14,7 @@ export KUBECONFIG="$HOME/Documents/code/homeops workspace/home-ops-hiro/kubeconf
 cd "$HOME/Documents/code/homeops workspace/home-ops-hiro"
 TC=talos/clusterconfig/talosconfig
 VOL=pvc-ea7e79e5-ebe4-4621-b7c2-f415ff25d954          # PVC storage/minio, re-check: kubectl -n storage get pvc minio -o jsonpath='{.spec.volumeName}'
-SILO_TAG='RELEASE.2026-10-26T00-00-00Z'               # GATE: final pin from docs/silo-qualification.md
+SILO_TAG='RELEASE.2026-10-26T00-00-00Z'               # final pin: docs/silo-qualification.md, Recommendation
 SILO_IMG="docker.io/pgsty/silo:$SILO_TAG@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7"
 MC_IMG="docker.io/pgsty/mc:$SILO_TAG@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8"
 prom() { kubectl get --raw "/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query?query=$(python3 -I -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1]))' "$1")" | python3 -I -c 'import sys,json;[print(x["metric"],x["value"][1]) for x in json.load(sys.stdin)["data"]["result"]]'; }
@@ -41,13 +41,14 @@ Not affected: Prometheus itself, Grafana, anything not using these two buckets. 
 
 | # | Gate | How to check | Status |
 |---|---|---|---|
-| G1 | Qualification PASS for the final pin; pin in PR #900 equals it | **Met on paper**: report pins `RELEASE.2026-10-26T00-00-00Z` + index `7bb2aff6...` / mc `ce62c905...`, identical to #900; SN-2026-011 is fixed from 2026-09-16. Re-compare at merge time; the report's PR #902 should be merged first | met (re-check) |
-| G2 | Silo's entrypoint maps the chart's `minio server ...` command to `silo` | Report section 1: PASS (verbatim chart command, `-S` accepted, uid 1000, health 200). arm64 host; amd64 not run | met |
+| G1 | Qualification PASS for the final pin; pin in PR #900 equals it | **Met** (report merged in #902): report pins `RELEASE.2026-10-26T00-00-00Z` + index `7bb2aff6...` / mc `ce62c905...`, identical to #900; SN-2026-011 is fixed from 2026-09-16. Re-compare at merge time; the report's PR #902 should be merged first | met (re-check) |
+| G2 | Silo's entrypoint maps the chart's `minio server ...` command to `silo` | Report section 1: PASS (verbatim chart command, `-S` accepted, uid 1000, health 200). report ran on arm64; amd64 is covered by the section 9 rehearsal on cmp-03 | met |
 | G3 | Silo opens a **real copy** of this instance's volume | **Met 2026-10-30** (section 9): 120Gi clone of the live volume, old image then Silo 10-26 (amd64, digest-pinned): 255 + 21,892 version-listing entries identical, 339 content hashes identical, IAM/quota/ILM/versioning identical, 2 restarts clean | met |
 | G4 | Whether the old binary can reopen a directory Silo has written (rung R1) | **Not clean** (section 9): the 2024 binary served identical data after Silo, but its background scanner logged `decodeXLHeaders: Unknown xl meta version 3` (8 times at start). R1 is **unsupported**; use R2 | met (R1 ruled out) |
 | G5 | Silo and `pgsty/mc` image **pre-pulled on all five nodes** | section 3, P3 | open |
 | G6 | Rollback assets: Longhorn snapshot protected from the Sunday trim, Longhorn **backup to S3 Completed**, old image kept (keeper pods) and exported to a registry you control | P4, P5, P6 | open |
 | G7 | Flux clean: `minio` HR Ready, no Stalled HRs, no pending Renovate PR on `kubernetes/apps/storage/minio/**` or `.renovaterc.json5` | P1 | open |
+| G7b | Renovate quiet: either you paused it (Dependency Dashboard / app pause) and no Renovate PR was created in the last hour, **or** the T-0 sweep below was done | section 3 Renovate subsection, T-0 | at the time |
 | G8 | Baselines captured to `~/silo-swap-shared/before/` | P7 | open |
 | G9 | Decision D1 made (rollback behaviour); PR #900 matches it | section 8 | open |
 | G10 | Not inside a Thanos upload window: start between `hh:20` and `hh:40` of an **odd** UTC hour, just after that hour's upload at `hh:00:33` (so the swap ends well before the next upload at `hh+2:00:33`, two hours later) | clock | at the time |
@@ -64,8 +65,15 @@ Not affected: Prometheus itself, Grafana, anything not using these two buckets. 
 | .24 cmp-04 | no | no | no | pull silo + mc |
 | .25 cmp-05 | yes | yes | **yes** (keeper needed) | keeper pod |
 
-Do P3 (pre-pull, cmp-05 already done) and P5 (keepers on .23 and .25) tonight; start the P4 Longhorn backup tonight too (hours). Re-run
-the `image list` loop in P3 to confirm before bed.
+Do P3 (pre-pull, cmp-05 first and alone; it is already done), P5 (keepers on .23 and .25) and **start the P4 Longhorn backup** (hours) before about **20:30 CDT Friday (01:30Z)**,
+before the Renovate Saturday wave starts at about 01:50Z, so a wave of image pulls does not land on cmp-05 on top of yours. Re-run the `image list` loop in P3 to confirm.
+
+### Renovate runs in the window (measured from PR history)
+
+`.renovaterc.json5`: `schedule: ["on Saturday"]`, no timezone (UTC), `prHourlyLimit: 4`, platform automerge. Saturdays 2026-10-10, 10-17, 10-24 opened
+30 / 33 / 26 Renovate PRs; 23 / 28 / 20 merged within 15 minutes of creation. Each of those Saturdays also had a batch of 3-4 PRs created between 17:00Z and 17:31Z,
+which is where the Sat 10-31 17:20Z start sits (10-10: a grafana/mcp-grafana image, merged after 1 minute; 10-24: the CoreDNS chart, merged after 1 minute; the rest were mise tool and GitHub Action bumps).
+The wave begins around 01:50Z (20:50 CDT **Friday**), so Friday-night prep overlaps its start. P1 and G7 only cover PRs touching `storage/minio` or `.renovaterc.json5`. Do **not** change `.renovaterc.json5` for this beyond what #900 already has.
 
 ### T-3d .. T-2d
 
@@ -200,8 +208,7 @@ Recorded 2026-10-28: Thanos bucket 49.87 GB / 247 objects, Loki 0.87 GB / 21,943
 compactor halted 0. `minio_s3_requests_5xx_errors_total` has **no series** until a 5xx happens: absent is the healthy state.
 The Loki server is not scraped; Loki baselines are LogQL (section 5).
 
-Admin/config export through a throwaway pod (root credentials via `secretKeyRef`, never printed). `GATE:` qualification
-confirms `pgsty/mc` can talk to the old 2024 server; the before and after exports use the same client so the diff is clean:
+Admin/config export through a throwaway pod (root credentials via `secretKeyRef`, never printed). Report Phase B confirms the new `pgsty/mc` (2026-10-26) works against the old 2024-12-18 server (admin API user/policy/ilm/quota/version, list, cat: PASS), and section 9 here ran it against a clone of this instance; the before and after exports use the same client so the diff is clean:
 
 ```sh
 cat > ~/silo-swap-shared/mcrun.sh <<'EOF'
@@ -227,6 +234,17 @@ kubectl -n storage get volumes.longhorn.io $VOL -o jsonpath='{.status.robustness
 kubectl -n storage get backups.longhorn.io -l backup-volume=$VOL            # a Completed backup exists
 prom 'thanos_compact_halted'; prom 'ALERTS{alertstate="firing"}'            # 0, and nothing unexpected firing
 ```
+
+Renovate sweep (G7b), unless you paused Renovate and no Renovate PR was created in the last hour:
+
+```sh
+gh pr list --repo JasonKoopmans/home-ops-hiro --author 'app/renovate' --state open --json number,title,createdAt,autoMergeRequest
+for n in $(gh pr list --repo JasonKoopmans/home-ops-hiro --author 'app/renovate' --state open --json number --jq '.[].number'); do gh pr merge --disable-auto "$n" --repo JasonKoopmans/home-ops-hiro; done
+gh pr list --repo JasonKoopmans/home-ops-hiro --author 'app/renovate' --state merged --search "merged:>=$(date -u -v-30M +%Y-%m-%dT%H:%M:%SZ)" --json number,title,mergedAt   # none, or understood
+```
+
+Up to 4 new PRs per hour can still open during the window (`prHourlyLimit`). Leave them open with auto-merge off and process them after the soak step you choose; do not merge them
+during the window. A Renovate merge that touches `kubernetes/apps/monitoring/**`, `kubernetes/apps/storage/**` or CoreDNS **during the window means pause and reassess** (a workload roll on cmp-03/05 competes with the swap's pulls and Thanos/Loki restarts).
 
 Abort if anything is firing that you do not understand, or the volume is not `healthy`.
 
@@ -255,8 +273,9 @@ kubectl -n monitoring get pod | grep thanos-compactor || echo "compactor stopped
 
 Wait until its last iteration finished (the pod is gone, so it has). Prometheus/sidecar, store gateway, query and Loki stay up.
 
-**M3. Flush Loki** (so the least data sits only in the WAL): `kubectl -n monitoring exec loki-0 -c loki -- wget -qO- --post-data= http://localhost:3100/flush`
-(UNVERIFIED that wget exists in the Loki image; skip if it does not, `flush_on_shutdown` and the WAL cover a restart, and Loki is not restarted here).
+**M3. Flush Loki** (so the least data sits only in the WAL): from your workstation (verified 2026-10-30: the Loki container has **no** `sh`, `wget` or `curl`, so `kubectl exec` cannot do it):
+`kubectl -n monitoring port-forward loki-0 3100:3100 & sleep 3; curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:3100/flush; kill %1` (204 expected; the port-forward form is UNTESTED here,
+skip if it fails: `flush_on_shutdown` and the WAL cover a restart, and Loki is not restarted here).
 
 **M4. Final restore point** (compactor stopped, so state is quiescent):
 
@@ -317,7 +336,7 @@ Run immediately (M9), again after the next odd-hour upload, and again at T+24h.
 | Scrape continuity | `prom 'up{job=~"minio.*"}'` | 3 series, all 1, within 2 minutes |
 | Server health | `prom 'minio_cluster_health_status{job="minio"}'` | 1 |
 | Uptime reset | `prom 'minio_node_process_uptime_seconds{job="minio"}'` | small (restarted) |
-| Metric names | `prom 'count by (__name__)({__name__=~"minio_(s3_requests\|bucket_usage).*"})'` | same names as `before/prom.txt` (`minio_*` are preserved by design; `GATE:` qualification) |
+| Metric names | `prom 'count by (__name__)({__name__=~"minio_(s3_requests\|bucket_usage).*"})'` | same names as `before/prom.txt` (report section 1: 10 of 11 repo names PASS; `minio_s3_requests_5xx_errors_total` is absent until the first 5xx, so absent is healthy. `minio_bucket_usage_*` and `minio_bucket_quota_*` exist only on `/minio/v2/metrics/bucket`, which the repo's two bucket Probes already scrape, so query them with `job="minio-bucket"`) |
 | Buckets intact | `prom 'minio_bucket_usage_object_total'` | Thanos 247 (+ new blocks only), Loki about 21,943 and growing; bytes within a few percent of `before` |
 | S3 errors | `prom 'sum by (api) (rate(minio_s3_requests_errors_total[10m]))'` and `prom 'sum(rate(minio_s3_requests_5xx_errors_total[10m]))'` | 5xx empty or 0; 4xx not higher than baseline mix |
 | Next Thanos upload | `kubectl -n monitoring logs prometheus-kube-prometheus-stack-prometheus-0 -c thanos-sidecar --tail=400 \| grep -i 'upload new block'` after the next odd hour `:00:33` | a new line; `prom 'thanos_shipper_upload_failures_total'` unchanged |

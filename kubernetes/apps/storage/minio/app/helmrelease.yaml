@@ -64,8 +64,8 @@ spec:
     # Tag AND index digest are pinned (`<tag>@sha256:<digest>`); the chart renders
     # `image: "<repository>:<tag>"`, so the string passes through unchanged. Digest is
     # the multi-arch index, which keeps the pin valid on amd64 and arm64.
-    # GATE: final release pin comes from docs/silo-qualification.md; RELEASE.2026-10-26
-    # is the candidate (2026-10-28), alternatives 2026-10-18 / 2026-09-16 / 2026-08-06.
+    # Pin is final: docs/silo-qualification.md (Recommendation) picks RELEASE.2026-10-26
+    # for SN-2026-011 (fixed from 2026-09-16) and the suspended-bucket ILM delete-marker fix.
     image:
       repository: docker.io/pgsty/silo
       tag: RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7
