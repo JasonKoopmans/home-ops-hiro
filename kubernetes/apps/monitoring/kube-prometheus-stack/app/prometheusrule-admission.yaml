@@ -31,7 +31,11 @@ spec:
         #
         # The 20m window (not 5m) covers a client whose retries back off to
         # minutes apart; for: 30m is longer than the window, so a single burst
-        # (true for 20m) never fires but a rejection every few minutes does.
+        # (true for 20m) never fires but a rejection every few minutes does. The
+        # condition is "increase over the last 20m > 0, held for 30m", not a strict
+        # every-window guarantee: two bursts ~15m apart also fire, which is still a
+        # retrying client. A client backing off beyond 20m between attempts never
+        # fires; that is the accepted trade-off.
         #
         # No ...MetricsMissing twin: the series is legitimately absent whenever
         # nothing has been rejected, so absence cannot be told from health.
@@ -51,4 +55,4 @@ spec:
             severity: warning
           annotations:
             summary: Admission webhook {{ $$labels.name }} keeps rejecting requests
-            description: Webhook {{ $$labels.name }} has rejected at least one request in every 20-minute window for 30 minutes. A client is retrying something it can never get through. Find it with the denial text in the apiserver logs (Loki, {instance=~"kube-system/kube-apiserver-.*"} |= "{{ $$labels.name }}") or the controller's own logs; for validator.longhorn.io see docs/runbook-longhorn-snapshot-stuck.md.
+            description: Webhook {{ $$labels.name }} has kept rejecting requests for 30 minutes (at least one in the last 20 minutes throughout). A client is retrying something it can never get through. Find it with the denial text in the apiserver logs (Loki, {instance=~"kube-system/kube-apiserver-.*"} |= "{{ $$labels.name }}") or the controller's own logs; for validator.longhorn.io see docs/runbook-longhorn-snapshot-stuck.md.

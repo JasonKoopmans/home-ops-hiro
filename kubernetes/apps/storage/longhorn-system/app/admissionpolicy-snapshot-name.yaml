@@ -23,6 +23,8 @@ spec:
         operations: ["CREATE"]
         resources: ["snapshots"]
   validations:
+    # size() counts characters, not bytes; the same only because Kubernetes
+    # object names are ASCII (DNS-1123). Do not "fix" it to a byte count.
     - expression: "object.metadata.name.size() <= 63"
       messageExpression: "'Snapshot name ' + object.metadata.name + ' is ' + string(object.metadata.name.size()) + ' bytes; Longhorn can create it but never update or delete it again above 63 bytes'"
       reason: Invalid
@@ -34,11 +36,18 @@ metadata:
   name: longhorn-snapshot-name-length
 spec:
   policyName: longhorn-snapshot-name-length
-  # Warn + Audit first: kubectl shows the message but the create still goes
-  # through. Longhorn's own components name snapshots longhorn-<uuid> (45 bytes)
-  # or <uuid>, but that has only been read off the live list, not proven for
-  # every code path (replica rebuild, restore, clone). Once a few weeks pass with
-  # no unexpected warning, change this to [Deny] and nothing else.
+  # Warn + Audit first: the create still goes through. Warnings only reach
+  # interactive kubectl users; longhorn-manager is a client-go client and never
+  # shows them, and Audit only helps if apiserver audit logs are collected. So do
+  # not judge the flip to [Deny] by "no warning seen". Use the apiserver's own
+  # counter instead: apiserver_validating_admission_policy_check_total{policy=
+  # "longhorn-snapshot-name-length"}, split by its enforcement_action label, and
+  # flip to [Deny] only when the warn/audit count stays 0 over a few weeks apart
+  # from known test creates. The series does not exist until the first
+  # evaluation, so confirm the label names and values on the first one.
+  # Longhorn's own components name snapshots longhorn-<uuid> (45 bytes) or
+  # <uuid>; that is read off the live list, not proven for replica rebuild,
+  # restore or clone paths, which is why this starts as warn-only.
   validationActions: [Warn, Audit]
   matchResources:
     namespaceSelector:

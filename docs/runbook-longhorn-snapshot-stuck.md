@@ -43,8 +43,16 @@ kubectl patch validatingwebhookconfiguration longhorn-webhook-validator --type=j
   '[{"op":"remove","path":"/webhooks/0/matchConditions"}]'
 ```
 
-Check `webhooks[0]` is `validator.longhorn.io` first, and compare the config with
-the saved copy afterwards.
+Check first that index 0 is the right webhook (the output must be
+`validator.longhorn.io`), and compare the config with the saved copy afterwards:
+
+```bash
+kubectl get validatingwebhookconfiguration longhorn-webhook-validator -o jsonpath='{.webhooks[0].name}'
+```
+
+longhorn-manager owns this configuration and may rewrite it when it restarts, so
+the exemption can disappear on its own; a manager restart in the middle of the
+procedure drops it and the delete is denied again. Re-apply and wait.
 
 Do not delete the Backup CR of the same name: deleting a Backup CR removes the
 backup from S3. The webhook's DELETE rule is not worth dropping for all
