@@ -143,14 +143,21 @@ spec:
     deploymentUpdate:
       type: Recreate
 
-    # Measured 2026-09-28: 7d peak 918Mi against this 1Gi limit (90%).
-    # Bumped to ~1.5x that peak.
+    # Measured 2026-09-28: 7d peak 918Mi against a 1Gi limit (90%), bumped to 1408Mi.
+    # 2026-10-30, for the Silo swap: the 2024 binary's 14d peak under real load is now
+    # 1051Mi (75% of 1408Mi). In the clone rehearsal (docs/runbook-minio-silo-swap-shared.md
+    # section 9) Silo peaked at 407-428Mi against 310Mi for the old binary on the same
+    # data, at little client load, so Silo's peak under Thanos/Loki traffic is UNMEASURED
+    # and could sit near the old limit. Raised to ~2x the old peak (repo convention) so an
+    # OOM cannot be the swap's failure mode; with `disableWait` Flux would not report it.
+    # Revisit: after the first week on Silo, read max_over_time(container_memory_working_set_bytes
+    # {namespace="storage",pod=~"minio-.*",container="minio"}[7d]) and size to ~2x that.
     resources:
       requests:
         cpu: 50m
         memory: 256Mi
       limits:
-        memory: 1408Mi
+        memory: 2Gi
 
     metrics:
       serviceMonitor:

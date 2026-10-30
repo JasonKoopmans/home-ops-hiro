@@ -315,6 +315,7 @@ Run immediately (M9), again after the next even-hour upload, and again at T+24h.
 | Alerts | `prom 'ALERTS{alertname=~"Minio.*\|Thanos.*\|FluxResourceNotReady",alertstate="firing"}'` | empty |
 | Config diff | redo the P7 export into `after/admin.txt` and `diff <(grep -v -E 'uptime\|time\|version\|commit\|deploymentID\|"id"\|Uptime\|Version\|Commit\|Deployment' before/admin.txt) <(same for after)` | versioning Suspended, quotas 100GiB/20GiB, ILM rules, users and both policies unchanged; Silo additionally lists extra built-in policies (`consolereadonly`, `iamAdmin`, `infraAdmin`, `tablesAdmin`, `tablesReadOnly`, `tablesReadWrite`), expected diff noise. Silo caveats from the fork notes: new/updated policies reject bare ARN prefixes (these policies use `arn:aws:s3:::bucket` and `bucket/*`, fine), explicit version deletes need `s3:DeleteObjectVersion`, per-bucket CORS is new |
 | Bootstrap Jobs | `kubectl -n storage get jobs` | the five Jobs still `Complete` and **unchanged** (`ssa: IfNotPresent`) |
+| Memory / OOM | `prom 'max_over_time(container_memory_working_set_bytes{namespace="storage",pod=~"minio-[a-z0-9]+-[a-z0-9]+",container="minio"}[1h])'` after the first scanner cycle (about an hour) and again at T+24h; `prom 'kube_pod_container_status_last_terminated_reason{namespace="storage",pod=~"minio-.*",reason="OOMKilled"}'` | well under the **2Gi** limit (PR #900 raises it from 1408Mi; old binary's 14d peak 1051Mi, Silo rehearsal peak 428Mi at low load); no OOMKilled series; restart count 0. With `disableWait` Flux will not show an OOM crash-loop: this row and `MinioDown` are the only signals |
 | Flux | `flux get hr minio -n storage; flux get ks minio -n storage` | Ready (this proves little with `disableWait`; the rows above do) |
 
 ## 6. Rollback ladder
@@ -341,6 +342,7 @@ Watch for 7 days (a Thanos compaction + retention cycle is raw 7d):
 - Alerts: `Minio*`, `Thanos*`; `prom 'increase(minio_node_process_uptime_seconds[1d])'` should show no restarts; `MinioContainerRestartsHigh`.
 - Thanos: halted 0, ~12 iterations/h, store blocks loaded growing 1 per 2h then dropping on compaction, bucket usage curve continuous (no cliff).
 - Loki: write 2xx only, read-back of 2d-old data works, no `chunk not found`.
+- Memory: working-set peak vs the 2Gi limit (see the Memory row in section 5); after 7 days resize to about 2x the Silo peak and note it in `helmrelease.yaml`.
 - Disk: volume actualSize (`kubectl -n storage get volumes.longhorn.io $VOL -o jsonpath='{.status.actualSize}'`) vs the 120Gi PVC while the snapshot pins blocks.
 - **Day 3:** delete `pre-silo-*` snapshots (UI), then `kubectl -n storage patch volumes.longhorn.io $VOL --type merge -p '{"spec":{"unmapMarkSnapChainRemoved":"enabled"}}'`. Keep the Longhorn **backup** and the exported old image until day 7.
 - **Day 7:** delete keeper pods (`kubectl -n storage delete pod -l app=silo-image-keeper`), then a small PR removing `upgrade.disableWait: true` from `helmrelease.yaml` (and the `ks.yaml` patch if D1c was used).
