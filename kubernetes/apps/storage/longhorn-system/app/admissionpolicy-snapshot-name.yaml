@@ -1,0 +1,55 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/admissionregistration.k8s.io/validatingadmissionpolicy_v1.json
+# Longhorn's validating webhook turns a Snapshot's name into a label value (the
+# linked-clone check), and a label value is capped at 63 bytes. A longer name
+# can be created but every later UPDATE/DELETE of that CR fails with a 500
+# ("must be no more than 63 bytes"), so the CR can never be removed through the
+# API. On 2026-10-09 scripts/longhorn-backup-all.sh left 15 such CRs; one went
+# stale and longhorn-manager retried its DELETE ~3.7 times a minute for 12 days
+# (see docs/runbook-longhorn-snapshot-stuck.md). The script is fixed (#898); this
+# policy refuses the name at CREATE for whoever sends it next (UI, kubectl,
+# another script).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: longhorn-snapshot-name-length
+spec:
+  # A CEL evaluation problem must never block Longhorn's own snapshot creation.
+  failurePolicy: Ignore
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["longhorn.io"]
+        apiVersions: ["v1beta2"]
+        operations: ["CREATE"]
+        resources: ["snapshots"]
+  validations:
+    # size() counts characters, not bytes; the same only because Kubernetes
+    # object names are ASCII (DNS-1123). Do not "fix" it to a byte count.
+    - expression: "object.metadata.name.size() <= 63"
+      messageExpression: "'Snapshot name ' + object.metadata.name + ' is ' + string(object.metadata.name.size()) + ' bytes; Longhorn can create it but never update or delete it again above 63 bytes'"
+      reason: Invalid
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/admissionregistration.k8s.io/validatingadmissionpolicybinding_v1.json
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: longhorn-snapshot-name-length
+spec:
+  policyName: longhorn-snapshot-name-length
+  # Warn + Audit first: the create still goes through. Warnings only reach
+  # interactive kubectl users; longhorn-manager is a client-go client and never
+  # shows them, and Audit only helps if apiserver audit logs are collected. So do
+  # not judge the flip to [Deny] by "no warning seen". Use the apiserver's own
+  # counter instead: apiserver_validating_admission_policy_check_total{policy=
+  # "longhorn-snapshot-name-length"}, split by its enforcement_action label, and
+  # flip to [Deny] only when the warn/audit count stays 0 over a few weeks apart
+  # from known test creates. The series does not exist until the first
+  # evaluation, so confirm the label names and values on the first one.
+  # Longhorn's own components name snapshots longhorn-<uuid> (45 bytes) or
+  # <uuid>; that is read off the live list, not proven for replica rebuild,
+  # restore or clone paths, which is why this starts as warn-only.
+  validationActions: [Warn, Audit]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: storage
