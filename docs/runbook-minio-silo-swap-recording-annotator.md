@@ -46,8 +46,9 @@ Impact during the window (budget 90 min, expected 30-45; the server swap itself 
 - The offsite copy is untouched and keeps its retention; nothing in this runbook writes to the locked AWS bucket
   except the one deliberate post-swap `mc mirror` (M12), which is dry-run first.
 
-The merge of the PR is the trigger: Flux applies `origin/main` within 1-2 min and the HelmRelease does a Recreate
-upgrade. **Do not merge until M7.**
+Merging applies `origin/main` within 1-2 min and would start a Recreate upgrade, so the runbook makes the merge inert
+(M4/M7: mirror CronJob and HelmRelease suspended first) and treats `flux resume hr` as the real trigger.
+**Do not merge until M7.**
 
 ### Calendar facts that shape the window
 
@@ -279,9 +280,27 @@ snapshot alone is acceptable only if D2 = Sunday and you accept that it expires 
 Check: keeper pods Running, pre-pull present on all nodes, PR green, silence active, `before/` files exist,
 rollback branch staged. Read G10's answer aloud: it tells you which rung you will reach for.
 
-### M7. Trigger: merge the PR
+### M7. Trigger: merge the PR, then resume the HelmRelease
 
-Merge the PR (the user does this; sessions never merge). Watch:
+State, not discipline, must hold the swap back. In M4 you suspended the mirror CronJob; **also suspend the
+HelmRelease now**, so the merge is inert and `flux resume` is the real trigger (the mirror CronJob's new `mc` image
+also lands at merge, and an unsuspended `:23` run would start a real mirror before the M11 dry-run):
+
+```sh
+flux -n storage suspend hr recording-annotator-minio
+kubectl -n storage get cronjob recording-annotator-media-mirror -o jsonpath='{.spec.suspend}{"\n"}'   # true
+```
+
+Merge the PR (the user does this; sessions never merge). Confirm `flux -n storage get ks recording-annotator-minio`
+is reconciled to the merge commit and the HR shows the new image values, **and that the D1 `ks.yaml` patch is live**
+(P13). Only then:
+
+```sh
+flux -n storage resume hr recording-annotator-minio
+```
+
+An override of `remediateLastFailure` inside the HelmRelease itself would be overwritten by the `cluster-apps` patch,
+which is why D1 is a `ks.yaml` change. Watch:
 
 ```sh
 flux -n storage get ks recording-annotator-minio
@@ -289,7 +308,7 @@ flux -n storage get hr recording-annotator-minio -w
 kubectl -n storage get pod -l release=recording-annotator-minio -w -o wide
 ```
 
-Expected: within 1-2 min the HelmRelease upgrades (revision 11), the old pod terminates (Recreate), a new pod appears
+Expected: right after `flux resume` the HelmRelease upgrades (revision 11), the old pod terminates (Recreate), a new pod appears
 and starts `docker.io/pgsty/silo@sha256:…`; no pull wait because of §B1. The Job
 `recording-annotator-user-bootstrap` is **not** recreated, the mirror CronJob picks up the new image.
 

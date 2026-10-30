@@ -37,12 +37,19 @@ spec:
     # routes (health, metrics), the minio_* metric names and the .minio.sys layout.
     # Runbook: docs/runbook-minio-silo-swap-recording-annotator.md. Qualification: docs/silo-qualification.md.
     #
-    # GATE: the pin below is the qualification candidate (release 2026-10-26); the final pin comes from the
-    # silo-qualify report. Do not merge until it is confirmed or replaced.
+    # Pin = the qualification result (docs/silo-qualification.md, PR #902): release 2026-10-26, rehearsed on a CSI
+    # clone of this volume (data, IAM and format.json identical; old image reopened Silo-touched data).
     # Use the plain image, NOT the -distroless variant: the chart's command is `/bin/sh -ce '...'`.
     #
-    # WARNING: rolling back to the original MinIO image is not supported once Silo has written .minio.sys
-    # (persistent IAM revocation metadata). See "Rollback ladder" in the runbook before reverting this block.
+    # WARNING: rolling back to the original MinIO image is not supported once Silo has written persistent IAM
+    # revocation metadata (none exists on this instance; the clone rehearsal reopened cleanly). See "Rollback ladder"
+    # in the runbook before reverting this block.
+    #
+    # MERGE ORDER: merging starts a Recreate upgrade on the volume holding the only copy of the recordings, and the
+    # cluster-apps patch (kubernetes/flux/cluster/ks.yaml) forces upgrade remediation (rollback to the old image,
+    # unpullable except on hiro-cmp-03/05). A `remediation:` override in THIS file would be overwritten by that patch,
+    # so the override lives in ks.yaml (runbook D1). Runbook M4/M7: suspend this HelmRelease and the mirror CronJob
+    # BEFORE merging, then `flux resume` is the trigger.
     image:
       repository: docker.io/pgsty/silo
       # tag@digest (multi-arch index digest): a community fork's tag is not a promise, the digest is.
