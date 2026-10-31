@@ -102,10 +102,11 @@ spec:
       pruneBackupsDays: 3
       pauseIfNoPlayers: "true"
       persistence:
+        # The chart reads storageClass here, not under backupDir.
+        storageClass: longhorn-no-backup
         backupDir:
           enabled: true
           Size: 5Gi
-          storageClass: longhorn-no-backup
       resources:
         requests:
           cpu: 25m
