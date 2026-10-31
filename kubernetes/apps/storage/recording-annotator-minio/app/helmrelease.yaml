@@ -63,7 +63,10 @@ spec:
     # this HelmRelease and the mirror CronJob BEFORE merging, then `flux resume` is the trigger.
     #
     # tag@digest below (multi-arch index digest): a community fork's tag is not a promise, the digest is. Keep
-    # `repository:` and `tag:` adjacent: the Renovate rule's regex matches them as consecutive lines.
+    # `repository:` and `tag:` adjacent. Renovate does NOT track these two keys on `main` today: the
+    # `customManagers` rule that reads them (consecutive `repository:` / `tag:` lines) is added by the shared-instance
+    # PR (#900) and applies here only once that merges. Until then bump them by hand, tag and digest together
+    # (runbook, post-swap step 4).
     image:
       repository: docker.io/pgsty/silo
       tag: RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7

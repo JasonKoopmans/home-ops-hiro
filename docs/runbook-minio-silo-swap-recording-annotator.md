@@ -686,7 +686,8 @@ At the end of the soak:
    in the revisit register if G10/G11 left anything open.
 4. Renovate: `silo-qualification.md` notes the helm-values manager does not recognise a `tag@sha256` string in
    `image.tag` / `mcImage.tag`, so those two keys are bumped **by hand** until a `customManagers` regex rule exists in
-   `.renovaterc.json5` (owned by the `minio-shared-silo` session; this PR does not touch it). The mirror CronJob and
+   `.renovaterc.json5` (added by the shared-instance PR #900, not on `main` yet; this PR does not touch it, and once #900 merges
+   the rule applies here too, which needs `repository:` and `tag:` to stay adjacent). The mirror CronJob and
    bootstrap Job `image:` lines are plain `repo:tag@digest` and are handled. Watch `github.com/pgsty/silo/releases`
    and re-run `scripts/silo-qualify/` before bumping: the fork already shipped security fixes on 2026-09-16.
 
