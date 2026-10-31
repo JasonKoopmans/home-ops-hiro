@@ -8,7 +8,7 @@ spec:
   interval: 1h
   dependsOn:
     - name: mariadb-operator-crds
-      namespace: default
+      namespace: database
   chart:
     spec:
       chart: mariadb-operator

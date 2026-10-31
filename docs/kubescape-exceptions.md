@@ -48,7 +48,7 @@ config-level equivalent of "exclude this check for resources X, Y, Z"; the
 config-file `checks.exclude` is repo-wide.
 
 That annotation is only addable for resources whose manifest we author
-directly: `default/test`, `default/multus-test-pod`, and
+directly: `default/test` and
 `network/kube-multus-ds` carry it. The other ~23 resources covered by the
 `C-0271-*` Kubescape exceptions are templated by upstream charts (cilium,
 longhorn, loki, kube-prometheus-stack, mariadb-operator, reloader, spegel,
