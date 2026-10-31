@@ -1,0 +1,155 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app ollama
+spec:
+  interval: 1h
+  # The pod is NotReady until the ~2.5Gi model is pulled (readiness checks for
+  # it), so the first install waits on a download. 10m is the most the default
+  # poller wait allows without `waitStrategy: legacy`.
+  timeout: 10m
+  chartRef:
+    kind: OCIRepository
+    name: ollama
+  values:
+    controllers:
+      main:
+        # Single replica on an RWO volume: app-template defaults to Recreate,
+        # so a roll cannot deadlock on a Multi-Attach.
+        pod:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          # CPU-only inference: keep it off the 2-CPU nodes (cmp-03/04), whose
+          # CPU is already dominated by Longhorn I/O, and off cmp-05's slow
+          # system disk.
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: kubernetes.io/hostname
+                        operator: In
+                        values: ["hiro-cmp-01", "hiro-cmp-02"]
+        containers:
+          app:
+            image:
+              repository: docker.io/ollama/ollama
+              tag: 0.40.13
+            env:
+              # HOME must be writable for the non-root user (Ollama writes its
+              # id_ed25519 key under ~/.ollama); models live on the PVC.
+              HOME: /models
+              OLLAMA_MODELS: /models/models
+              OLLAMA_HOST: 0.0.0.0:11434
+              # One small model, resident, one request at a time: classification
+              # is batch work, and parallel slots multiply KV-cache memory.
+              OLLAMA_KEEP_ALIVE: "-1"
+              OLLAMA_MAX_LOADED_MODELS: "1"
+              OLLAMA_NUM_PARALLEL: "1"
+              # Bounds the KV cache; article summaries are far below 4k tokens.
+              OLLAMA_CONTEXT_LENGTH: "4096"
+            probes:
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/version
+                    port: 11434
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              # Ready only once the model is on the PVC, so a failed or still
+              # running pull shows as NotReady (no Service endpoints) instead of
+              # n8n getting "model not found" from a Ready pod.
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - /bin/sh
+                      - -c
+                      - ollama list | grep -q qwen3:4b
+                  initialDelaySeconds: 10
+                  periodSeconds: 15
+                  timeoutSeconds: 10
+                  failureThreshold: 3
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                # INFORMED GUESS, unmeasured: nothing has run here yet. Revisit
+                # against container_cpu_usage_seconds_total once a few hundred
+                # classifications have run. No CPU limit, per repo convention.
+                cpu: 500m
+                memory: 4Gi
+              limits:
+                # INFORMED GUESS: qwen3:4b Q4 is ~2.5Gi of weights plus a 4k KV
+                # cache and runtime. Revisit against
+                #   max_over_time(container_memory_working_set_bytes{pod=~"ollama-.*"}[14d])
+                # and set at ~2x the observed peak.
+                memory: 5Gi
+          # Pulls the model into the PVC once, then idles. Ollama needs the
+          # server up first, hence the wait loop. Same image, so the CLI and
+          # server versions match. Idempotent: `ollama pull` is a no-op when the
+          # model is already present.
+          model-pull:
+            image:
+              repository: docker.io/ollama/ollama
+              tag: 0.40.13
+            env:
+              HOME: /models
+              OLLAMA_MODELS: /models/models
+              OLLAMA_HOST: 127.0.0.1:11434
+            command: ["/bin/sh", "-c"]
+            args:
+              - |
+                until ollama list >/dev/null 2>&1; do sleep 2; done
+                # Retry until the pull succeeds (registry down, disk full,
+                # interrupted download); the app container's readiness probe
+                # keeps the pod NotReady until the model exists.
+                until ollama pull qwen3:4b; do sleep 30; done
+                exec sleep infinity
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                # INFORMED GUESS: the CLI only streams pull progress.
+                memory: 256Mi
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: 11434
+
+    persistence:
+      models:
+        type: persistentVolumeClaim
+        existingClaim: ollama
+        globalMounts:
+          - path: /models
+
+    # NO route block, deliberately. The API is unauthenticated and can pull
+    # arbitrary models. The only caller (n8n) is in-cluster at
+    #   http://ollama.default.svc.cluster.local:11434
+    # For ad-hoc testing:
+    #   kubectl -n default port-forward svc/ollama 11434:11434

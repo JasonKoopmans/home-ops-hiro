@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      # qwen3:4b is ~2.5Gi; headroom for a second model during the eval.
+      storage: 8Gi
+  # Model weights are re-downloadable, so no recurring S3 backup.
+  storageClassName: longhorn-no-backup
