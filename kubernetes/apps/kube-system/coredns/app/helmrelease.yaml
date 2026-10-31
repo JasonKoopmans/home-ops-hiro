@@ -68,6 +68,17 @@ spec:
             - matchExpressions:
                 - key: node-role.kubernetes.io/control-plane
                   operator: Exists
+      # Both replicas landed on one node, so draining it stopped cluster DNS.
+      # Required, as in k8s-gateway: 2 replicas on 5 control-plane nodes.
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                k8s-app: kube-dns
+    # One eviction at a time: a drain waits for the replacement to be Ready.
+    podDisruptionBudget:
+      maxUnavailable: 1
     tolerations:
       - key: CriticalAddonsOnly
         operator: Exists
