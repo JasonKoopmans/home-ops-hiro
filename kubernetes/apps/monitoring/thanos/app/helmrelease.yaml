@@ -26,7 +26,7 @@ spec:
           app:
             image:
               repository: quay.io/thanos/thanos
-              tag: v0.42.4
+              tag: v0.42.5
             args:
               - query
               - --http-address=0.0.0.0:10902
@@ -111,7 +111,7 @@ spec:
           app:
             image:
               repository: quay.io/thanos/thanos
-              tag: v0.42.4
+              tag: v0.42.5
             args:
               - store
               - --data-dir=/data
@@ -160,7 +160,7 @@ spec:
           app:
             image:
               repository: quay.io/thanos/thanos
-              tag: v0.42.4
+              tag: v0.42.5
             args:
               - compact
               - --data-dir=/data
