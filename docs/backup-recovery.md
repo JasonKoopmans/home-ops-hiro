@@ -2,9 +2,11 @@
 
 This document describes the backup strategy, data integrity guarantees, and recovery
 procedures for the **recording-annotator** application. The app stores recording blobs
-in a dedicated MinIO instance (`recording-annotator-minio`) and maintains a separate
-index. Several Prometheus alerts reference sections of this document as pointers for
-on-call response.
+in a dedicated S3-compatible instance (`recording-annotator-minio`) and maintains a separate
+index. That instance runs **Silo** (pgsty's maintained fork of MinIO) as of the
+MinIO → Silo swap; the names `minio`, `MINIO_*`, `mc` and `minio_*` metrics are unchanged
+(swap runbook: [runbook-minio-silo-swap-recording-annotator.md](runbook-minio-silo-swap-recording-annotator.md)).
+Several Prometheus alerts reference sections of this document as pointers for on-call response.
 
 ---
 
@@ -362,7 +364,7 @@ S3 rather than restoring a volume snapshot.
        runAsGroup: 1000
      containers:
        - name: mc
-         image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+         image: docker.io/pgsty/mc:RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8
          command:
            - /bin/sh
            - -c

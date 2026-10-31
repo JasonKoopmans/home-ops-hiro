@@ -5,6 +5,9 @@
 # authenticates as this user via kubernetes/apps/default/recording-annotator/app/recording-annotator-secret.sops.yaml,
 # which holds the same accessKey/secretKey pair (Storage__AccessKey/Storage__SecretKey).
 #
+# Silo note: the fork rejects NEW or UPDATED policies whose Resource is a bare ARN prefix. The two Resources below
+# are a full bucket ARN and a bucket/* object ARN, so they are valid as written.
+#
 # Mirrors kubernetes/apps/storage/minio/app/thanos-user-bootstrap-job.yaml almost exactly — same shape,
 # same known-good annotations. No DeleteObject in the policy (unlike Thanos/Loki): the app has no v1
 # blob-delete path by design (RecordingAnnotator docs/backup-recovery.md §2), so it's tightened out.
@@ -40,7 +43,13 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          # pgsty/mc replaced quay.io/minio/mc (HTTP 401 for anonymous pulls). Qualified in
+          # docs/silo-qualification.md (PR #902): this script replays verbatim there, twice, idempotent.
+          # Editing this image does NOT re-run the Job: it carries
+          # `ssa: IfNotPresent`, so kustomize-controller skips it once it exists, and the live Job (and the
+          # scoped user/policy it created) are untouched by the MinIO -> Silo swap. The new image only matters
+          # if the Job is ever recreated, e.g. on a rebuilt instance (pgsty/mc has /bin/sh, cat, sleep, expr, tr).
+          image: docker.io/pgsty/mc:RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8
           command:
             - /bin/sh
             - -c

@@ -8,15 +8,20 @@
 # and returns the requested path) and relying on MINIO_PROMETHEUS_AUTH_TYPE
 # being "public" so no bearer token is needed.
 #
-# This matters more here than it does for the shared instance. The recordings
-# bucket's ONLY offsite protection is server-side replication to the
-# Object-Locked S3 bucket — the PVC is deliberately longhorn-2-no-backup.
-# Replication is configured imperatively, outside Git, by
-# deploy/backup/configure-minio-replication.sh, so if it is never run, silently
-# misconfigured, or lost when this instance is rebuilt, the media has no backup
-# at all and nothing else would notice. minio_bucket_replication_* comes from
-# this endpoint and is what the RecordingAnnotatorMediaReplication* alerts key
-# off.
+# This matters more here than it does for the shared instance: the recordings
+# bucket is the store of every recording, and its only offsite protection is the
+# hourly `mc mirror` CronJob (recording-annotator-mirror-cronjob.yaml) into the
+# Object-Locked S3 bucket — the PVC is deliberately longhorn-2-no-backup. That
+# CronJob is Flux-managed, and the RecordingAnnotatorMediaMirror* alerts key off
+# the CronJob's own status (kube_cronjob_status_last_successful_time), not off
+# this endpoint. MinIO server-side replication (minio_bucket_replication_*) was
+# abandoned in #420 because it cannot target AWS S3.
+#
+# What this endpoint still gives us is per-bucket size and object count
+# (minio_bucket_usage_total_bytes / minio_bucket_usage_object_total), the
+# independent number to compare against the offsite copy before and after the
+# MinIO -> Silo swap (docs/runbook-minio-silo-swap-recording-annotator.md).
+# Silo keeps the /minio/v2/metrics/* paths and minio_* names.
 apiVersion: monitoring.coreos.com/v1
 kind: Probe
 metadata:
