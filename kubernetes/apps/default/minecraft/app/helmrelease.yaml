@@ -36,12 +36,6 @@ spec:
       ENABLE_ROLLING_LOGS: true
       UID: *APP_UID
       GID: *APP_GID
-      # Geyser reads these system properties ahead of its config.yml, so the transport
-      # lives in Git rather than in a plugin file generated on first start.
-      # NetherNet (Bedrock 26.60+ rejects RakNet). Built-in signaling uses TCP on the
-      # port and gameplay uses UDP on the same port; the advertised address is the
-      # envoy-internal LAN VIP that the TCPRoute/UDPRoute listen on.
-      JVM_DD_OPTS: "geyserTransport=nethernet,geyserUdpPort=19132,geyserSignalingMode=builtin,geyserAdvertiseAddresses=${ENVOY_INTERNAL_ADDR}"
       # Enforce the allowlist for Java and Floodgate (Bedrock) players alike.
       ENFORCE_WHITELIST: "TRUE"
       # ViaVersion: Geyser imitates a newer Java client than Paper 1.21.10 speaks.
@@ -66,6 +60,13 @@ spec:
       forceReDownload: true
       memory: 3G
       jvmXXOpts: "-Ddisable.watchdog=true -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=false"
+      # Geyser reads these system properties ahead of its config.yml, so the transport lives
+      # in Git rather than in a plugin file generated on first start. NetherNet (Bedrock
+      # 26.60+ rejects RakNet): built-in signaling uses TCP on the port and gameplay uses UDP
+      # on the same port; the advertised address is the envoy-internal LAN VIP. Raw -D flags
+      # in JVM_OPTS: itzg's JVM_DD_OPTS splits on spaces, so a comma list arrived as one
+      # value and Geyser ignored it.
+      jvmOpts: "-DgeyserTransport=nethernet -DgeyserUdpPort=19132 -DgeyserSignalingMode=builtin -DgeyserAdvertiseAddresses=${ENVOY_INTERNAL_ADDR}"
       pluginUrls:
         - https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot
         - https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot
