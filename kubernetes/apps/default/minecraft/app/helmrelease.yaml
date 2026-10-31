@@ -97,7 +97,9 @@ spec:
         tag: 2026.10.3
       backupInterval: 6h
       initialDelay: 5m
-      pruneBackupsDays: 14
+      # Time-only retention: 6h x 3d = 12 archives must fit in the 5Gi backup PVC, so this
+      # holds while an archive stays under ~400MB. Guess; raise PVC and days together.
+      pruneBackupsDays: 3
       pauseIfNoPlayers: "true"
       persistence:
         backupDir:

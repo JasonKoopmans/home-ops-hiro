@@ -29,6 +29,8 @@ second Service with `loadBalancerClass: tailscale` carrying TCP+UDP 19132, and
 ## Not yet verified (check on first start)
 
 - Geyser log shows NetherNet enabled, no RakNet warning, no "needs Java 26.3" warning (ViaVersion loaded).
+- `kubectl -n network get gateway envoy-internal -o yaml`: both `minecraft-bedrock` (UDP) and
+  `minecraft-bedrock-signaling` (TCP) must be `Programmed`, neither `Conflicted`/`ProtocolConflict`.
 - Whether WebRTC gameplay survives the Envoy UDP proxy (client source address is replaced).
   If joins hang after the trust prompt, move UDP to a Cilium `LoadBalancer` Service
   (`lbipam.cilium.io/ips`) for 19132 instead of the UDPRoute.
@@ -46,7 +48,8 @@ players have prefixed names: add them in-game or via RCON with Floodgate's `fwhi
 ## Backups
 
 `mc-backup` sidecar: RCON save-off/flush, tar.gz every 6h to PVC `minecraft-backupdir`
-(`longhorn-no-backup`, 5Gi), pruned after 14 days, skipped while nobody is online.
+(`longhorn-no-backup`, 5Gi), pruned after 3 days (12 archives; a guess sized to the PVC, retention is
+time-only so a full volume fails silently: watch `LonghornVolumeUsageHigh` for `minecraft-backupdir`), skipped while nobody is online.
 The world PVC is on `longhorn`, so Longhorn's recurring backups to S3 are the second layer.
 
 Restore test (do once before inviting friends): scale a scratch pod with a new PVC, extract the
