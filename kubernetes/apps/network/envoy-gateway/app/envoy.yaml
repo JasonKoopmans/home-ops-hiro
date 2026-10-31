@@ -117,6 +117,12 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    - name: minecraft-bedrock-signaling
+      protocol: TCP
+      port: 19132
+      allowedRoutes:
+        namespaces:
+          from: All
     - name: minecraft
       protocol: TCP
       port: 25565

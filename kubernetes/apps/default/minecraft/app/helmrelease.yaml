@@ -13,12 +13,15 @@ spec:
     image:
       repository: ghcr.io/itzg/minecraft-server
       tag: 2026.10.0-java25
+    # Memory/CPU are informed guesses for ~10 players (Paper + Geyser + ViaVersion),
+    # not measured: revisit with max_over_time(container_memory_working_set_bytes) after a
+    # week of real play. Heap is explicit (MEMORY) so it cannot drift with the limit.
     resources:
       limits:
-        memory: 2000Mi
+        memory: 5Gi
       requests:
-        cpu: 100m
-        memory: 1000Mi
+        cpu: 500m
+        memory: 4Gi
     securityContext:
       runAsUser: &APP_UID 568
       fsGroup: &APP_GID 568
@@ -33,8 +36,16 @@ spec:
       ENABLE_ROLLING_LOGS: true
       UID: *APP_UID
       GID: *APP_GID
-      INIT_MEMORY: 25%
-      MAX_MEMORY: 70%
+      # Geyser reads these system properties ahead of its config.yml, so the transport
+      # lives in Git rather than in a plugin file generated on first start.
+      # NetherNet (Bedrock 26.60+ rejects RakNet). Built-in signaling uses TCP on the
+      # port and gameplay uses UDP on the same port; the advertised address is the
+      # envoy-internal LAN VIP that the TCPRoute/UDPRoute listen on.
+      JVM_DD_OPTS: "geyserTransport=nethernet,geyserUdpPort=19132,geyserSignalingMode=builtin,geyserAdvertiseAddresses=${ENVOY_INTERNAL_ADDR}"
+      # Enforce the allowlist for Java and Floodgate (Bedrock) players alike.
+      ENFORCE_WHITELIST: "TRUE"
+      # ViaVersion: Geyser imitates a newer Java client than Paper 1.21.10 speaks.
+      SPIGET_RESOURCES: "19254"
     persistence:
       dataDir:
         enabled: true
@@ -46,22 +57,58 @@ spec:
       difficulty: normal
       whitelist: "GachouGoose,movi"
       ops: "movi,GachouGoose"
-      pvp: true
-      motd: Meh
-      worldSaveName: Kubeworld
-      viewDistance: 12
+      pvp: false
+      motd: Family Minecraft
+      # New world for the family server; the old Kubeworld stays on the volume.
+      worldSaveName: FamilyWorld
+      viewDistance: 9
+      maxPlayers: 20
       forceReDownload: true
-      memory: ""
+      memory: 3G
       jvmXXOpts: "-Ddisable.watchdog=true -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv6Addresses=false"
       pluginUrls:
         - https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot
         - https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot
-    extraPorts:
-      - name: bedrock
-        containerPort: 19132
-        protocol: UDP
-        service:
+      # RCON is for the mc-backup sidecar only (localhost); it is never routed.
+      rcon:
+        enabled: true
+        existingSecret: minecraft-rcon
+      # Must sit under minecraftServer: at the top level the chart ignored it, which is
+      # why the Service carried only 25565. Both entries share the Service so the
+      # gateway routes can reach 19132 over TCP (NetherNet signaling) and UDP (gameplay).
+      extraPorts:
+        - name: bedrock-tcp
+          containerPort: 19132
+          protocol: TCP
+          service:
+            enabled: true
+            embedded: true
+            port: 19132
+        - name: bedrock-udp
+          containerPort: 19132
+          protocol: UDP
+          service:
+            enabled: true
+            embedded: true
+            port: 19132
+    mcbackup:
+      enabled: true
+      image:
+        tag: 2026.10.3
+      backupInterval: 6h
+      initialDelay: 5m
+      # Time-only retention: 6h x 3d = 12 archives must fit in the 5Gi backup PVC, so this
+      # holds while an archive stays under ~400MB. Guess; raise PVC and days together.
+      pruneBackupsDays: 3
+      pauseIfNoPlayers: "true"
+      persistence:
+        backupDir:
           enabled: true
-          embedded: true
-          port: 19132
-
+          Size: 5Gi
+          storageClass: longhorn-no-backup
+      resources:
+        requests:
+          cpu: 25m
+          memory: 128Mi
+        limits:
+          memory: 512Mi
