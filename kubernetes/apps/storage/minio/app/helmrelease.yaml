@@ -21,18 +21,62 @@ spec:
   upgrade:
     cleanupOnFail: true
     # The chart's only hook is the post-install/post-upgrade `post-job`, which runs
-    # `mc mb --ignore-existing` for `buckets` below. Its image (quay.io/minio/mc, tag
-    # pinned by the chart) answers HTTP 401 to anonymous pulls as of 2026-10-04 and is
+    # `mc mb --ignore-existing` for `buckets` below. Its chart-pinned image
+    # (quay.io/minio/mc) answered HTTP 401 to anonymous pulls as of 2026-10-04 and was
     # cached on no node, so on upgrade the hook sat in ImagePullBackOff, Helm timed out
     # after 5m and Flux rolled the whole release back. The buckets already exist and
     # `purge: false` never removes them, so skipping the hook on upgrade loses nothing.
-    # Install still runs it.
+    # Install still runs it, now with the `mcImage` set below instead of the chart's
+    # unpullable default. Keep disableHooks: the upgrade that swaps the server image
+    # must not depend on a second image pull succeeding.
     disableHooks: true
+    # TEMPORARY, for the MinIO -> Silo swap and its soak (docs/runbook-minio-silo-swap-shared.md,
+    # decision D1). cluster-apps forces `remediateLastFailure: true` and a values override
+    # cannot beat that patch, so a Silo pod that fails to become Ready would make Flux
+    # roll the release back to quay.io/minio/minio, an image that no registry serves and
+    # that is cached on only 2 of 5 nodes, onto a volume Silo may already have written to.
+    # Rollback only follows a failed upgrade action; with the wait off the upgrade is
+    # "done" once the Deployment is applied, so a broken Silo pod stays broken IN PLACE
+    # (logs intact, old binary never touches the volume) and the operator picks the
+    # rollback rung. Cost: the HelmRelease reads Ready even if the pod is not, so watch the
+    # pod and MinioDown, not Flux. Remove these two lines after the soak.
+    disableWait: true
     remediation:
       retries: 3
   values:
     # Single-node deployment suitable for homelab; no distributed mode overhead
     mode: standalone
+
+    # Silo (github.com/pgsty/silo, AGPL-3), the maintained community fork of MinIO.
+    # Upstream minio/minio is archived: chart 5.4.0 (the last ever published) pins
+    # quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z, which answers 401 to anonymous
+    # pulls, 404 on Docker Hub, and was cached on only 2 of 5 nodes. The chart's command
+    # is `/usr/bin/docker-entrypoint.sh minio server ...`; Silo's entrypoint rewrites a
+    # leading `minio` argument to `silo`, so only the image needs to change. `MINIO_*`
+    # env, `/minio/*` routes, `minio_*` metrics and the `.minio.sys` layout are kept.
+    #
+    # THIS IS A ONE-WAY UPGRADE. Once Silo has written persistent IAM revocation
+    # metadata into `.minio.sys`, a rolling downgrade is unsupported, so never let
+    # Flux "roll back" this release: see docs/runbook-minio-silo-swap-shared.md before
+    # merging, and before touching these two lines afterwards. Renovate bumps are held
+    # for approval on the Dependency Dashboard for the same reason (.renovaterc.json5).
+    #
+    # Tag AND index digest are pinned (`<tag>@sha256:<digest>`); the chart renders
+    # `image: "<repository>:<tag>"`, so the string passes through unchanged. Digest is
+    # the multi-arch index, which keeps the pin valid on amd64 and arm64.
+    # Pin is final: docs/silo-qualification.md (Recommendation) picks RELEASE.2026-10-26
+    # for SN-2026-011 (fixed from 2026-09-16) and the suspended-bucket ILM delete-marker fix.
+    image:
+      repository: docker.io/pgsty/silo
+      tag: RELEASE.2026-10-26T00-00-00Z@sha256:7bb2aff6b89efe1cb1303c10fc21d579447434ed06649ac9ec05a5e2dbf30ad7
+
+    # Client image of the chart's makeBucketJob (post-install hook, so INSTALL only:
+    # disableHooks skips it on upgrade). The chart's own default tag is on
+    # quay.io/minio/mc, which is no longer pullable anonymously; without this override
+    # a fresh install of this release would sit in ImagePullBackOff.
+    mcImage:
+      repository: docker.io/pgsty/mc
+      tag: RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8
 
     # Read rootUser and rootPassword from the existing SOPS-encrypted secret
     existingSecret: minio-root-credentials
@@ -99,14 +143,21 @@ spec:
     deploymentUpdate:
       type: Recreate
 
-    # Measured 2026-09-28: 7d peak 918Mi against this 1Gi limit (90%).
-    # Bumped to ~1.5x that peak.
+    # Measured 2026-09-28: 7d peak 918Mi against a 1Gi limit (90%), bumped to 1408Mi.
+    # 2026-10-30, for the Silo swap: the 2024 binary's 14d peak under real load is now
+    # 1051Mi (75% of 1408Mi). In the clone rehearsal (docs/runbook-minio-silo-swap-shared.md
+    # section 9) Silo peaked at 407-428Mi against 310Mi for the old binary on the same
+    # data, at little client load, so Silo's peak under Thanos/Loki traffic is UNMEASURED
+    # and could sit near the old limit. Raised to ~2x the old peak (repo convention) so an
+    # OOM cannot be the swap's failure mode; with `disableWait` Flux would not report it.
+    # Revisit: after the first week on Silo, read max_over_time(container_memory_working_set_bytes
+    # {namespace="storage",pod=~"minio-.*",container="minio"}[7d]) and size to ~2x that.
     resources:
       requests:
         cpu: 50m
         memory: 256Mi
       limits:
-        memory: 1408Mi
+        memory: 2Gi
 
     metrics:
       serviceMonitor:

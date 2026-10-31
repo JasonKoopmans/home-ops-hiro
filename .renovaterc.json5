@@ -143,6 +143,33 @@
       automerge: false,
     },
     {
+      // Silo (github.com/pgsty/silo, the maintained fork of MinIO) upgrades are
+      // one-way: once a newer server has written persistent IAM revocation
+      // metadata into `.minio.sys`, rolling downgrades are unsupported, and
+      // cluster-apps forces `upgrade.remediation.remediateLastFailure: true`, so a
+      // failed upgrade is rolled back by Flux onto the old binary (the same trap as
+      // Longhorn, see flux-rollback-poisons-one-way-charts). A bump must therefore
+      // be a deliberate act with a snapshot taken first, never a Saturday automerge.
+      // `dependencyDashboardApproval` goes one step further than `automerge: false`:
+      // Renovate opens no PR at all until the box is ticked on the Dependency
+      // Dashboard, so nothing sits mergeable (or gets merged by a stray click) next
+      // to the runbook's maintenance window. The client image (`pgsty/mc`) is held
+      // too: the bootstrap Jobs and the mirror CronJob run it against the server.
+      //
+      // Both images tag releases `RELEASE.YYYY-MM-DDTHH-MM-SSZ`, which Renovate's
+      // default docker versioning cannot order (the tag is not numeric-leading), so
+      // without this rule it would find no update, ever. The year, month and day map
+      // to major, minor and patch and the hour to `build`; releases carry 00-00-00 so
+      // far, and the minutes and seconds are ignored. Checked with Renovate 44.192.2:
+      // a pin on RELEASE.2026-08-06 is offered RELEASE.2026-10-26 as a "minor" update.
+      description: "Hold Silo and its mc client for approval — server upgrades are one-way",
+      matchDatasources: ["docker"],
+      matchPackageNames: ["/pgsty\\/(silo|mc)$/"],
+      versioning: "regex:^RELEASE\\.(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})T(?<build>\\d{2})-\\d{2}-\\d{2}Z$",
+      automerge: false,
+      dependencyDashboardApproval: true,
+    },
+    {
       // Merging this restarts every Flux controller. A restart while upgrades are
       // in flight can clear a HelmRelease's rollback history, and the next failed
       // upgrade then Stalls (MissingRollbackTarget) and stays Ready=False until
@@ -296,6 +323,24 @@
         "datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n.+/(?<currentValue>(v|\\d)[^/]+)",
       ],
       datasourceTemplate: "{{#if datasource}}{{{datasource}}}{{else}}github-releases{{/if}}",
+    },
+    {
+      // `image.repository` / `image.tag` (and `mcImage.*`) of the minio charts are Helm
+      // values, which neither the flux nor the kubernetes manager reads. The tag is
+      // pinned as `<tag>@sha256:<index digest>`; capturing the digest lets Renovate
+      // move both together. The Jobs and the mirror CronJob use plain `image:` fields,
+      // which the kubernetes manager already handles.
+      //   image:
+      //     repository: docker.io/pgsty/silo
+      //     tag: RELEASE.2026-10-26T00-00-00Z@sha256:...
+      customType: "regex",
+      description: "Process pinned Silo image values in the minio HelmReleases",
+      managerFilePatterns: ["/^kubernetes/apps/storage/[^/]+/app/helmrelease\\.yaml$/"],
+      matchStrings: [
+        "repository: (?<depName>docker\\.io/pgsty/(?:silo|mc))\\s+tag: (?<currentValue>RELEASE\\.[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
+      ],
+      datasourceTemplate: "docker",
+      versioningTemplate: "regex:^RELEASE\\.(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})T(?<build>\\d{2})-\\d{2}-\\d{2}Z$",
     },
     {
       customType: "regex",
