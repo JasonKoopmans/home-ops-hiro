@@ -258,8 +258,8 @@ Abort: the index job fails -> fix before freezing (the offsite index is part of 
 ### M4. Stop every writer
 
 ```sh
-kubectl -n default scale deploy/recording-annotator --replicas=0
-kubectl -n default rollout status deploy/recording-annotator --timeout=2m
+kubectl -n default scale deploy/recording-annotator-app --replicas=0
+kubectl -n default rollout status deploy/recording-annotator-app --timeout=2m
 kubectl -n storage patch cronjob recording-annotator-media-mirror -p '{"spec":{"suspend":true}}'
 kubectl -n storage get jobs | grep recording-annotator-media-mirror   # nothing running
 ```
@@ -490,8 +490,8 @@ not move, the next scheduled `:23` run will (still inside the 3h threshold).
 
 1. Re-confirm the bucket has the 80 objects (M8). **Never start the app against a blank volume**: its first `/readyz`
    would auto-create an empty `recordings` bucket and hide a disaster.
-2. `kubectl -n default scale deploy/recording-annotator --replicas=1` then
-   `kubectl -n default rollout status deploy/recording-annotator --timeout=5m`. `/readyz` gates on MinIO, so Ready
+2. `kubectl -n default scale deploy/recording-annotator-app --replicas=1` then
+   `kubectl -n default rollout status deploy/recording-annotator-app --timeout=5m`. `/readyz` gates on MinIO, so Ready
    means the app reached Silo with the scoped credentials.
 3. `flux -n default resume hr recording-annotator` (it does not change replicas; the scale in step 2 is what counts).
 4. Playback diff (M13).
