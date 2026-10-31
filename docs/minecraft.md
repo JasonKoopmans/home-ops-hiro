@@ -26,24 +26,58 @@ Tailscale is the planned next step for remote play: operator in its own `tailsca
 second Service with `loadBalancerClass: tailscale` carrying TCP+UDP 19132, and
 `geyserAdvertiseAddresses` pointed at the tailnet name. The LAN gateway path stays until then.
 
-## Not yet verified (check on first start)
+## Verified live (2026-10-31)
 
-- Geyser log shows NetherNet enabled, no RakNet warning, no "needs Java 26.3" warning (ViaVersion loaded).
-- `kubectl -n network get gateway envoy-internal -o yaml`: both `minecraft-bedrock` (UDP) and
-  `minecraft-bedrock-signaling` (TCP) must be `Programmed`, neither `Conflicted`/`ProtocolConflict`.
-- Whether WebRTC gameplay survives the Envoy UDP proxy (client source address is replaced).
-  If joins hang after the trust prompt, move UDP to a Cilium `LoadBalancer` Service
-  (`lbipam.cilium.io/ips`) for 19132 instead of the UDPRoute.
-- `SPIGET_RESOURCES=19254` (ViaVersion) downloads at start; Spiget outages block startup.
+- Geyser starts with NetherNet from system properties (`Transport set from system property: nethernet`,
+  built-in signaling on 19132). The flags are plain `-D` options in `jvmOpts` (`JVM_OPTS`): itzg's
+  `JVM_DD_OPTS` splits on **spaces**, so a comma list reached Geyser as one value and it stayed on RakNet.
+- `envoy-internal` accepts the TCP and UDP listeners on 19132 together (`Programmed`, no `ProtocolConflict`).
+- A Bedrock client on the LAN joins end to end through the Envoy TCP and UDP routes; WebRTC gameplay
+  survives the proxy. The `juice: Send failed, errno=101` warnings are failed ICE candidates and are harmless.
+- ViaVersion loads (`SPIGET_RESOURCES=19254`); Spiget outages would block startup.
+- The backup PVC's `storageClass` must sit at `mcbackup.persistence.storageClass`, not under `backupDir`
+  (the chart ignores the latter). A PVC's class is immutable, so fixing it needs the claim deleted first.
+
+Still unproven: restore test (below), Longhorn snapshot of `minecraft-pvc` before risky changes, and
+`Kubeworld` size on the 1Gi volume.
 
 ## Allowlist
 
-`ENFORCE_WHITELIST=TRUE`. Java names go in `minecraftServer.whitelist`. Floodgate (Bedrock)
-players have prefixed names: add them in-game or via RCON with Floodgate's `fwhitelist add <gamertag>`
-(confirm command in the Floodgate docs), and record who was added here:
+`ENFORCE_WHITELIST=TRUE`. Java names live in `minecraftServer.whitelist`; the list in Git is the
+starting point after a pod restart. Anything added by hand below is **lost on restart** unless it
+is also in Git.
 
-| Player | Platform | Added |
-|---|---|---|
+Bedrock players appear to the server with a `.` prefix (`smileitsjake` is `.smileitsjake`); the dot is
+Floodgate's, not part of the gamertag.
+
+### Adding a Bedrock player
+
+`fwhitelist add <gamertag>` fails for anyone the server has not met: Floodgate resolves the name through
+GeyserMC's API, which only knows gamertags it has seen
+(`Got an error from requesting the xuid of a Bedrock player: Unable to find user in our cache`).
+`rcon-cli` prints nothing either way, so read the log. Use the Floodgate UUID instead:
+
+1. Ask the player to try joining once. The log shows `Disconnecting ...: You are not whitelisted`.
+2. Turn enforcement off, have them join and stay connected:
+   `kubectl -n default exec deploy/minecraft -c minecraft -- rcon-cli "whitelist off"`
+3. Read their UUID from the log:
+   `kubectl -n default logs deploy/minecraft -c minecraft | grep 'Floodgate player logged in as .* joined'`
+   (`00000000-0000-0000-0009-<xuid in hex>`).
+4. Add the UUID and turn enforcement back on:
+   `rcon-cli "fwhitelist add <uuid>"`, then `rcon-cli "whitelist on"`. Do not skip `whitelist on`.
+5. Have them join again. A success logs `Floodgate player logged in as .<name> joined`.
+
+Do not use name-based `fwhitelist add`, and do not expect `whitelist list` to show Floodgate entries
+under a readable name.
+
+Record who was added (UUIDs are not secret but are tied to a person):
+
+| Player | Platform | UUID | Added |
+|---|---|---|---|
+| smileitsjake | Bedrock | `00000000-0000-0000-0009-01f38cdc5ceb` | 2026-10-31 |
+
+Open item: make the list survive restarts by putting Bedrock UUIDs in Git. `MicroGachou` is on the live
+list but not in `minecraftServer.whitelist`; it would be dropped on the next restart.
 
 ## Backups
 
