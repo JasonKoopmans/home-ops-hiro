@@ -6,6 +6,10 @@ metadata:
   name: &app ollama
 spec:
   interval: 1h
+  # The pod is NotReady until the ~2.5Gi model is pulled (readiness checks for
+  # it), so the first install waits on a download. 10m is the most the default
+  # poller wait allows without `waitStrategy: legacy`.
+  timeout: 10m
   chartRef:
     kind: OCIRepository
     name: ollama
@@ -53,7 +57,7 @@ spec:
               # Bounds the KV cache; article summaries are far below 4k tokens.
               OLLAMA_CONTEXT_LENGTH: "4096"
             probes:
-              liveness: &probes
+              liveness:
                 enabled: true
                 custom: true
                 spec:
@@ -64,7 +68,22 @@ spec:
                   periodSeconds: 30
                   timeoutSeconds: 5
                   failureThreshold: 3
-              readiness: *probes
+              # Ready only once the model is on the PVC, so a failed or still
+              # running pull shows as NotReady (no Service endpoints) instead of
+              # n8n getting "model not found" from a Ready pod.
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command:
+                      - /bin/sh
+                      - -c
+                      - ollama list | grep -q qwen3:4b
+                  initialDelaySeconds: 10
+                  periodSeconds: 15
+                  timeoutSeconds: 10
+                  failureThreshold: 3
             securityContext:
               allowPrivilegeEscalation: false
               capabilities:
@@ -98,7 +117,10 @@ spec:
             args:
               - |
                 until ollama list >/dev/null 2>&1; do sleep 2; done
-                ollama pull qwen3:4b
+                # Retry until the pull succeeds (registry down, disk full,
+                # interrupted download); the app container's readiness probe
+                # keeps the pod NotReady until the model exists.
+                until ollama pull qwen3:4b; do sleep 30; done
                 exec sleep infinity
             securityContext:
               allowPrivilegeEscalation: false
