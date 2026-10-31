@@ -9,8 +9,15 @@
 # are a full bucket ARN and a bucket/* object ARN, so they are valid as written.
 #
 # Mirrors kubernetes/apps/storage/minio/app/thanos-user-bootstrap-job.yaml almost exactly — same shape,
-# same known-good annotations. No DeleteObject in the policy (unlike Thanos/Loki): the app has no v1
-# blob-delete path by design (RecordingAnnotator docs/backup-recovery.md §2), so it's tightened out.
+# same known-good annotations. DeleteObject is granted on the blob prefix only (recordings/recordings/*): app
+# release 0.5.0 (RecordingAnnotator PR #38) deletes the blob from `DELETE /api/artifacts/{id}`, so without it that
+# call returns HTTP 500. Versioning is Enabled on the bucket, so a delete only adds a delete marker; nothing grants
+# DeleteObjectVersion, so versions cannot be purged by the app. The hourly mirror runs without `--remove`, so an
+# app-side delete never reaches the Object-Locked AWS copy.
+#
+# THIS JOB DOES NOT RE-RUN on the live instance (ssa: IfNotPresent) and its script skips a policy that already
+# exists, so editing the policy below changes only a rebuilt instance. Applying it live is a one-off
+# `mc admin policy create local recording-annotator-rw <file>` as root (it overwrites); see the PR that added this.
 #
 # Manual equivalent:
 #   mc alias set local http://recording-annotator-minio.storage.svc.cluster.local:9000 <root user> <root password>
@@ -79,6 +86,11 @@ spec:
                     "Effect": "Allow",
                     "Action": ["s3:GetObject", "s3:PutObject"],
                     "Resource": ["arn:aws:s3:::recordings/*"]
+                  },
+                  {
+                    "Effect": "Allow",
+                    "Action": ["s3:DeleteObject"],
+                    "Resource": ["arn:aws:s3:::recordings/recordings/*"]
                   }
                 ]
               }
