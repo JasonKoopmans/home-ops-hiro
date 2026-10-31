@@ -46,7 +46,7 @@ spec:
     # /usr/share/grafana/data/plugins-bundled.
     image:
       # renovate: datasource=docker depName=grafana/grafana
-      tag: 13.2.4
+      tag: 13.3.0
 
     # Root cause (see PR #598 for the full trail, including two wrong guesses
     # before this one): Grafana's own plugin loader registers
