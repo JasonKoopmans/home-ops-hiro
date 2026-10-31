@@ -50,14 +50,6 @@ metadata:
   name: recording-annotator-media-mirror
   namespace: storage
 spec:
-  # TEMPORARY, for the MinIO -> Silo swap (docs/runbook-minio-silo-swap-recording-annotator.md, M7/M11). The new
-  # pgsty/mc client has never run against the COMPLIANCE-locked AWS bucket, so the first run must be a by-hand
-  # `--dry-run` (M11); a real `:23` run that disagrees with the old copy about which objects differ would write new
-  # versions into a bucket nobody can delete from. Keep the safety in Git, not in an operator's memory: the merge
-  # lands the new image already suspended. Flux owns this field, so a live `kubectl patch` back to false is
-  # reverted at the next reconcile; the unsuspend is a one-line follow-up PR removing this line, after the dry-run
-  # is clean. Until then RecordingAnnotatorMediaMirrorNotSucceeding fires after 3h, which is the reminder.
-  suspend: true
   # Offset from the top of the hour so this does not contend with the app's own index-backup run.
   schedule: "23 * * * *"
   timeZone: ${TIMEZONE}
@@ -84,8 +76,9 @@ spec:
               # pgsty/mc (the maintained fork's client) replaced quay.io/minio/mc, which answers HTTP 401 to
               # anonymous pulls. Qualified in docs/silo-qualification.md (PR #902): this script replays verbatim
               # (pgsty/mc has /bin/sh, cat, sleep, expr, tr; no grep/sed/awk/tar; MC_CONFIG_DIR must be set, as below).
-              # The real AWS Object-Lock leg with this client is NOT yet tested: the runbook suspends this CronJob
-              # before the merge and does a `--dry-run` first, so do not unsuspend it ahead of that step.
+              # A by-hand `--dry-run` and a real run passed on 2026-10-30 (both transferred 0 B, listings equal). The first
+              # real WRITE into the locked bucket with this client is still untested, so after a new recording watch
+              # RecordingAnnotatorMediaMirrorNotSucceeding.
               image: docker.io/pgsty/mc:RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8
               command:
                 - /bin/sh
