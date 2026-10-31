@@ -1,5 +1,24 @@
 # Runbook: swap the RecordingAnnotator MinIO to Silo
 
+**Status: DONE 2026-10-30/31 (PR #899, follow-ups #903 and #925). In soak; §7 lists what is left.** Silo
+`RELEASE.2026-10-26` has served `recordings` since 2026-10-31 04:10Z (about 23:10 CDT on 10-30); the swap itself took
+seconds, the whole window about 80 minutes. Result: `format.json` byte-identical, 83 objects / 2,030,030,689 B
+identical before and after, admin export diff only new Silo defaults, mirror dry-run and real run clean, a genuine
+upload (pocket-bridge) and an app delete (204, delete marker) both verified. Things this run taught that the text
+below now reflects or that you should know:
+
+- The app Deployment is `recording-annotator-app` (the HelmRelease is `recording-annotator`).
+- The toolbox Pod in §A and the smoke script need a **1Gi** memory limit: the smoke script's `$(cat /tmp/big)`
+  comparison of two 40 MiB files was OOM-killed at 256Mi (no `cleanup done`, scratch bucket left behind until the rerun).
+- `hiro-cmp-01` had lost both pinned Silo images between the Friday pre-pull and the window (kubelet GC). Always
+  re-verify §B1 at T-0 and re-pull what is missing.
+- The scheduled `:23` mirror was suspended for about 7 hours (suspend in Git until #925), so
+  `RecordingAnnotatorMediaMirrorNotSucceeding` fired after 3h as designed; a by-hand Job made `--from=cronjob`
+  updates `lastSuccessfulTime` and clears it.
+- The live `recording-annotator-rw` policy got `s3:DeleteObject` on `recordings/recordings/*` by the one-off Pod in #903.
+- The playback baseline (§B4) was never taken before the swap; only post-swap headers exist (206, `Content-Range`, ETag,
+  CORS echo, preflight 204).
+
 Instance: `kubernetes/apps/storage/recording-annotator-minio` (dedicated, holds the real recordings).
 Sibling: the shared Thanos/Loki instance has its own runbook, `runbook-minio-silo-swap-shared.md` (same section
 skeleton; written by another session, so check it for anything that must be done in lockstep: the Renovate rule and
@@ -746,7 +765,7 @@ spec:
         - {name: SK, valueFrom: {secretKeyRef: {name: $sec, key: $k2}}}
       securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
       volumeMounts: [{name: tmp, mountPath: /tmp}]
-      resources: {requests: {cpu: 10m, memory: 64Mi}, limits: {memory: 256Mi}}
+      resources: {requests: {cpu: 10m, memory: 64Mi}, limits: {memory: 1Gi}}   # 256Mi OOM-killed the smoke script
   volumes: [{name: tmp, emptyDir: {sizeLimit: 512Mi}}]
 EOF
   until [ "$(kubectl -n storage get pod "$name" -o jsonpath='{.status.phase}')" = Succeeded ] || \
