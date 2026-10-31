@@ -44,13 +44,15 @@ spec:
                 NER_ROOT="/work/org/apache/tika/parser/ner/opennlp"
                 mkdir -p "$${NER_ROOT}"
 
-                wget -O "$${NER_ROOT}/ner-person.bin" https://opennlp.sourceforge.net/models-1.5/en-ner-person.bin
-                wget -O "$${NER_ROOT}/ner-location.bin" https://opennlp.sourceforge.net/models-1.5/en-ner-location.bin
-                wget -O "$${NER_ROOT}/ner-organization.bin" https://opennlp.sourceforge.net/models-1.5/en-ner-organization.bin
-                wget -O "$${NER_ROOT}/ner-date.bin" https://opennlp.sourceforge.net/models-1.5/en-ner-date.bin
-                wget -O "$${NER_ROOT}/ner-time.bin" https://opennlp.sourceforge.net/models-1.5/en-ner-time.bin
-                wget -O "$${NER_ROOT}/ner-percentage.bin" https://opennlp.sourceforge.net/models-1.5/en-ner-percentage.bin
-                wget -O "$${NER_ROOT}/ner-money.bin" https://opennlp.sourceforge.net/models-1.5/en-ner-money.bin
+                # opennlp.sourceforge.net/models-1.5/ returns 404 (found 2026-10-31); the
+                # SourceForge file-release host still serves the same files.
+                wget -O "$${NER_ROOT}/ner-person.bin" https://downloads.sourceforge.net/project/opennlp/models-1.5/en-ner-person.bin
+                wget -O "$${NER_ROOT}/ner-location.bin" https://downloads.sourceforge.net/project/opennlp/models-1.5/en-ner-location.bin
+                wget -O "$${NER_ROOT}/ner-organization.bin" https://downloads.sourceforge.net/project/opennlp/models-1.5/en-ner-organization.bin
+                wget -O "$${NER_ROOT}/ner-date.bin" https://downloads.sourceforge.net/project/opennlp/models-1.5/en-ner-date.bin
+                wget -O "$${NER_ROOT}/ner-time.bin" https://downloads.sourceforge.net/project/opennlp/models-1.5/en-ner-time.bin
+                wget -O "$${NER_ROOT}/ner-percentage.bin" https://downloads.sourceforge.net/project/opennlp/models-1.5/en-ner-percentage.bin
+                wget -O "$${NER_ROOT}/ner-money.bin" https://downloads.sourceforge.net/project/opennlp/models-1.5/en-ner-money.bin
 
                 cd /work
                 jar cf /tika-extras/opennlp-ner-models.jar org
