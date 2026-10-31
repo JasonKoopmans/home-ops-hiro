@@ -150,6 +150,12 @@ spec:
             summary: OPNsense firewall state table usage is high
             description: Firewall state table usage on {{ $$labels.instance }} is above 85% for more than 15 minutes. Currently {{ $$value | printf "%.1f" }}%.
 
+        # The next two rules cannot fire: as of 2026-10-28 the opnsense-telegraf
+        # target (192.168.1.1:9273) exports no ping_* series, so both expressions
+        # evaluate empty, which looks the same as healthy. The 2026-10-26 WAN
+        # outage raised nothing for that reason. Replace them with a probe
+        # that does exist (see docs/revisit-register.md #18) rather than
+        # tuning thresholds here.
         - alert: OpnSenseGatewayPacketLossHigh
           expr: avg_over_time(ping_loss_percent{job="opnsense-telegraf"}[10m]) > 5
           for: 10m
