@@ -12,7 +12,7 @@ spec:
   values:
     image:
       repository: ghcr.io/itzg/minecraft-server
-      tag: 2026.10.0-java25
+      tag: 2026.10.1-java25
     # Memory/CPU are informed guesses for ~10 players (Paper + Geyser + ViaVersion),
     # not measured: revisit with max_over_time(container_memory_working_set_bytes) after a
     # week of real play. Heap is explicit (MEMORY) so it cannot drift with the limit.
