@@ -94,6 +94,18 @@ spec:
       guaranteedEngineManagerCPU: "10"
       guaranteedReplicaManagerCPU: "10"
       nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+      # The default, block-if-contains-last-replica, keeps a node's
+      # instance-manager PDB (0 disruptions) for as long as the node holds the
+      # only replica of ANY volume, attached or not. Single-replica volumes
+      # (postgres-1/2/3, thanos-compactor-data, metube-downloads) therefore hang
+      # every drain of their node until the drain times out. This policy lets the
+      # drain through once the volume is detached (its replica stopped), which
+      # the drain's own pod eviction does. Volumes with 2+ replicas are
+      # unaffected. Cost: that single-replica workload is down until the node is
+      # back (postgres keeps serving from its other two instances).
+      # Chart defaults only seed a fresh install: the live Setting
+      # (settings.longhorn.io node-drain-policy) must be checked after a merge.
+      nodeDrainPolicy: allow-if-replica-is-stopped
       orphanAutoDeletion: true
       # Deliberately FALSE (also the Longhorn default; stated explicitly to
       # record the decision). This is the global fallback for volumes whose

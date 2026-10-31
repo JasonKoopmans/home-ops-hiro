@@ -179,6 +179,26 @@ if kubectl get crd volumes.longhorn.io >/dev/null 2>&1; then
         -o custom-columns=NAME:.metadata.name,NODE:.spec.nodeID,MODE:.status.currentState 2>/dev/null \
         | awk '$3=="starting" || $3=="stopping" {c++} END {print c+0}')"
     [[ "${rebuilding}" -gt 0 ]] && warn "${rebuilding} Longhorn replica(s) are starting/stopping"
+    # A volume whose only replica sits on the target keeps the node's
+    # instance-manager PDB (and so the drain) pinned under the default
+    # node-drain-policy, block-if-contains-last-replica.
+    drain_policy="$(kubectl get settings.longhorn.io node-drain-policy -n "${LONGHORN_NAMESPACE}" -o jsonpath='{.value}' 2>/dev/null || true)"
+    last_here="$(kubectl get replicas.longhorn.io -n "${LONGHORN_NAMESPACE}" --no-headers \
+        -o custom-columns=VOL:.spec.volumeName,NODE:.spec.nodeID 2>/dev/null \
+        | awk -v n="${NODE}" '{c[$1]++; if ($2==n) h[$1]=1} END {for (v in h) if (c[v]==1) print v}' | sort)"
+    if [[ -n "${last_here}" ]]; then
+        names="$(printf '%s\n' "${last_here}" | paste -sd' ' -)"
+        case "${drain_policy}" in
+            block-if-contains-last-replica|block-for-eviction-if-contains-last-replica|block-for-eviction)
+                block "node-drain-policy=${drain_policy}: ${NODE} holds the only replica of ${names} -- the drain will hang on the instance-manager PDB (use allow-if-replica-is-stopped, or move the replica first)" ;;
+            "")
+                warn "could not read Longhorn node-drain-policy; ${NODE} holds the only replica of ${names}" ;;
+            *)
+                warn "${NODE} holds the only replica of ${names}: their pods stay down until ${NODE} is back (policy ${drain_policy})" ;;
+        esac
+    else
+        ok "no volume has its only replica on ${NODE}"
+    fi
 else
     warn "Longhorn CRDs not found -- volume health skipped"
 fi

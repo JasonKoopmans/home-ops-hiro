@@ -27,13 +27,20 @@ spec:
                     labelSelector:
                       matchLabels:
                         app.kubernetes.io/name: envoy
+          # Hard spread, per Gateway. ScheduleAnyway co-located two of a gateway's
+          # three pods on one node, so draining it left 1 of 3 serving. One
+          # EnvoyProxy serves both gateways, so a hard anti-affinity on the shared
+          # name label (6 pods, 5 nodes) cannot work; matchLabelKeys adds each
+          # pod's own gateway name to the selector, spreading per gateway.
           topologySpreadConstraints:
             - maxSkew: 1
               topologyKey: kubernetes.io/hostname
-              whenUnsatisfiable: ScheduleAnyway
+              whenUnsatisfiable: DoNotSchedule
               labelSelector:
                 matchLabels:
                   app.kubernetes.io/name: envoy
+              matchLabelKeys:
+                - gateway.envoyproxy.io/owning-gateway-name
         container:
           resources:
             requests:
