@@ -34,8 +34,7 @@
     "policyType": "postureExceptionPolicy",
     "actions": ["alertOnly"],
     "resources": [
-      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "test", "namespace": "default" } },
-      { "designatorType": "Attributes", "attributes": { "kind": "Pod", "name": "multus-test-pod", "namespace": "default" } }
+      { "designatorType": "Attributes", "attributes": { "kind": "Deployment", "name": "test", "namespace": "default" } }
     ],
     "posturePolicies": [
       { "controlID": "C-0271" }
