@@ -129,6 +129,10 @@ failure counters. To retry without a spec change, after confirming the cause is 
 flux reconcile hr <name> -n <ns> --reset --force
 ```
 
+A release that has not completed an upgrade in weeks can hide a second fault. The minio chart's post-upgrade hook could not
+pull its image (2026-10-04), so the first upgrade to complete in a month still timed out and rolled back. Before you
+unstick one, read the chart's hooks and images, not after the retry fails.
+
 ## 5. Confirm it cleared
 
 The object turns Ready, its `ready!="True"` series disappears, and the alert resolves about 15 minutes later

@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-This is a **GitOps-managed homelab** mono-repository deploying a bare-metal Kubernetes cluster. The cluster runs on **Talos Linux** across 4 Proxmox-hosted nodes and is managed entirely through **Flux CD**. All changes to the cluster flow through Git — if it's not committed here, it doesn't exist in the cluster.
+This is a **GitOps-managed homelab** mono-repository deploying a bare-metal Kubernetes cluster. The cluster runs on **Talos Linux** across 5 Proxmox-hosted nodes and is managed entirely through **Flux CD**. All changes to the cluster flow through Git — if it's not committed here, it doesn't exist in the cluster.
 
 **Core stack:** Talos Linux · Flux CD · Cilium (CNI) · Envoy Gateway · Cloudflared · cert-manager · external-dns · Longhorn (storage) · SOPS + age (secrets) · Renovate (dependency updates)
 
@@ -20,6 +20,7 @@ This repo started from the [onedr0p/cluster-template](https://github.com/onedr0p
 ├── .github/             # GitHub Actions workflows, labels, labeler config
 ├── .taskfiles/          # Task runner definitions (used with `task` CLI)
 ├── bootstrap/           # Cluster bootstrap resources (helmfile.d, sops-age)
+├── docs/                # Runbooks, designs, evidence. Start at docs/README.md (the map); do not read the folder wholesale
 ├── kubernetes/
 │   ├── apps/            # ← All application workloads live here, grouped by namespace
 │   ├── components/      # Reusable Kustomize components (sops/cluster-secrets)
@@ -87,6 +88,7 @@ kubernetes/apps/<namespace-group>/
   - OCI charts (including the bjw-s **app-template**): an `OCIRepository` in `ocirepository.yaml`, **named after the app** (never a shared name like `app-template` — a shared name would be co-owned by several Flux Kustomizations and pruned when any one app is removed). The HelmRelease references it via `spec.chartRef`.
   - Classic Helm repos (longhorn, loki, kube-prometheus-stack, minio, …): a `HelmRepository` in `helmrepository.yaml` and `spec.chart` in the HelmRelease.
 - Lightweight/self-hosted apps use the **bjw-s app-template** chart; well-known projects use their **upstream Helm charts**. Follow whichever pattern similar apps already use.
+- **A one-shot Job (bootstrap, migration) gets `kustomize.toolkit.fluxcd.io/ssa: IfNotPresent`** alongside `prune: "false"`. A Job's `spec.template` is immutable, so kustomize-controller's dry-run on every reconcile fails against the live object and flips the app's Kustomization to `Ready=False` for good after the Job's first success. The annotation makes it skip the Job once it exists (`storage/minio`'s bootstrap Jobs, #324/#325).
 - Charts that ship CRDs the app itself depends on sometimes split them into a separate `helmrelease-crds.yaml` (see `mariadb-operator`, `kube-prometheus-stack`) with `dependsOn` ordering inside the app directory.
 
 **Known exceptions** (leave these as-is):
@@ -193,16 +195,19 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 
 ## Storage
 
-- **Longhorn** is the only storage provisioner. Volumes are backed by dedicated disks on each node (Talos `UserVolumeConfig` in `talos/patches/global/machine-volumes.yaml`).
-- Backups target **AWS S3** (`s3://hiro-longhorn-backups@us-east-1/`), not the in-cluster MinIO — backup configuration lives in `kubernetes/apps/storage/longhorn-system/app/default-backup-target.yaml`. MinIO is an application object store (Thanos, Loki), not the Longhorn backupstore; do not conflate the two when reasoning about what survives a cluster loss.
+- **Longhorn** is the only storage provisioner. Volumes are backed by dedicated disks on each node (Talos `UserVolumeConfig` in `talos/all/05-machine-volumes.yaml`).
+- Backups target **AWS S3** (`s3://hiro-longhorn-backups@us-east-1/`), not the in-cluster MinIO — backup configuration lives in `kubernetes/apps/storage/longhorn-system/app/default-backup-target.yaml`. MinIO is an application object store (Thanos, Loki), not the Longhorn backupstore; do not conflate the two when reasoning about what survives a cluster loss. Telemetry in MinIO (Thanos, Loki) is deliberately not backed up to S3: it is accepted as loseable until deep history matters. Where MinIO later holds general application data, the intended durability is its own S3 sync applied selectively by policy, not Longhorn backups of its PVC.
 - **Several storage classes exist** (defined in `kubernetes/apps/storage/longhorn-system/app/storageclasses.yaml`). Choose by redundancy and backup needs:
 
   | Class | Replicas | Recurring backups | Use for |
   |---|---|---|---|
   | `longhorn` (default) | 3 | yes | general persistent data |
   | `longhorn-1` / `longhorn-2` | 1 / 2 | yes | lower-redundancy data |
-  | `longhorn-no-backup` / `longhorn-1-no-backup` / `longhorn-2-no-backup` | 3 / 1 / 2 | no | reproducible or bulk data (caches, object-store buckets, metrics) |
-  | `longhorn-tsdb` | see file | reduced snapshots | Prometheus TSDB-style write-heavy volumes |
+  | `longhorn-no-backup` / `longhorn-1-no-backup` / `longhorn-2-no-backup` | 3 / 1 / 2 | no (daily snapshot, retain 2) | reproducible or bulk data (caches, object-store buckets) |
+  | `longhorn-tsdb` | 2 | no (daily snapshot, retain 2) | continuously-written volumes whose durable copy is in object storage (Prometheus, Loki) |
+  | `longhorn-scratch` | 1 | no (no snapshots either) | disposable working data rewritten every run (thanos-compactor scratch, metube); only a trim job touches it |
+
+- **A class's `recurringJobSelector` applies only when the PVC is provisioned.** It must name a real group: an empty `"[]"` does not opt out, because Longhorn then files the volume in the `default` group (6-hourly snapshot plus a daily backup). Changing a selector on an existing class needs `kustomize.toolkit.fluxcd.io/force: Enabled` on the StorageClass (its parameters are immutable), and volumes created earlier keep their old `recurring-job-group.longhorn.io/*` label until you relabel them: `kubectl get volumes.longhorn.io -n storage <vol> -o json | jq .metadata.labels` shows the group.
 
 - Declare PVCs in a standalone `pvc.yaml` with an explicit `storageClassName` (don't rely on the default class silently).
 - **A single-replica Deployment on a ReadWriteOnce volume must not roll.** With `RollingUpdate` (the default in some upstream charts, e.g. minio: `maxSurge: 100%`, `maxUnavailable: 0`) the new pod can land on another node, cannot attach the volume the old pod still holds, sits in `ContainerCreating` until Helm times out, and Flux rolls back. Set the chart's strategy to `Recreate` up front (minio: `deploymentUpdate: {type: Recreate}`). app-template Deployments already default to `Recreate`; check a live one with `kubectl get deploy -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,STRATEGY:.spec.strategy.type`.
@@ -378,6 +383,7 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
 ## Renovate & Dependency Updates
 
 - Renovate is configured via `.renovaterc.json5` and runs on Saturdays. PR creation is rate-limited (`prHourlyLimit: 4`) so a week's updates roll out over hours, not minutes: 30 merges in under five minutes once piled their image pulls onto one node's slow disk and stalled three upgrades. Do not re-add `:disableRateLimiting`.
+- **The Saturday wave is a hazard for Saturday maintenance windows.** The schedule has no `timezone`, so it is UTC: roughly 26-33 PRs between about 01:50Z and 22:30Z, up to 4 an hour, most merging within 15 minutes (automerge is gated only on Flux Local), cluster workloads included. Before a Saturday window or its Friday-evening prep, have the owner pause Renovate in the Mend portal, or sweep at T-0: `gh pr list --author app/renovate --state open`, `gh pr merge --disable-auto <n>` on each, and confirm nothing merged in the last 30 minutes.
 - It creates PRs for Helm chart bumps, container image updates, and GitHub Action digests; Flux-managed `OCIRepository` tags and `chart:` versions are picked up automatically by the flux manager.
 - For version strings Renovate can't infer, use hint comments on the line above:
   ```yaml

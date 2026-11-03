@@ -61,6 +61,9 @@ A pod with value `1` holds the lease. Anything shorter than the step (a 22 s lea
 `actual_state_of_world` and `desired_state_of_world` series should both equal `count(volumeattachments)`. Dump node
 objects only if they disagree: each is ~6k tokens, mostly the image list.
 
+kube-controller-manager exits when it loses its lease, so a restart count or `Last State` in `kubectl_describe` dates a
+leader-election loss, and restarts after an apiserver or etcd hiccup are expected (2026-10-17 and 2026-10-27 00:01 both).
+
 ## Cluster MCP quirks
 
 - `kubectl_get` with `output: json` or `custom` on a **list** returns only name, status and creation time. Use `yaml` for

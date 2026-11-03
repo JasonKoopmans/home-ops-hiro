@@ -11,6 +11,11 @@ mechanisms here (Longhorn recurring-job defaults and its scheduled-capacity
 admission check, Minio single-drive-mode quirks, PVC vs. Deployment resize
 patterns) are likely to recur elsewhere in this cluster.
 
+**Update 2026-08-01: the capacity half is closed too.** The `minio` PVC is 120Gi (21% used) and the bucket quotas are
+100GiB (`observability-thanos`) and 20GiB (`observability-loki`), landed in commits `8d935fb` and `6f06773`. Everything
+below about a full disk and a reverted 50Gi PVC is history; re-check `df -h /export` in the pod for current numbers.
+The shared MinIO is being swapped for Silo: [runbook-minio-silo-swap-shared.md](runbook-minio-silo-swap-shared.md).
+
 ## Timeline / root causes found and fixed
 
 1. **Longhorn snapshot-chain bloat** (`longhorn-2-no-backup` class). Root

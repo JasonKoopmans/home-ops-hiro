@@ -4,6 +4,8 @@ Shared agent conventions (repo structure, Flux patterns, app checklists, style r
 
 @.github/copilot-instructions.md
 
+Long-form docs (runbooks, designs, evidence) are indexed in [docs/README.md](docs/README.md): open the one row you need rather than reading `docs/`.
+
 ## Claude Code specifics
 
 ### Verifying changes before pushing

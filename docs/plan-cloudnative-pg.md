@@ -236,7 +236,7 @@ These were set without measurement because no workload exists yet. They are
 starting points chosen to be slightly generous, **not** tuned values. Each needs
 ~14d of real runtime data before it means anything.
 
-See [[local-render-and-memory-sizing]] for the measurement method — in short,
+The measurement method is in the instructions' Resource Requests & Limits section — in short,
 `max_over_time(container_memory_working_set_bytes{...}[14d])` via Thanos, then
 size limits at roughly 2x observed peak, because a 30s scrape cannot sample the
 spike that actually triggers an OOM kill.
@@ -276,7 +276,8 @@ with no CPU limit a burst is not throttled. This was done six days ahead of the
 slow a pod under node contention, not kill it). **Memory is untouched and still
 a guess**, and `shared_buffers` still waits on the same data. The revisit on
 2026-10-10 should re-read the primary's CPU p99 over the full 14d and check that
-it still sits well under 250m.
+it still sits well under 250m. A change to the shared `resources` block restarts the primary in place
+(`primaryUpdateMethod` defaults to `restart`), not a switchover.
 
 **No CPU limits anywhere**, by repo convention (74 memory limits vs. 12 CPU
 limits across `kubernetes/apps/`). CFS throttling is particularly bad for a
@@ -396,14 +397,13 @@ timestamp going stale** rather than on the existence of a failure object.
 ### Design constraints
 
 - **Alerts must be able to self-clear.** Key on last-success age, never on object
-  existence — see [[alerts-must-be-able-to-self-clear]]. `kube_job_failed`-style
+  existence (rule in the instructions' Alerting section). `kube_job_failed`-style
   latching is exactly the trap to avoid here.
 - **Watch the `absent()` trap** for a metric that has never reported a success.
 - **Noise is the known failure mode in this cluster, not missed detection** — see
-  [[alert-noise-not-detection-is-the-gap]]. Check what already alerts before
-  adding rules.
-- Alerts route to Telegram via the existing shared bot — see
-  [[telegram-alerting-identity]].
+  the instructions' Alerting section. Check what already alerts before adding rules.
+- Alerts route to Telegram via the existing shared bot (routing is in
+  `alertmanagerconfig.yaml`).
 
 ### Metrics already available (confirmed from the PR #470 render)
 
