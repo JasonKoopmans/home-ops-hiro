@@ -30,17 +30,6 @@ spec:
     # unpullable default. Keep disableHooks: the upgrade that swaps the server image
     # must not depend on a second image pull succeeding.
     disableHooks: true
-    # TEMPORARY, for the MinIO -> Silo swap and its soak (docs/runbook-minio-silo-swap-shared.md,
-    # decision D1). cluster-apps forces `remediateLastFailure: true` and a values override
-    # cannot beat that patch, so a Silo pod that fails to become Ready would make Flux
-    # roll the release back to quay.io/minio/minio, an image that no registry serves and
-    # that is cached on only 2 of 5 nodes, onto a volume Silo may already have written to.
-    # Rollback only follows a failed upgrade action; with the wait off the upgrade is
-    # "done" once the Deployment is applied, so a broken Silo pod stays broken IN PLACE
-    # (logs intact, old binary never touches the volume) and the operator picks the
-    # rollback rung. Cost: the HelmRelease reads Ready even if the pod is not, so watch the
-    # pod and MinioDown, not Flux. Remove these two lines after the soak.
-    disableWait: true
     remediation:
       retries: 3
   values:
