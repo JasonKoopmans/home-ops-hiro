@@ -45,11 +45,14 @@ spec:
     # revocation metadata (none exists on this instance; the clone rehearsal reopened cleanly). See "Rollback ladder"
     # in the runbook before reverting this block.
     #
-    # MERGE ORDER: merging starts a Recreate upgrade on the volume holding the only copy of the recordings. The
-    # cluster-apps patch (kubernetes/flux/cluster/ks.yaml) forces upgrade remediation (rollback to the old image,
-    # unpullable except on hiro-cmp-03/05) and a `remediation:` override in THIS file would be overwritten by it, so
-    # the guard was `upgrade.disableWait` (removed after the soak), which that patch does not touch (runbook D1). Runbook M4/M7: suspend
-    # this HelmRelease and the mirror CronJob BEFORE merging, then `flux resume` is the trigger.
+    # MERGE ORDER / ROLLBACK: this volume holds the only copy of the recordings. The swap-time
+    # guard (`upgrade.disableWait`) was removed after the soak (PR #960), so Flux CAN now roll a
+    # failed upgrade back (cluster-apps forces remediateLastFailure; a `remediation:` override in
+    # THIS file would be overwritten by that patch) onto the previous Silo revision, on a volume the
+    # newer binary may have written to. Before any Silo bump: take a Longhorn snapshot of the
+    # volume, `flux suspend hr recording-annotator-minio -n storage` and suspend the mirror
+    # CronJob, then `flux resume` is the trigger; watch the pod, not Flux. Runbook:
+    # docs/runbook-minio-silo-swap-recording-annotator.md.
     #
     # tag@digest below (multi-arch index digest): a community fork's tag is not a promise, the digest is. Keep
     # `repository:` and `tag:` adjacent. Renovate does NOT track these two keys on `main` today: the
