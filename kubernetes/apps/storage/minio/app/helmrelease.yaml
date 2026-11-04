@@ -30,17 +30,6 @@ spec:
     # unpullable default. Keep disableHooks: the upgrade that swaps the server image
     # must not depend on a second image pull succeeding.
     disableHooks: true
-    # TEMPORARY, for the MinIO -> Silo swap and its soak (docs/runbook-minio-silo-swap-shared.md,
-    # decision D1). cluster-apps forces `remediateLastFailure: true` and a values override
-    # cannot beat that patch, so a Silo pod that fails to become Ready would make Flux
-    # roll the release back to quay.io/minio/minio, an image that no registry serves and
-    # that is cached on only 2 of 5 nodes, onto a volume Silo may already have written to.
-    # Rollback only follows a failed upgrade action; with the wait off the upgrade is
-    # "done" once the Deployment is applied, so a broken Silo pod stays broken IN PLACE
-    # (logs intact, old binary never touches the volume) and the operator picks the
-    # rollback rung. Cost: the HelmRelease reads Ready even if the pod is not, so watch the
-    # pod and MinioDown, not Flux. Remove these two lines after the soak.
-    disableWait: true
     remediation:
       retries: 3
   values:
@@ -56,10 +45,14 @@ spec:
     # env, `/minio/*` routes, `minio_*` metrics and the `.minio.sys` layout are kept.
     #
     # THIS IS A ONE-WAY UPGRADE. Once Silo has written persistent IAM revocation
-    # metadata into `.minio.sys`, a rolling downgrade is unsupported, so never let
-    # Flux "roll back" this release: see docs/runbook-minio-silo-swap-shared.md before
-    # merging, and before touching these two lines afterwards. Renovate bumps are held
-    # for approval on the Dependency Dashboard for the same reason (.renovaterc.json5).
+    # metadata into `.minio.sys`, a rolling downgrade is unsupported. The swap-time guard
+    # (`upgrade.disableWait`) was removed after the soak (PR #960), so Flux CAN now roll
+    # a failed upgrade back (cluster-apps forces remediateLastFailure; retries: 3 below)
+    # onto the previous Silo revision, on a volume the newer binary may have written to.
+    # Before approving a Silo bump from the Dependency Dashboard (.renovaterc.json5 holds
+    # them for this reason): take a Longhorn snapshot and `flux suspend hr minio -n storage`
+    # first, then resume as the trigger and watch the pod, not Flux. See
+    # docs/runbook-minio-silo-swap-shared.md section 6.
     #
     # Tag AND index digest are pinned (`<tag>@sha256:<digest>`); the chart renders
     # `image: "<repository>:<tag>"`, so the string passes through unchanged. Digest is
@@ -149,7 +142,7 @@ spec:
     # section 9) Silo peaked at 407-428Mi against 310Mi for the old binary on the same
     # data, at little client load, so Silo's peak under Thanos/Loki traffic is UNMEASURED
     # and could sit near the old limit. Raised to ~2x the old peak (repo convention) so an
-    # OOM cannot be the swap's failure mode; with `disableWait` Flux would not report it.
+    # OOM cannot be the swap's failure mode.
     # Revisit: after the first week on Silo, read max_over_time(container_memory_working_set_bytes
     # {namespace="storage",pod=~"minio-.*",container="minio"}[7d]) and size to ~2x that.
     resources:

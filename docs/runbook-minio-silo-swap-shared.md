@@ -1,5 +1,7 @@
 # Runbook: swap the shared MinIO (Thanos + Loki) to Silo
 
+> **Post-soak status (2026-11-04, PR #960):** `upgrade.disableWait` is gone from the HelmRelease, so every mention of it below (D1d, "the wait is off", "Flux will not roll back") describes the swap window only. Flux can now roll a failed upgrade back onto the previous Silo revision: before a Silo bump take a Longhorn snapshot and `flux suspend hr` first.
+
 Instance `storage/minio` (Deployment `minio`, PVC `minio`, 120Gi, class `longhorn-2-no-backup`). The dedicated
 RecordingAnnotator instance has its own runbook, `docs/runbook-minio-silo-swap-recording-annotator.md`; nothing here
 touches it. Manifest changes: draft PR #900. **Merging that PR is the trigger** (section 4, M6).
