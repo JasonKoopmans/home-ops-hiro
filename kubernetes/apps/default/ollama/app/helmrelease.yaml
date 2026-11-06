@@ -98,8 +98,12 @@ spec:
                 drop: ["ALL"]
             resources:
               requests:
-                # Measured 2026-11-06: one generation held ~2.3 CPUs for hours.
-                cpu: 1500m
+                # 1000m, not the ~2.3 CPUs it burned: cmp-01 has 2.95 allocatable
+                # and ~1.2 requested by others, and 1500m would cross the 85%
+                # NodeCpuRequestsHigh line (91%) and not fit on cmp-02 at all.
+                # The limit below, not the request, bounds usage. Revisit with
+                # docs/revisit-register.md #20.
+                cpu: 1000m
                 memory: 4Gi
               limits:
                 # DELIBERATE CPU LIMIT (exception to the repo convention): CPU
