@@ -60,8 +60,9 @@ Not now, but not ruled out. Scrutiny on 2026-11-06:
   double items/hour, if each has its own cores. Both pods must not share a node (they would fight for the same ~2 CPUs).
 - Capacity today (allocatable / requested CPU): cmp-01 2.95 / 1.68, cmp-02 2.95 / 1.67, cmp-05 3.95 / 2.18. With
   the old thinking model and a 1500m request nothing fit but cmp-01. At 1000m, cmp-01 and cmp-02 take one each
-  (~74% requested, under the 85% alert); cmp-05 was added to the node affinity (user call: inference does no steady disk I/O, and cmp-05 has the most free CPU and RAM); its slow
-  system disk only hurts the one-time image pull and model load. Memory is the tighter limit: MemAvailable was 1.6Gi on cmp-01 (with the
+  (~74% requested, under the 85% alert); cmp-05 (most free CPU and RAM; inference does no steady disk I/O) was tried and dropped: the 3.4Gi image is not cached
+  there and pulls on cmp-05 outrun the 10m HelmRelease timeout (#16). Allow it by pre-pulling `docker.io/ollama/ollama:0.40.13`
+  on cmp-05 first, then adding it to the affinity. Memory is the tighter limit: MemAvailable was 1.6Gi on cmp-01 (with the
   leaking pod at 5Gi) and 3.0Gi on cmp-02 at observation time, vs ~3.3Gi per pod.
 - Each pod needs its own model volume (RWO), so this is a StatefulSet with `volumeClaimTemplates` or a second
   release, not `replicas: 2` on the current Deployment. n8n reaches them through one Service; kube-proxy-style

@@ -28,10 +28,11 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           # CPU-only inference: keep it off the 2-CPU nodes (cmp-03/04), whose
-          # CPU is already dominated by Longhorn I/O. cmp-05 is allowed (4 CPU,
-          # most free CPU/RAM): its slow system disk only slows the one-time
-          # image pull and model load, and steady-state inference does no disk
-          # I/O. Revisit if cmp-05 shows disk or etcd trouble while this runs.
+          # CPU is already dominated by Longhorn I/O, and off cmp-05 for now.
+          # Inference itself does no disk I/O and cmp-05 has the most free CPU,
+          # but the 3.4Gi ollama image is not cached there and pulls on that
+          # node outrun the 10m HelmRelease timeout (revisit-register #16).
+          # To allow it: pre-pull the image on cmp-05 first (docs/ollama-oom-rca.md).
           affinity:
             nodeAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
@@ -39,7 +40,7 @@ spec:
                   - matchExpressions:
                       - key: kubernetes.io/hostname
                         operator: In
-                        values: ["hiro-cmp-01", "hiro-cmp-02", "hiro-cmp-05"]
+                        values: ["hiro-cmp-01", "hiro-cmp-02"]
         containers:
           app:
             image:
