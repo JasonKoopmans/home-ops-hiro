@@ -16,7 +16,7 @@ CPU-only Ollama (`default/ollama`) serving n8n's Readwise feed classification. A
 ## Root cause
 
 1. **Thinking model on CPU.** Every classification generated thousands of reasoning tokens at ~1 tok/s. Runtime per item
-   was tens of minutes. `--context-shift` (Ollama default) lets a 4k context generate indefinitely.
+   was tens of minutes. The runner is started with `--context-shift` (seen in the logged `starting llama-server cmd=`), which lets a 4k context keep generating past its window.
 2. **n8n queues many concurrent requests** against `OLLAMA_NUM_PARALLEL=1`, so most of each request's wall time was
    queue wait; the CPU never idled.
 3. **llama-server host prompt cache.** Each finished prompt state (~500Mi at 3.6k tokens) is kept in RAM up to a default
@@ -37,7 +37,10 @@ bottleneck is CPU, not request concurrency, so do not scale out on this cluster.
 
 ## Verify after rollout
 
-Env passthrough is not proof the settings work; check effective behaviour:
+Checked on the live 0.40.13 pod before merge: `llama-server --help` lists `LLAMA_ARG_CACHE_RAM` and `LLAMA_ARG_THREADS`
+as env equivalents of `--cache-ram` / `--threads`, and the running runner's `/proc/<pid>/environ` carries the container's
+`HOME` and `OLLAMA_*` (Ollama does not filter the environment). What is not yet proven is the effect, so check
+behaviour after rollout:
 
 - The runner argv Ollama logs at start (`starting llama-server cmd=...`, 2026-11-06 13:19) carried no `--threads` and
   no `--cache-ram`, so the `LLAMA_ARG_*` env vars are not overridden by a flag. Re-read that line after rollout: if a
