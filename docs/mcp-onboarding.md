@@ -576,6 +576,30 @@ needed.
 `kustomization.yaml`, so placeholder manifests there would break `task validate`.
 They live in `.taskfiles/mcp/resources/` instead.
 
+## Per-server notes
+
+Facts that belong to one image, verified when the server was onboarded. Re-check them after a version bump.
+
+**mcp-proxmox** (`ProxmoxMCP-Plus` 0.5.14, 2026-08-15). 47 tools and no read-only toggle, so scope the API token, not the manifest (see the PVEAuditor note under *Security posture*).
+
+- Run with `PROXMOX_MCP_MODE=mcp-http` and `MCP_TRANSPORT=STREAMABLE_HTTP`. The default mode is an OpenAPI bridge on 8811, a different surface. `MCP_API_KEY` is the bearer token (401 without it).
+- `MCP_ALLOWED_HOSTS` takes a comma list of **bare hostnames**; a `host:*` form answers 421 to everything.
+- `PROXMOX_TOKEN_NAME` is the bare token id (`mcp`), never `root@pam!mcp`: proxmoxer builds `PVEAPIToken={user}!{token_name}={value}` itself, so the full form doubles the user and 401s. Create the token with `pveum user token add root@pam mcp --privsep 0`; the UI checkbox defaults the other way and yields a token with no permissions. `GET /api2/json/access/permissions` shows the scope (roles on `/` means privsep is off).
+- It refuses `verify_ssl=false` outside dev mode, so mount Proxmox's cluster CA and point `REQUESTS_CA_BUNDLE` at it. The CA is fetchable through the API, no SSH: `GET /api2/json/nodes/<node>/certificates/info` returns `pve-root-ca.pem`; check it with `openssl verify -CAfile`.
+- The SQLite job store needs a writable path (`PROXMOX_JOBS_SQLITE_PATH`) or it dies under `readOnlyRootFilesystem`. `COMMAND_POLICY_MODE` defaults to `deny_all`.
+- Proxmox is a five-node cluster (vm01-vm05) hosting this cluster's five VMs; do not conflate the two. `vm01` (192.168.1.11) is NXDOMAIN from public resolvers and in-cluster CoreDNS forwards to public resolvers, so pods address it by IP. The certificate SAN includes the IP, so TLS still verifies. Run `dig @1.1.1.1` on any LAN hostname before it goes into a manifest.
+
+**mcp-n8n** (`czlonkowski/n8n-mcp` 2.82.1, 2026-09-06). Tiers and tool filtering are in the Catalog row.
+
+- **It cannot reach anything in-cluster until `WEBHOOK_SECURITY_MODE=permissive`.** The default `strict` refuses every private IP (`moderate` only relaxes localhost). The symptom is a tool call returning `SSRF protection: Private IP addresses not allowed` while the pod looks healthy: probes pass and `tools/list` works. Pair the flag with a NetworkPolicy (egress to CoreDNS and the one backend) so the protection moves to Cilium instead of being dropped. For any MCP server fronting an internal service, make one real tool call before believing it works.
+- Telemetry is on by default and feeds their ML training. `N8N_MCP_TELEMETRY_DISABLED=true` turns it off (and stops a `$HOME` mkdir that fails under `readOnlyRootFilesystem`).
+- n8n workflows have no Git copy: they live in SQLite on the PVC, so an AI-driven edit cannot be reverted short of a Longhorn restore. That is why this server ships with deletes disabled.
+- n8n serves cleartext HTTP on port 443. `N8N_PROTOCOL: https` without `N8N_SSL_KEY`/`N8N_SSL_CERT` only shapes generated URLs, so in-cluster callers use `http://n8n.default.svc.cluster.local:443` and n8n's own ServiceMonitor uses `scheme: http`. It looks like a typo in review; it is not.
+
+**Plaintext staging files.** Filling a SOPS secret by hand can leave `*.sops.tmp.yaml` in the working tree. On 2026-09-06 that happened for both mcp-proxmox (with the full-privilege token) and mcp-n8n, in a public repo with nothing in `.gitignore` covering it. Neither was committed, and `*.tmp.yaml` is now ignored. After any secret fill, check `git status` for stray `.tmp` or `.dec` files, and never `git add -A` without reading the staged list.
+
+**Shell traps when handing over commands.** In zsh, a command containing `!` inside double quotes (`-H "Authorization: PVEAPIToken=root@pam!mcp=..."`) dies with `event not found` before it runs; use single quotes, or better, have the command read the value from sops so it never reaches shell history. And `kubectl run -i` races its own attach and silently drops whatever the container writes before the stream is up: a diagnostic pod that prints immediately needs a leading `sleep`, or must batch its output at the end (it left a blank column in `mcp-probe.sh`).
+
 ## Verifying
 
 ```sh

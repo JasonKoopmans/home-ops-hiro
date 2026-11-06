@@ -102,6 +102,12 @@ transient S3 read-after-write listing lag immediately after upload.
 The automated drill's 7-minute wait exists partly to inoculate against this. If a *manual* drill ever shows
 missing data within a minute or two of the write, re-run once before treating it as a finding.
 
+Two failures of the automated drill on 2026-08-25 were not drill bugs. `postgres-rw` unresolvable at init-container
+start, and a recovery Job retrying `dial tcp 10.43.0.1:443: i/o timeout`, are the same transient Cilium pod-startup
+race (the second one was a wedged datapath on one node, cured by restarting its cilium-agent). Both drill containers
+now gate on connectivity before their first real call. The cleanup trap left no scratch resources behind in any of the
+three runs, failures included.
+
 ---
 
 ## §4 Real recovery
@@ -140,6 +146,9 @@ it fills in the two fields that are easy to get wrong under pressure:
 kubectl apply -f recovery.yaml
 kubectl -n database get cluster postgres-recovered -w
 ```
+
+Scratch and recovery clusters are applied with `kubectl apply` and never committed or sent through Flux. Deleting the
+Cluster returns before its PVCs are gone (they lag by a few seconds), so wait before reusing the name.
 
 Expect `Setting up primary` → `Waiting for the instances to become active` → `Cluster in healthy state`, roughly
 3–5 minutes on a small database. A `-full-recovery-` Job pod runs first; that is the restore itself.

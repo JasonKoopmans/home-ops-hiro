@@ -18,6 +18,11 @@ First seen 2026-10-16: 15 CRs named `pvc-<uuid>-manual-1791583232-15005-23394`
 (70 bytes) from `scripts/longhorn-backup-all.sh`, fixed in #898. One
 (minecraft) went stale and was denied ~3.7 times a minute for 12 days.
 
+The denial is logged on whichever node owns that volume's engine (cmp-03, cmp-01 before it), which is why one node's
+apiserver and longhorn-manager logs looked chatty; the node is not busier. If you are asked about that noise, check for
+a stuck Snapshot CR first and do not drop the line in Alloy. The minecraft CR was cleared with the procedure below on
+2026-10-29; 14 healthy 70-byte CRs from the 2026-10-09 run remained then, and the same exemption works if one goes stale.
+
 ## Recognise it
 
 ```bash

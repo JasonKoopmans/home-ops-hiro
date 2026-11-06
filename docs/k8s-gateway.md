@@ -33,6 +33,11 @@ Checked 2026-10-17 (#806):
 - Chart defaults to watch for: `maxUnavailable: 1`, no `runAsUser` (root), a
   100m CPU limit, `cache 30`, TCP on 53. The HelmRelease overrides the first
   three and keeps the 3.x behaviour (uid 1000 on :1053, Service 53/UDP to 1053).
+- Never set `resources.limits.cpu: null` in a values file that 3.7.2 also reads: it renders as a 0 CPU limit, which fails
+  validation.
+- One values file can hold both the 3.x keys and the 4.x keys and render correctly on both charts. That removes the race
+  where the HelmRelease changes before the OCIRepository has fetched the new chart (the approach used for #806).
+- The move to Codeberg changes Renovate's `packageName`, so an approval rule keyed on the ghcr name stops matching.
 - The chart copies `service.annotations` onto the metrics Service too, so the
   ClusterIP `k8s-gateway-metrics` carries the `lbipam.cilium.io/ips`
   annotation. Cilium ignores it on a non-LoadBalancer Service.

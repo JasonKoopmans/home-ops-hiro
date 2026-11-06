@@ -4,6 +4,8 @@ Shared agent conventions (repo structure, Flux patterns, app checklists, style r
 
 @.github/copilot-instructions.md
 
+Long-form docs (runbooks, designs, evidence) are indexed in [docs/README.md](docs/README.md): open the one row you need rather than reading `docs/`.
+
 ## Claude Code specifics
 
 ### Verifying changes before pushing
@@ -14,15 +16,15 @@ There is no unit-test suite; the manifests are the code. Verify with:
 2. `task build path=<group>/<app>` — full render with SOPS decryption + envsubst (needs `age.key` and `kubeconfig` at repo root; may not exist in worktrees/CI).
 3. `task validate` — kubeconform across `kubernetes/`.
 4. The real gate is the **Flux Local** GitHub workflow on the PR — treat its diff output as the review artifact.
-5. **Alert rules (`prometheusrule-*.yaml`)** — steps 1–4 never evaluate an expression. Extract `.spec`, replace `$$` with `$`, and run promtool from the `prom/prometheus` image (there is none on PATH): `docker run --rm -v "$PWD:/w" -w /w --entrypoint /bin/promtool prom/prometheus:latest check rules rules.yml`, then `test rules tests.yml` with synthetic series (explicit per-minute values, a `stale` marker where a series ends) and break the rule on purpose to confirm the suite fails. Confirm the live CRD and operator webhook accept it with `kubectl apply --dry-run=server -f -` (persists nothing). See **Alerting** in the shared instructions.
-6. **Alloy pipeline (`kubernetes/apps/monitoring/alloy/app/configmap.yaml`)** — steps 1–4 only render the ConfigMap, and `alloy validate` checks syntax, not behaviour: a `stage.match` selector written with a backtick-quoted line filter validates and then fails at `run`, and every Alloy pod hot-reloads this one file, so a bad selector stops log shipping cluster-wide. Run the changed `loki.process` block against sample lines in a throwaway `grafana/alloy` container (the version the chart deploys): feed it with `local.file_match` + `loki.source.file`, end in `loki.echo`, and check which lines are kept and dropped, the counters on `/metrics`, and that no `__tmp*` label leaks. Write match selectors as double-quoted LogQL strings and avoid backslashes in the regex (`[.]`, `[]]`).
+5. **Alert rules (`prometheusrule-*.yaml`)** — steps 1–4 never evaluate an expression. Run promtool and a server-side dry-run as described in `kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md` (*Verifying a rule*).
+6. **Alloy pipeline (`kubernetes/apps/monitoring/alloy/app/configmap.yaml`)** — steps 1–4 only render the ConfigMap, and every Alloy pod hot-reloads this one file, so a bad selector stops log shipping cluster-wide. Test the changed `loki.process` block in a throwaway container as described in `kubernetes/apps/monitoring/alloy/AGENTS.md`.
 
 ### Cluster access
 
 - `KUBECONFIG`, `SOPS_AGE_KEY_FILE`, and `TALOSCONFIG` point at repo-local files (`kubeconfig`, `age.key`, `talos/clusterconfig/talosconfig`) via `.mise.toml` and the Taskfile. In a fresh clone or worktree these files are absent — read-only analysis still works, cluster commands don't.
 - Read-only `kubectl`/`flux` commands are fine for diagnosis. **Never `kubectl apply`/`delete`/`edit` Flux-managed resources** — change Git instead. `task apply` exists for imperative testing but prefer letting Flux reconcile.
 - Before risky operations (node work, storage changes), run `task cluster:health`.
-- **What already alerts, and where it routes,** needs no cluster credentials through the Grafana MCP (`grafana_api_request`, GET only): `/api/datasources/proxy/uid/prometheus/api/v1/rules?type=alert` lists every loaded rule with its state, and `/api/datasources/proxy/uid/alertmanager/api/v2/alerts` lists firing alerts with their `receivers` (`.../telegram-warnings` is the digest, `null` is a blackhole). Datasource uids: `thanos` (default; raw 7d, then 5m/1h), `prometheus` (3d), `alertmanager`. Range queries through the MCP return raw JSON and can exceed the token limit, so prefer instant queries built on `count_over_time` / `max_over_time`.
+- **What already alerts, and where it routes,** needs no cluster credentials (Grafana MCP, GET only): the recipe is in `kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md` (*Listing what already alerts*).
 - **Control-plane logs and leader history** (kube-controller-manager, apiserver; who the leader is, when it changed) are in Loki and Thanos, with label and range-limit traps: `docs/runbook-control-plane-logs.md`. A once-a-minute `VerifyVolumesAreAttached ... nil spec for volume` line there is harmless and self-clears: `docs/runbook-kcm-nil-spec-volume.md`.
 
 ### Editing rules of thumb
