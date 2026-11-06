@@ -397,11 +397,11 @@ timestamp going stale** rather than on the existence of a failure object.
 ### Design constraints
 
 - **Alerts must be able to self-clear.** Key on last-success age, never on object
-  existence (rule in the instructions' Alerting section). `kube_job_failed`-style
+  existence (rule in `kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md`). `kube_job_failed`-style
   latching is exactly the trap to avoid here.
 - **Watch the `absent()` trap** for a metric that has never reported a success.
 - **Noise is the known failure mode in this cluster, not missed detection** — see
-  the instructions' Alerting section. Check what already alerts before adding rules.
+  `kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md`. Check what already alerts before adding rules.
 - Alerts route to Telegram via the existing shared bot (routing is in
   `alertmanagerconfig.yaml`).
 

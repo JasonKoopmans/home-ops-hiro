@@ -34,6 +34,20 @@ This repo started from the [onedr0p/cluster-template](https://github.com/onedr0p
 └── makejinja.toml       # Template rendering config
 ```
 
+## Where the rules live
+
+This file holds the rules that apply to every change. Rules for one area sit beside it in a nested `AGENTS.md` and load only when you read a file under that directory (Claude Code loads the sibling `CLAUDE.md`, a one-line `@AGENTS.md` shim; tools that read `AGENTS.md` pick the file up directly). If your tool does not load it, open it before editing there.
+
+| Working in | Read |
+|---|---|
+| `talos/` | `talos/AGENTS.md`: topf, the 1.14 config contract, the apply procedure |
+| `kubernetes/apps/monitoring/kube-prometheus-stack/` | its `AGENTS.md`: alert rule shape, routing, promtool testing, listing what already alerts |
+| `kubernetes/apps/monitoring/alloy/` | its `AGENTS.md`: testing a log pipeline change before it hot-reloads cluster-wide |
+| `kubernetes/apps/lifeos/` | its `AGENTS.md`: the one app whose PVC holds state Git lacks |
+| `.devcontainer/` | `.devcontainer/AGENTS.md`: arm64 container, mise, rebuild rules |
+| `.github/workflows/` | `.github/workflows/AGENTS.md`: what each workflow does and does not gate |
+| a task, not a place | `docs/runbook-add-app.md`, `docs/runbook-remove-app.md`, `docs/runbook-renovate-prs.md`; everything else is mapped in `docs/README.md` |
+
 ## How Flux Works in This Repo
 
 Flux is managed by the **flux-operator** + **flux-instance** (in `kubernetes/apps/flux-system/`). The instance syncs `kubernetes/flux/cluster/`, which contains a single `cluster-apps` Kustomization pointing at `./kubernetes/apps`. From there, discovery is **automatic**: the kustomize-controller finds each namespace group's `kustomization.yaml`, which lists the namespace and every app's `ks.yaml`. **You never need to register anything in `kubernetes/flux/`** when adding an app or a namespace group.
@@ -95,7 +109,7 @@ kubernetes/apps/<namespace-group>/
 
 - The `serverless/` directory deploys into the `knative-serving` namespace — the only group where directory name ≠ namespace name. Tools that need the namespace should read `.namespace` from the group's `kustomization.yaml`, not the directory name.
 - `kubernetes/apps/default/test/` is a committed scratch/smoke-test app (app-template + a multus test pod). Don't extend it; don't treat it as a pattern reference.
-- **`lifeos/grafana` is the one app where the cluster holds state Git does not have.** It is a personal workspace that is deliberately half UI-authored: dashboards in the `GitOps` folder come from ConfigMaps here, but everything in other folders — drafts, alert rules, preferences, API tokens — exists only in the SQLite DB on its PVC. So the repo's usual "delete it and Flux rebuilds it exactly" assumption does **not** hold: the PVC is the only *live* copy, and Flux cannot recreate what is on it. It is on the backed-up `longhorn` class, so deleting it costs everything since the last recurring backup and requires a Longhorn restore — recoverable, but never by reconciling. Don't move it to a `-no-backup` storage class, don't `kubectl delete pvc` it to force a rebuild, and don't "fix" the two-plane split by making everything provisioned. See `docs/lifeos-grafana.md`.
+- **`lifeos/grafana` is the one app where the cluster holds state Git does not have** (UI-authored dashboards, alert rules and tokens live in the SQLite DB on its PVC). Never `kubectl delete pvc` it to force a rebuild, never move it to a `-no-backup` class, and do not "fix" the split by making everything provisioned. Rationale: `kubernetes/apps/lifeos/AGENTS.md` and `docs/lifeos-grafana.md`.
 
 ### Canonical `ks.yaml`
 
@@ -229,17 +243,7 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 
 ## Alerting (PrometheusRules)
 
-Alert rules live with the Prometheus stack, not with the app they watch: `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-<area>.yaml`, listed in that directory's `kustomization.yaml`. Copy a recent one (`prometheusrule-flux.yaml`, `prometheusrule-thanos.yaml`).
-
-- **Shape.** `metadata.namespace: monitoring`, label `release: kube-prometheus-stack`, groups named `<area>.rules`, a `severity` of `warning` or `critical` on every alert, and `$$` for every `$` in annotation templates (Flux post-build substitution turns it into one).
-- **Look before adding.** The gap here has been alert noise, not missing detection. List what already alerts, and where it routes, before writing a rule (the read-only recipe is in `CLAUDE.md`).
-- **An alert must be able to clear on its own.** Key it on the current state, never on an object merely existing: `kube_job_failed` latches until the Job is deleted, so use the age of the last success instead, and add a `...NeverSucceeded` twin where the metric is absent until the first success. When a scrape gap or an exporter restart must not resolve and re-fire a long-running alert, use `keep_firing_for` (spelled that way in this CRD, unlike `for`).
-- **Keep the `for:` clock stable.** It is tracked per label set, so aggregate away labels that change while the fault persists (`revision`, `reason`, `pod`, `instance`); otherwise every flip restarts it.
-- **Add a `...MetricsMissing` detector** when a group of rules depends on one exporter or scrape. A vanished series makes every rule evaluate empty, which looks exactly like healthy.
-- **Routing** is `alertmanagerconfig.yaml`. Criticals get one message per alertname and repeat hourly; warnings collapse into a digest per namespace (alert names starting `Node`, `KubeNode`, `Host` or `Kubelet` keep their own message). A digest line prints only `job_name`, `pod`, `node`, `instance` or `name`, so a warning must carry one of those to be identifiable, and Telegram caps a message at 4096 characters, so a rule that can fire dozens of instances at once should aggregate. An alert with no `namespace` label lands in the single namespace-less digest. Inhibit rules mute symptoms only, never a signal that can be the root cause.
-- **Test the behavior, not just the render.** CI only builds the manifests. Run `promtool check rules` and `promtool test rules` (steps in `CLAUDE.md`), check the live CRD and operator accept the rule with `kubectl apply --dry-run=server`, and backtest the expression on raw Thanos data. Ask for raw resolution explicitly (`max_source_resolution=0s` on the datasource-proxy API) and stay inside the 7-day raw retention: with auto-downsampling the querier reads 5-minute blocks from a 25-minute step and 1-hour blocks from 5 hours, and one scrape blip then looks like five minutes of continuous state. To measure how long a condition held, count it with a subquery at the rule's evaluation interval (`count_over_time(<expr>[30m:30s])`) instead of reading a coarse range query, which can step over a short recovery.
-- **After merge, check it in prod:** the rule's `health` and `state` in the Prometheus rules API, the receiver of each firing instance in Alertmanager, and `alertmanager_notifications_failed_total` if you changed a notification template.
-- Triage for the Flux alerts: `docs/runbook-flux-not-ready.md`. For a node's system disk (`NodeSystemDiskWriteLatencyHigh`, and the etcd fsync alerts that read the same disk): `docs/runbook-node-disk-slow.md`.
+Alert rules live with the Prometheus stack, not with the app they watch: `kubernetes/apps/monitoring/kube-prometheus-stack/app/prometheusrule-<area>.yaml`. The gap here has been alert noise, not missing detection, so list what already alerts, and where it routes, before writing a rule. Shape, routing, promtool testing and the read-only recipe for listing live rules are in `kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md`, which loads when you read a file there. Triage runbooks: `docs/runbook-flux-not-ready.md`, `docs/runbook-node-disk-slow.md`.
 
 ---
 
@@ -262,13 +266,7 @@ Alert rules live with the Prometheus stack, not with the app they watch: `kubern
 
 ## CI / GitHub Actions
 
-| Workflow | Purpose |
-|---|---|
-| **Flux Local** | **The primary (and only real) CI gate.** Runs `flux-local test` and posts `flux-local diff` for HelmReleases and Kustomizations on every PR touching `kubernetes/**`. |
-| **Security Scan** | Report-only. Runs KubeLinter (manifest misconfigurations) and Kubescape (NSA framework compliance score) against Helm-rendered manifests, plus gitleaks (accidental plaintext secrets) against the raw repo. On PRs touching `kubernetes/**` and weekly (for score-over-time tracking). Never fails the build — findings post to the run's **step summary**, not a PR comment. |
-| **CRD Upgrade Check** | Report-only. Runs on PRs touching `**/helmrelease-crds.yaml` (the CRD charts that version independently of their operator image). Compares the old and new chart's CRDs for removals, dropped served/storage versions and schema deltas, then dry-runs every rendered CR against a disposable kind cluster running the new CRDs. Posts to the step summary and a PR comment; never fails the build. See `docs/crd-upgrade-check.md`, including the list of things it deliberately does not verify. Local equivalent: `task crd:check`. |
-| **Image Vulnerability Scan** | Report-only. Trivy CVE scan of every container image referenced in the rendered manifests. Weekly + manual dispatch only (not per-PR — image CVEs don't change with unrelated PRs). Results in the step summary. |
-| **Labeler / Label Sync** | PR auto-labeling housekeeping. |
+**Flux Local** is the primary (and only real) CI gate: it runs `flux-local test` and posts `flux-local diff` for HelmReleases and Kustomizations on every PR touching `kubernetes/**`. Every other workflow (Security Scan, CRD Upgrade Check, Image Vulnerability Scan, the labelers) is report-only and never fails the build. What each one does, and how to render manifests for a linter, is in `.github/workflows/AGENTS.md`.
 
 ### What This Means for Agents
 
@@ -278,112 +276,24 @@ Alert rules live with the Prometheus stack, not with the app they watch: `kubern
 - If `flux-local` fails on your PR, the likely causes are a malformed HelmRelease, a missing resource in a `kustomization.yaml`, or an incorrect path.
 - Local pre-checks: `task build path=<group>/<app>` (kustomize build + envsubst), `task validate` (kubeconform across `kubernetes/`).
 
-### Statically Linting Manifests (gotcha)
-
-Most apps here (~38/41) are `HelmRelease` + `chartRef`, so the YAML committed under `kubernetes/apps/**` is Helm *values*, not rendered Pod/Deployment specs. A generic linter pointed at that YAML directly (KubeLinter, Checkov, Kubescape, etc.) mostly won't see anything meaningful — it needs the fully Helm-templated output. Render first with the same mechanism the Flux Local and Security Scan workflows already use:
-
-```sh
-flux-local build all --enable-helm --output-file rendered.yaml kubernetes/flux/cluster
-```
-
-(defaults to `--skip-secrets`/`--skip-crds`, so no SOPS age key is needed). Feed `rendered.yaml`, not the source tree, to any static analysis tool.
-
 ---
 
 ## Adding a New Application
 
-1. **Determine the namespace group.** Check `kubernetes/apps/` for an existing group that fits. Create a new group only if nothing fits.
-
-2. **Create the app directory:**
-   ```
-   kubernetes/apps/<namespace-group>/<app-name>/
-   ├── ks.yaml
-   └── app/
-       ├── kustomization.yaml
-       ├── helmrelease.yaml
-       ├── ocirepository.yaml   # or helmrepository.yaml for classic Helm repos
-       ├── pvc.yaml             # if persistent storage is needed
-       └── secret.sops.yaml     # if secrets are needed
-   ```
-
-3. **Create `ks.yaml`** using the canonical template above.
-
-4. **Create the chart source + HelmRelease** (OCIRepository named after the app + `chartRef`, or HelmRepository + `spec.chart`). Include Renovate hints where applicable (see Renovate section).
-
-5. **Create `app/kustomization.yaml`** — list every file with a `./` prefix (tooling depends on the exact `./helmrelease.yaml` string):
-   ```yaml
-   ---
-   apiVersion: kustomize.config.k8s.io/v1beta1
-   kind: Kustomization
-   resources:
-     - ./helmrelease.yaml
-     - ./ocirepository.yaml
-     # - ./pvc.yaml
-     # - ./secret.sops.yaml
-   ```
-
-6. **Register the app** in the parent group's `kustomization.yaml`:
-   ```yaml
-   resources:
-     - ./namespace.yaml
-     - ./<existing-app>/ks.yaml
-     - ./<app-name>/ks.yaml        # ← add this line
-   ```
-
-7. **If creating a new namespace group**, create `namespace.yaml` (with `kustomize.toolkit.fluxcd.io/prune: disabled` annotation) and a group `kustomization.yaml` that sets `namespace:`, includes `components: [../../components/sops]`, and lists `./namespace.yaml` plus the app `ks.yaml` files. **No registration in `kubernetes/flux/` is needed** — discovery is automatic.
+Copy a similar existing app (`default/echo` for app-template, `monitoring/loki` for an upstream chart); the layout is under *The Standard App Deployment Pattern* and the canonical `ks.yaml` above. The checklist (namespace group, chart source, `kustomization.yaml`, registering the app in its group, creating a new group) is `docs/runbook-add-app.md`. Nothing is ever registered in `kubernetes/flux/`.
 
 ---
 
 ## Removing an Application
 
-> **Use the two-phase GitOps pattern below — never use `kubectl delete` directly.** Direct deletions bypass Flux's inventory tracking and will be re-applied on the next reconciliation.
-
-### How Flux Cleanup Works in This Repo
-
-- `cluster-apps` has `prune: true` and `deletionPolicy: WaitForTermination`, and patches this onto every child Kustomization.
-- App Kustomizations have `prune: true`: Flux tracks every resource it applies and deletes resources that disappear from source.
-- When a Flux **Kustomization CR is deleted**, Flux finalizes it by pruning its full inventory — HelmReleases, PVCs, ConfigMaps, Secrets, etc.
-- When a **HelmRelease is deleted**, the Helm controller runs `helm uninstall`, removing all Helm-managed resources.
-
-### Two-Phase Removal
-
-Use the Taskfile tasks:
-
-```sh
-# Phase 1: remove the HelmRelease → Flux triggers helm uninstall (pods, services, routes)
-task app:decommission:phase1 path=<namespace-group>/<app-name>
-
-# Verify the HelmRelease and all pods are gone before continuing
-kubectl get helmrelease,pods -n <namespace> | grep <app-name>
-
-# Phase 2: remove the Kustomization entry and all app files → Flux prunes remaining resources
-task app:decommission:phase2 path=<namespace-group>/<app-name>
-```
-
-Or manually:
-
-**Phase 1** — Edit `kubernetes/apps/<group>/<app>/app/kustomization.yaml` and remove `./helmrelease.yaml` from the resources list. Commit and push. The app's Kustomization remains alive so Flux prunes only the HelmRelease, triggering `helm uninstall`.
-
-**Phase 2** — Remove `./<app>/ks.yaml` from `kubernetes/apps/<group>/kustomization.yaml`, then delete the entire app directory. Commit and push. Flux prunes the Kustomization and all remaining tracked resources (PVCs, OCIRepository, ConfigMaps, Secrets).
-
-### Watchouts
-
-**Shared resource names:** The convention is one OCIRepository per app, named after the app, so removals are self-contained. If you ever encounter a resource shared by multiple apps (same name, same namespace, shipped by more than one Kustomization), transfer ownership first: remove it from the departing app's `app/kustomization.yaml` during Phase 1, verify the surviving app still reconciles, then run Phase 2. Check with:
-
-```sh
-grep -r "kind: OCIRepository" kubernetes/apps/<group>/
-```
-
-**PVC data:** Phase 2 deletes PVCs and, with Longhorn's `Delete` reclaim policy, the underlying volumes. Take a Longhorn snapshot/backup before Phase 2 if the data needs to be preserved.
-
-**Apps without a HelmRelease:** If the app uses only raw manifests, skip Phase 1 — the Kustomization prune handles full cleanup.
+**Use the two-phase GitOps pattern: never `kubectl delete` a Flux-managed resource.** Phase 1 removes the HelmRelease (`task app:decommission:phase1 path=<group>/<app>`); verify the pods are gone; phase 2 removes the Kustomization and the app directory (`task app:decommission:phase2 path=<group>/<app>`). Phase 2 deletes the PVCs and, with the `Delete` reclaim policy, the Longhorn volumes, so snapshot or back up first if the data matters. The manual steps and the shared-resource watchout are in `docs/runbook-remove-app.md`.
 
 ---
 
 ## Renovate & Dependency Updates
 
 - Renovate is configured via `.renovaterc.json5` and runs on Saturdays. PR creation is rate-limited (`prHourlyLimit: 4`) so a week's updates roll out over hours, not minutes: 30 merges in under five minutes once piled their image pulls onto one node's slow disk and stalled three upgrades. Do not re-add `:disableRateLimiting`.
-- **The Saturday wave is a hazard for Saturday maintenance windows.** The schedule has no `timezone`, so it is UTC: roughly 26-33 PRs between about 01:50Z and 22:30Z, up to 4 an hour, most merging within 15 minutes (automerge is gated only on Flux Local), cluster workloads included. Before a Saturday window or its Friday-evening prep, have the owner pause Renovate in the Mend portal, or sweep at T-0: `gh pr list --author app/renovate --state open`, `gh pr merge --disable-auto <n>` on each, and confirm nothing merged in the last 30 minutes.
+- **Merge-day rules** (the Saturday wave against maintenance windows, charts pinned in two places, the updates that never auto-merge) are in `docs/runbook-renovate-prs.md`.
 - It creates PRs for Helm chart bumps, container image updates, and GitHub Action digests; Flux-managed `OCIRepository` tags and `chart:` versions are picked up automatically by the flux manager.
 - For version strings Renovate can't infer, use hint comments on the line above:
   ```yaml
@@ -392,35 +302,19 @@ grep -r "kind: OCIRepository" kubernetes/apps/<group>/
   ```
 - Commit messages follow **conventional commits** (`feat(app): …`, `fix(scope): …`) — Renovate uses `:semanticCommits`, and humans/agents should match.
 - **Do not remove Renovate annotations or change the version pinning strategy** without explicit approval.
-- **Some updates are never auto-merged** — `automerge: false` rules in `.renovaterc.json5`, each with a comment saying why: Longhorn and LifeOS (one-way), the Flux Operator group (restarts the controllers), Talos and Kubernetes versions in `talos/topf.yaml` (applied by hand, so a merged bump only makes Git claim a version the nodes are not running), the topf version in `.mise.toml` (it decides which Talos defaults get rendered at the next apply), and Cilium minor/major. Merge those by hand when you are ready to roll them. A new dependency of that kind needs its own rule.
-- **A chart pinned in two places gets two PRs.** `kube-prometheus-stack`, `external-dns` and `envoy-gateway` are also pinned in `bootstrap/helmfile.d/00-crds.yaml` (and its `.j2` template), so a release produces one PR for that helmfile and one for the HelmRelease with the same version in the title (#799 and #800 were 91.9.0 ➔ 92.10.1). The helmfile is "extract CRDs, never apply" and lives outside `kubernetes/`, so its PR changes nothing in the cluster and Flux Local skips the test and diff. Review and merge the HelmRelease PR first, watch it land, then merge the bootstrap one so the two pins stay equal. A merge reaches the cluster within a minute or two; there is no need to run `flux reconcile`.
 
 ---
 
 ## Talos Linux
 
-- Talos machine configuration lives in `talos/`, rendered by [topf](https://github.com/postfinance/topf) (it replaced the archived talhelper). `talos/topf.yaml` lists the nodes and versions; patch files in `talos/all/` and `talos/control-plane/` (applied in filename order, `.tpl` files are Go templates) are merged over what topf generates. The layout and its conventions are in `talos/README.md`.
-- **Do not modify Talos configs** unless the issue explicitly asks for infrastructure-level changes. Most application-level work happens only in `kubernetes/`.
-- `talosVersion` and `kubernetesVersion` in `talos/topf.yaml` must be a compatible pair, and they are what `task talos:upgrade-node` and `task talos:upgrade-k8s` act on, so Git ahead of the nodes is an upgrade waiting to happen. Do not bump them as a side effect.
-- Renovate tracks `talosVersion` from the GitHub releases of `siderolabs/talos` (the `ghcr.io/siderolabs/installer` image stopped at 1.13, so it cannot see 1.14 or later) and `kubernetesVersion` from the `ghcr.io/siderolabs/kubelet` image. Both PRs are merged by hand, then rolled with `task talos:upgrade-node` and `task talos:upgrade-k8s`.
-- **`talosVersion` is also the machine-config version contract** topf renders for. At 1.14 that is the full multi-document format (`KubeAPIServerConfig`, `KubeletConfig`, `KubeNodeConfig`, `KubeCoreDNSConfig`, `UnattendedInstallConfig`, `ResolverConfig`, …), and Talos rejects a config that sets the same thing in both v1alpha1 and a document. Settings the documents own go in documents; only etcd, `machine.certSANs`, `sysctls`, `files` and `time` are still v1alpha1. `talosctl upgrade` does not regenerate config, so a version bump is safe to roll, but `generate-config`, `apply-node` and bootstrapping a new node all use the new contract.
-- topf emits every 1.14 default, including ones this cluster has not chosen, and omitting a document does not remove it. They are deleted explicitly with `$patch: delete`: Flannel (`KubeFlannelCNIConfig`, Cilium is the CNI) and workload isolation (`SecurityProfileConfig`, #760) in `talos/all/10-disabled-defaults.yaml`, the PodSecurity admission document in `talos/control-plane/00-cluster.yaml` (the cluster does not enforce it), and weekly `FilesystemTrimConfig` in `talos/all/09-filesystem-trim.yaml` until the Proxmox disks have `discard=on`. kube-proxy is disabled (Cilium replaces it). After any topf or Talos bump, and before any apply, run `task talos:validate` (renders every node and runs `talosctl validate --mode metal`) and read `task talos:apply-node IP=<ip> MODE=no-reboot DRY_RUN=1` for each node. There is no CI gate for `talos/`; Flux Local only builds `kubernetes/**`.
-- **`talos/secrets.sops.yaml` must exist.** If topf finds no secrets file it generates a new bundle instead of failing, and a config rendered from that cannot talk to the running cluster. The Taskfile checks for it first; restore it from Git, never regenerate it.
-- **Etcd encryption key.** The cluster's Secrets are encrypted under secretbox key `key2`; a config that renders any other key name leaves a node's kube-apiserver unable to decrypt them and it never becomes ready (talhelper 3.1.17 rendered `key1`; seen on hiro-cmp-01 in `try` mode, 2026-10-08). topf renders `key2` with the same secret, and `task talos:apply-node` still runs `scripts/talos-check-etcd-encryption.sh` first and refuses a config whose key differs from the node's live one. Keep that check across tool and Talos bumps.
-- **Applying config is not a no-op.** Each apply restarts the kubelet and the three control-plane static pods on that node and moves the VIP if it holds it. Do one node at a time, the etcd leader (`talosctl etcd status`) last: `task talos:apply-node IP=<ip> MODE=try TIMEOUT=5m`, confirm `curl -sk https://<ip>:6443/readyz` returns 200 or 401 and the node's control-plane pods are Ready, then repeat with `MODE=no-reboot`. topf renders the config and `talosctl apply-config` applies it, because `topf apply` has no try-mode timeout.
+Machine config lives in `talos/`, rendered by [topf](https://github.com/postfinance/topf) (it replaced the archived talhelper). **Do not modify it** unless the issue explicitly asks for infrastructure-level changes, and do not bump `talosVersion` or `kubernetesVersion` in `talos/topf.yaml` as a side effect: Git ahead of the nodes is an upgrade waiting to happen. Applying config restarts the kubelet and the control-plane static pods on a node and moves the VIP, so it is done one node at a time. The rest (version contract, the 1.14 defaults, the secrets file, the etcd key check, the apply procedure) is in `talos/AGENTS.md`, which loads when you read a file under `talos/`.
 
 ---
 
 ## Development Environment
 
 - **mise** (`.mise.toml`) manages CLI tool versions (kubectl, flux, talosctl, sops, kustomize, kubeconform, etc.) and sets `KUBECONFIG`, `SOPS_AGE_KEY_FILE`, and `TALOSCONFIG` to repo-local paths. Also pins the security scanning toolchain used by the Security Scan / Image Vulnerability Scan workflows: `kube-linter`, `trivy`, `gitleaks`, `conftest` (the last is available for future OPA/Rego policy checks but isn't wired into CI). **Kubescape is the exception** — aqua's registry has no linux/arm64 build, which broke `mise install` in the arm64 devcontainer, so it's installed inline in `security-scan.yaml` (still via mise/aqua, just scoped to that CI job) instead of living in the shared `.mise.toml`.
-- A `.devcontainer/` config is provided for VS Code / Codespaces. It runs `jdxcode/mise:<version>-debian` (Debian slim, **linux/arm64** on the owner's machine) as root, and `postCreateCommand` apt-installs the few system packages the slim image lacks, then runs `mise install`. Watchouts when it breaks:
-  - **The devcontainer is arm64; CI is amd64.** A tool that installs fine in GitHub Actions can still fail in the container (no arm64 build, or an arm64 build with different shared-library needs). Kubescape is the standing example.
-  - **A missing shared library makes `mise install` exit 127 partway through.** The slim image ships almost no libraries, so if a binary exits 127 (or `error while loading shared libraries`), run `ldd "$(mise which <tool>)" | grep 'not found'` and add the Debian package to `postCreateCommand` with a comment naming the tool that needs it (`groff-base` for `aws help`, `libatomic1` for node's arm64 build). A failed `node` also takes down every `npm:` tool, because mise installs those with node. Read the first error in the `mise install` output, not the last.
-  - **mise skips npm lifecycle scripts by default.** An `npm:` package that downloads or links its real binary in `postinstall` installs "successfully" but leaves only a stub. `npm:@anthropic-ai/claude-code` is one: without `allow_builds` it prints "claude native binary not installed". Allow scripts per package (`{ version = "...", allow_builds = ["<pkg>"] }`), never globally.
-  - **Inline-table entries in `.mise.toml` still get Renovate bumps.** Renovate reads the `version` key (the `aqua:aws/aws-cli` entry has been bumped this way), so adding options such as `allow_builds` or `symlink_bins` does not detach a tool from Renovate.
-  - **Claude Code state survives a rebuild only through the `claude-config` volume** (sessions, memory, login and plugins in `/root/.claude`). `CLAUDE_CONFIG_DIR=/root/.claude` also moves `~/.claude.json` into it. The volume starts empty, so copy `/root/.claude/.` and `/root/.claude.json` somewhere safe before the first rebuild that introduces it, then restore them.
-  - **`mise install` runs once, when the container is created.** A change to `postCreateCommand`, or a tool option such as `allow_builds` on a version that is already installed, needs **Rebuild Container** (or `mise install --force <tool>`) to take effect. Before calling a devcontainer fix done, test it with a rebuild that does not use the cache.
+- **Devcontainer** (`.devcontainer/`, Debian arm64 on the owner's machine; CI is amd64): what breaks, how to fix it and when it needs a rebuild is in `.devcontainer/AGENTS.md`.
 - **Task** (`Taskfile.yaml` + `.taskfiles/`) provides common workflows:
   - `task reconcile` — force Flux to sync from Git
   - `task build path=<group>/<app>` — render an app (kustomize build + sops decrypt + envsubst) without applying
