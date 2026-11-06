@@ -123,7 +123,12 @@ metadata:
   name: longhorn-scratch-trim-job
   namespace: storage
 spec:
-  cron: "30 1 * * *" # every day at 1:30 AM
+  # Every 6h (01:30/07:30/13:30/19:30). Daily let thanos-compactor-data sit at
+  # 30.65 of 32.2GB actual (95%, LonghornVolumeUsageHigh) for ~20h on 2026-11-05
+  # against 18.7GB peak filesystem use: the compactor frees its scratch blocks
+  # but Longhorn only unmaps them on a trim. The 01:30 run is unchanged. A single
+  # long compaction pass still holds real scratch, which no trim can free.
+  cron: "30 1,7,13,19 * * *"
   task: "filesystem-trim"
   groups:
   - scratch
