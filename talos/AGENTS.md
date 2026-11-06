@@ -36,3 +36,15 @@ Found evaluating the 1.13 ➔ 1.14 bump (#748, 2026-10-05); the method applies t
   `UserVolumeConfig`, so it is not exposed.
 - 1.14.2 enables `CONFIG_BLK_WBT`; cmp-05's system disk already shows about 16ms write latency, so watch it after the roll
   (`docs/runbook-node-disk-slow.md`).
+
+## Never print a rendered config
+
+A rendered machine config (topf output, `talosctl apply-config --dry-run` diffs, anything under `clusterconfig/`) contains the API-server and aggregator CA private keys, the service-account key, the discovery cluster id and secret, the etcd secretbox `secret` and `cluster.token` (a short value that a "long base64" filter does not catch). Do not `diff`, `cat` or `yq`-print one into a session.
+
+Line-anchored redaction does not work: a `yq 'del(.secret)'` missed a nested secret, a `sed` anchored on `^( *)key:` was defeated by the `> ` diff prefix and PEM body lines, and an unfiltered `apply-config --dry-run` diff printed the bootstrap token (2026-10-09, during the topf render test). Instead:
+
+1. Split each config into documents (`yq -s '"d_"+(.kind // "main")+"_"+(.name // "")'` after `sort_keys(..)`) and compare `shasum` per document, printing only equal, differs or only-in-X.
+2. For a differing non-secret document, print a sanitised copy: replace `[A-Za-z0-9+/=_-]{32,}` and drop lines matching `token|secret|BEGIN|END|PRIVATE`, applied **before** diffing, never as a post-filter anchored to the line start.
+3. Compare secret fields by hashing the decoded value and print SAME or DIFF only.
+4. Delete rendered output and `clusterconfig/` directories from the scratchpad when done. If a leak happens anyway, say so plainly and let the owner decide about rotation.
+

@@ -36,3 +36,22 @@ image is there; **absence proves nothing** when the count is 50. A runbook that 
 `kubectl get nodes -o json` would have reported false negatives and aborted a maintenance window. Verify with the CRI view:
 `talosctl --talosconfig talos/clusterconfig/talosconfig -n 192.168.25.2X image list | grep <name>` (`.21`-`.25` are
 cmp-01..05). A pre-pulled image can also vanish from a node before the window through image GC, so re-check at T-0.
+
+## High CPU on a 2-CPU node is usually I/O, not a runaway process
+
+`hiro-cmp-03` and `-04` have 2 CPU (the node table is in `.github/copilot-instructions.md`). On 2026-07-19 `hiro-cmp-04` hit 98% CPU
+(9m idle) and tripped `HostHighCpuUsage`, `NodeCPUHighUsage` and `NodeSystemSaturation` with nothing malfunctioning: no rebuilds, no
+failing backups, no snapshot-chain bloat, all volumes healthy. About 60% of the CPU was kernel space (`system` 751m plus `softirq`
+312m, storage and network I/O servicing) and the Longhorn `instance-manager` added about 590m in user space. The cause was the
+Prometheus pod (the heaviest stateful I/O workload: TSDB writes plus scrape ingestion) being scheduled there.
+
+- **Check CPU by mode first:** `sum by (mode) (rate(node_cpu_seconds_total{mode!="idle", instance="<ip>:9100"}[5m]))`. A `system` plus
+  `softirq` heavy split with a large `instance-manager` is I/O load. The lever is placement or less I/O (scrape interval,
+  retention), not more CPU requests.
+- **The fix (#333):** a soft `nodeAffinity` (`preferredDuringSchedulingIgnoredDuringExecution`, weight 100, on `kubernetes.io/hostname`
+  in the 3-CPU nodes, since the nodes carry no CPU-tier label) on `prometheusSpec`, plus slowing the apiserver scrape from 30s to
+  60s (it was about 43% of 7.2k samples/s). Prometheus landed on cmp-02 (at 17%) and cmp-04 dropped to 71%.
+- Heavy stateful I/O apps (Prometheus, and candidates like MinIO or a write-heavy database) belong on the 3- and 4-CPU nodes.
+- **Longhorn replica rebalancing is not the lever:** `replica-auto-balance: best-effort` is already set cluster-wide and replica
+  counts are roughly even; the hotspot follows *which* volumes and co-located pods are I/O-intense.
+

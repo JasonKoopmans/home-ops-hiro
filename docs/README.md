@@ -27,6 +27,8 @@ New docs: name them `runbook-<topic>`, `incident-<topic>`, `plan-<topic>`, `spik
 | [runbook-add-app](runbook-add-app.md) | Adding an application: namespace group, chart source, `kustomization.yaml`, registering it | live |
 | [runbook-remove-app](runbook-remove-app.md) | Removing an application: the two-phase GitOps removal, PVC data, shared-resource watchouts | live |
 | [runbook-renovate-prs](runbook-renovate-prs.md) | Merging Renovate PRs around a maintenance window, paired chart PRs, the updates that never auto-merge | live |
+| [runbook-local-render](runbook-local-render.md) | Rendering or schema-checking manifests with flux-local and kubeconform in Docker, including from a worktree; sizing a memory limit | live |
+| [runbook-alert-rule-testing](runbook-alert-rule-testing.md) | Writing or changing a PrometheusRule: promtool unit tests, mutation testing, listing what already alerts and verifying a merged rule | live |
 
 ## An alert fired or something is broken
 

@@ -14,7 +14,7 @@ There is no unit-test suite; the manifests are the code. Verify with:
 
 1. `kustomize build kubernetes/apps/<group>/<app>/app` — fastest structural check (SOPS files are valid YAML even encrypted; `${VAR}` placeholders are fine at this stage).
 2. `task build path=<group>/<app>` — full render with SOPS decryption + envsubst (needs `age.key` and `kubeconfig` at repo root; may not exist in worktrees/CI).
-3. `task validate` — kubeconform across `kubernetes/`.
+3. `task validate` — kubeconform across `kubernetes/`. No `helm`/`flux`/`kubeconform` locally? The Docker recipes (worktree mount, one-release render and diff, strict schema check) are in `docs/runbook-local-render.md`.
 4. The real gate is the **Flux Local** GitHub workflow on the PR — treat its diff output as the review artifact.
 5. **Alert rules (`prometheusrule-*.yaml`)** — steps 1–4 never evaluate an expression. Run promtool and a server-side dry-run as described in `kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md` (*Verifying a rule*).
 6. **Alloy pipeline (`kubernetes/apps/monitoring/alloy/app/configmap.yaml`)** — steps 1–4 only render the ConfigMap, and every Alloy pod hot-reloads this one file, so a bad selector stops log shipping cluster-wide. Test the changed `loki.process` block in a throwaway container as described in `kubernetes/apps/monitoring/alloy/AGENTS.md`.
