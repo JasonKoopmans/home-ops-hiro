@@ -3,6 +3,7 @@
 Start here. Do not read `docs/` wholesale: it is about 500KB, and most of it matters only for one task. Find the row you need, open that file.
 
 Rules that apply to every change live in [`.github/copilot-instructions.md`](../.github/copilot-instructions.md) (imported by `CLAUDE.md`).
+Rules for one area live beside it in a nested `AGENTS.md` (listed under *Area instructions* below) and load when you work there.
 This folder holds the long form: runbooks, designs and evidence. A fact has **one home**: if a rule is in the instructions, a doc links
 to it instead of restating it, and `docs/revisit-register.md` is the model (an index that points at where each decision lives).
 
@@ -18,6 +19,14 @@ to it instead of restating it, and `docs/revisit-register.md` is the model (an i
 
 New docs: name them `runbook-<topic>`, `incident-<topic>`, `plan-<topic>`, `spike-<topic>` or `<app-or-area>` for reference, and put a
 `> **Status:** ...` banner under the title when the doc is not **live** or **reference**. Add a row here in the same PR.
+
+## Doing a routine task
+
+| Doc | Use it when | Status |
+|---|---|---|
+| [runbook-add-app](runbook-add-app.md) | Adding an application: namespace group, chart source, `kustomization.yaml`, registering it | live |
+| [runbook-remove-app](runbook-remove-app.md) | Removing an application: the two-phase GitOps removal, PVC data, shared-resource watchouts | live |
+| [runbook-renovate-prs](runbook-renovate-prs.md) | Merging Renovate PRs around a maintenance window, paired chart PRs, the updates that never auto-merge | live |
 
 ## An alert fired or something is broken
 
@@ -67,6 +76,19 @@ New docs: name them `runbook-<topic>`, `incident-<topic>`, `plan-<topic>`, `spik
 | [minecraft](minecraft.md) | The Paper + Geyser + Floodgate server and how Bedrock players get in | reference |
 | [runbook-guacamole-cloudflare-access](runbook-guacamole-cloudflare-access.md) | The Cloudflare Access setup for Guacamole, which lives outside this repo | live |
 | [homelab-goals](homelab-goals.md) | Config for the scheduled weekly review agent (what to surface from the watched feeds in `feeds/`); not cluster ops. Edit freely | live |
+
+## Area instructions
+
+Each is an `AGENTS.md` with a one-line `CLAUDE.md` (`@AGENTS.md`) beside it. Claude Code loads it when you read a file in that directory; read it yourself if your tool does not.
+
+| Directory | Holds |
+|---|---|
+| [`talos/`](../talos/AGENTS.md) | topf, the 1.14 config contract, the apply procedure |
+| [`kubernetes/apps/monitoring/kube-prometheus-stack/`](../kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md) | Alert rule shape, routing, promtool testing, listing what already alerts |
+| [`kubernetes/apps/monitoring/alloy/`](../kubernetes/apps/monitoring/alloy/AGENTS.md) | Testing a log pipeline change before it hot-reloads cluster-wide |
+| [`kubernetes/apps/lifeos/`](../kubernetes/apps/lifeos/AGENTS.md) | The one app whose PVC holds state Git lacks |
+| [`.devcontainer/`](../.devcontainer/AGENTS.md) | The arm64 container, mise, when a rebuild is needed |
+| [`.github/workflows/`](../.github/workflows/AGENTS.md) | What each workflow does and does not gate; rendering manifests for a linter |
 
 ## Docs outside this folder
 
