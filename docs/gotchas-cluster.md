@@ -55,3 +55,61 @@ Prometheus pod (the heaviest stateful I/O workload: TSDB writes plus scrape inge
 - **Longhorn replica rebalancing is not the lever:** `replica-auto-balance: best-effort` is already set cluster-wide and replica
   counts are roughly even; the hotspot follows *which* volumes and co-located pods are I/O-intense.
 
+## A node can come back with less RAM than the others
+
+`hiro-cmp-05` joined as the fifth control-plane node (about 2026-07-23) with roughly 5.6 GiB against 11.8 GiB on cmp-01..04, while
+running etcd, the apiserver **and** Longhorn. On 2026-07-27 the kernel OOM-killer took `kube-apiserver`; the apiserver then
+crashlooped because local etcd (`127.0.0.1:2379`) timed out, and the kubelet and static pods restarted (not a reboot). Three failures
+tangled on one node:
+
+- **Memory:** `SystemOOM`, then the apiserver crashloop (`PostStartHook start-service-ip-repair-controllers failed`).
+- **Storage:** the iSCSI session to a Longhorn scratch volume hit `session recovery timed out after 120 secs`, then
+  `rejecting I/O to offline device` and an ext4 journal abort. That is a symptom of starvation, **not** a failing disk: no SMART or
+  medium-error lines and Longhorn's disk stayed ready. The volume was reproducible, so nothing was lost.
+- **etcd:** health-check flaps (`context deadline exceeded`) every few hours since the node was added, with no alarms and no
+  corruption: a slow member.
+
+Lessons that outlive the incident (closed 2026-08-23, host RAM raised to 16 GiB, allocatable back to about 10.7 GiB like the rest):
+
+- **VM RAM is a Proxmox setting that `talos/topf.yaml` cannot express**, so a rebuilt node comes back with whatever the VM has.
+  After building or rebuilding a node compare `kubectl get nodes -o custom-columns=NAME:.metadata.name,MEM:.status.allocatable.memory,CPU:.status.allocatable.cpu`;
+  memory should match to a few MiB.
+- **Reported memory can drift down** (5.8, 4.1, 3.5, then 4.5 GiB over three weeks). Proxmox balloon-driver reclaim is the likely
+  cause (not verified), and Kubernetes schedules against whatever the kubelet reported at its last start. Verify in Proxmox before acting.
+- **Cordoning has a storage cost.** While cmp-05 was cordoned no `instance-manager` pod ran there, so no Longhorn replica could
+  start on it even though it had the most free disk, and a two-replica, no-backup volume ran on a single replica for days.
+- `longhorn-manager` exiting 137 with no liveness probe configured means the kernel killed it, not Kubernetes.
+- Keep heavy stateful I/O off a starved control-plane node: a flapping etcd member is the real danger.
+
+## Pods on one node cannot reach ClusterIPs: restart that node's cilium-agent
+
+2026-08-25: pods on `hiro-cmp-05` could not reach `10.43.0.1:443` (the apiserver ClusterIP) or other nodes' IPs, while the node was
+`Ready`, Cilium reported up, image pulls and external egress worked, and the apiserver answered a laptop in 0.17 s. The tell was the
+cilium-agent log on that node alone (8 errors in 10 minutes against 0 elsewhere): `error retrieving resource lock
+kube-system/cilium-l2announce-*` and `leaseClient.List: the server was unable to return a response in the time allotted`.
+
+- **Separate the pod network from the node network first.** A `hostNetwork: true` pod on the node reached `192.168.25.21:6443` in
+  9 ms; a normal pod pinned there with `nodeName` timed out on `https://10.43.0.1:443/healthz`. A healthy node returns `http=401`
+  in milliseconds. That isolated the fault to Cilium's datapath on that node.
+- **Fix:** delete the cilium-agent pod on that node (`kubectl -n kube-system delete pod <cilium pod>`; the DaemonSet recreates it).
+  East-west traffic was back to baseline about 2.5 minutes after init, and the two errors in the first 3 minutes were the agent's
+  own healthz not yet up. Established connections were never affected (the primary Postgres on the node kept running, 0 restarts).
+- **Knock-on effects to expect:** CNPG recovery Jobs pinned to the node by single-replica PVC locality failed with
+  `failed to get server groups: Get "https://10.43.0.1:443/api": dial tcp ... i/o timeout`, and CNPG does not retry that path;
+  Grafana pods on the node went into BackOff. An agent that cannot hold L2 announcement leases on a node is a latent LoadBalancer risk.
+- The root cause was never found: the restart cleared a stale or wedged datapath. A recurrence, on any node, is the next
+  diagnostic signal. When a workload on one node fails with in-cluster connectivity errors, run this check before debugging the workload.
+
+## Unexplained: all five nodes dropped within 25 seconds (2026-10-17)
+
+At about 02:29Z every node dropped within roughly 25 s and returned at 03:00:44Z (cmp-01) and 03:13:51-03:14:05Z (the rest). They sit
+on five different Proxmox hosts; vm02-04 never rebooted, vm01's syslog was clean, `oom_kill` was 0 and the cmp VMs (104-108) were not
+in a vzdump. The cause was never found. The fallout that lasted was a stuck Longhorn replica
+([gotchas-storage](gotchas-storage.md#a-replica-stuck-rebuilding-after-an-outage-blocks-snapshot-purge-and-so-trim)).
+
+## etcd has never been defragged
+
+On 2026-10-18 the etcd database was 539 MiB on disk with 84 MiB in use, and nothing defragments it. The stock
+`etcdDatabaseHighFragmentationRatio` alert is gated on the in-use size, so it stays quiet below 100 MiB and will fire once real
+data passes that. Re-check the two sizes before acting: the etcd series were not returned by the Prometheus MCP on 2026-11-06,
+so this is a dated observation, not live state. A defrag is a per-member operation (`talosctl etcd defrag`, one member at a time).

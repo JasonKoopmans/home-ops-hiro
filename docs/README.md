@@ -50,9 +50,9 @@ Things that bit this cluster and will bite again: what happens, why, what to do.
 | Doc | Covers |
 |---|---|
 | [gotchas-flux-helm](gotchas-flux-helm.md) | Rollback on one-way charts, dead per-app `upgrade:` blocks, hook Jobs that stall an upgrade, what static validation cannot catch, PVC growth, chart sources, private images |
-| [gotchas-storage](gotchas-storage.md) | Trim versus snapshot-chain removal, why a volume grow is rejected, manager-outage amplifiers, silent chart changes, engine upgrades, node and disk config, shared RWO volumes |
+| [gotchas-storage](gotchas-storage.md) | Trim versus snapshot-chain removal, a replica stuck rebuilding, backup S3 lock contention, the robustness metric shape, hypervisor pool faults behind guest disk errors, why a volume grow is rejected, manager-outage amplifiers, silent chart changes, engine upgrades, node and disk config, shared RWO volumes |
 | [gotchas-observability](gotchas-observability.md) | Alertmanager routing, alerts that cannot clear on their own, PodMonitor ports, node request alerts, Loki and Alloy, Thanos, known monitoring blind spots |
-| [gotchas-cluster](gotchas-cluster.md) | Dormant BGP, the `Database` CRD clash, the 50-image cap on `node.status.images` |
+| [gotchas-cluster](gotchas-cluster.md) | Dormant BGP, the `Database` CRD clash, the 50-image cap on `node.status.images`, a node rebuilt with less RAM, one node's pods unable to reach ClusterIPs, the unexplained all-node drop, high CPU on a 2-CPU node |
 
 ## Storage, backup and the Silo swap
 
