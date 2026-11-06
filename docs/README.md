@@ -47,7 +47,7 @@ Things that bit this cluster and will bite again: what happens, why, what to do.
 
 | Doc | Covers |
 |---|---|
-| [gotchas-flux-helm](gotchas-flux-helm.md) | Rollback on one-way charts, dead per-app `upgrade:` blocks, hook Jobs that stall an upgrade, what static validation cannot catch, PVC growth, chart sources, private images |
+| [gotchas-flux-helm](gotchas-flux-helm.md) | Rollback on one-way charts, dead per-app `upgrade:` blocks, hook Jobs that stall an upgrade, what static validation cannot catch, PVC growth, chart sources, private images, app-template resource naming, orphaning a stray HelmRelease |
 | [gotchas-storage](gotchas-storage.md) | Trim versus snapshot-chain removal, why a volume grow is rejected, manager-outage amplifiers, silent chart changes, engine upgrades, node and disk config, shared RWO volumes |
 | [gotchas-observability](gotchas-observability.md) | Alertmanager routing, PodMonitor ports, node request alerts, Loki and Alloy, Thanos, known monitoring blind spots |
 | [gotchas-cluster](gotchas-cluster.md) | Dormant BGP, the `Database` CRD clash, the 50-image cap on `node.status.images` |
@@ -81,7 +81,11 @@ Things that bit this cluster and will bite again: what happens, why, what to do.
 
 | Doc | Read before | Status |
 |---|---|---|
-| [mcp-onboarding](mcp-onboarding.md) | Adding an MCP server: the contract every server shares (`mcp` namespace, port 3000, auth phases) | reference |
+| [mcp-onboarding](mcp-onboarding.md) | Adding or debugging an MCP server: the contract every server shares (`mcp` namespace, port 3000, auth phases), known traps, per-server notes (proxmox, n8n, grafana, the SSE-only postgres) | reference |
+| [n8n](n8n.md) | Touching n8n: what lives only in its database (workflows, the Telegram Error Workflow), testing a workflow offline, n8n 2.x gotchas | reference |
+| [event-gateway](event-gateway.md) | Anything on the phone / Power Automate to Cloudflare Queue to n8n path: why it pulls, the Queues limits it depends on | reference |
+| [pocket-bridge](pocket-bridge.md) | The Hey Pocket to RecordingAnnotator to Obsidian CronJob: API constraints, dedupe design, the 2026-09-14 incident | reference |
+| [recording-annotator](recording-annotator.md) | The RecordingAnnotator deployment: scoped-MinIO-user convention, `hiro-` bucket prefix, hostnames, the client API | reference |
 | [lifeos-grafana](lifeos-grafana.md) | Touching the LifeOS Grafana. It is the one app where the PVC holds state Git does not | reference |
 | [lifeos-warehouse](lifeos-warehouse.md) | Changing the `lifeos` Postgres schema or what n8n writes into it | reference |
 | [lifeos-calendar](lifeos-calendar.md) | The Outlook to Google calendar mirror design (one-way, warehouse side in this repo) | design |
