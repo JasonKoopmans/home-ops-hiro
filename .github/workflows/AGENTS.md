@@ -20,4 +20,4 @@ Most apps here (~38/41) are `HelmRelease` + `chartRef`, so the YAML committed un
 flux-local build all --enable-helm --output-file rendered.yaml kubernetes/flux/cluster
 ```
 
-(defaults to `--skip-secrets`/`--skip-crds`, so no SOPS age key is needed). Feed `rendered.yaml`, not the source tree, to any static analysis tool.
+(defaults to `--skip-secrets`/`--skip-crds`, so no SOPS age key is needed). Feed `rendered.yaml`, not the source tree, to any static analysis tool. Running flux-local in Docker (including from a git worktree), rendering one HelmRelease and diffing it against main, and schema-checking a field are in [`docs/runbook-local-render.md`](../../docs/runbook-local-render.md).

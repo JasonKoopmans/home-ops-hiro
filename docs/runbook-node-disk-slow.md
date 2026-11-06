@@ -83,6 +83,37 @@ allowlist, `EtcdMetricsMissing` for the scrape going blind.
 Not in place, deliberately or for now: a cap on parallel pulls for cmp-05 (kubelet `maxParallelImagePulls`, a Talos change),
 a soft taint steering new pods off cmp-05, and a faster disk for it.
 
+## Levers still open, and ones not worth pulling
+
+Ranked as of 2026-10-09; check each is still open before acting. The real fix is a faster Proxmox datastore for `scsi0`.
+
+1. **Cap parallel pulls on cmp-05 only:** kubelet `maxParallelImagePulls: 2` (`serializeImagePulls: false` stays; it has been
+   deliberate since the initial commit, `talos/all/01-machine-kubelet.yaml`). A Talos node patch, so it needs an explicit ask
+   (`talos/AGENTS.md`). Untested: compare the pull-duration p90 on the next batch.
+2. **Soft-steer pods off cmp-05:** a `PreferNoSchedule` taint, or soft anti-affinity on the big-image apps (precedent: #333). The
+   other nodes had about 3.8 cores unrequested and cmp-03 was at 82% CPU (2026-10-04), so they cannot absorb everything.
+3. **`waitStrategy: legacy` plus the default `timeout` cluster-wide** in `cluster-apps` (`kubernetes/flux/` needs an explicit OK).
+   The five HelmReleases on `timeout: 15m/20m` already carry per-app `legacy` (#752).
+
+Not worth it: `discard_unpacked_layers` (same write volume), Spegel (the writes still land on `sda`), more CPU or RAM (it is
+iowait, not CPU), and GC tuning for cmp-05 (137 GiB `/var` at 60%, while the other nodes sit near the 75% trigger on 47.8 GiB).
+
+## Facts that are easy to get wrong
+
+- **Hardware (Proxmox vm05, VM 104):** `scsi0` is `sda` 140G on `vdisk01` (lvmthin, 133.88 GB pool, 77.5% full on 2026-10-04);
+  `scsi1` is Longhorn `sdb` 300G on `data-200` (a ZFS SAS stripe, 3.7 ms in the storm). Longhorn's data disks on cmp-05 were fine.
+  cmp-05's `/var` is 137.8 GiB against 47.8 GiB on the others.
+- **etcd runs on all five nodes** (`allowSchedulingOnControlPlanes`), and the leader was hiro-cmp-03 on 2026-10-04, so cmp-05's slow
+  disk does not gate commits. Quiet-cluster baseline (2026-10-05): p99 WAL fsync 51 ms on cmp-05 against 4-15 ms, backend commit
+  63 ms against 4-16 ms.
+- **Why pods land on cmp-05 is unproven.** 12 of the 30 pods created 00:20-00:45Z on 2026-10-03 did (cmp-03 10, the rest 2-3), but
+  cmp-05 holds a normal share of pods (41 against 28-44) and the highest memory requests (83%), so default LeastAllocated scoring
+  should not favour it. Recreate replacements returning to the node they vacated is the likelier cause (unchecked). The claim that
+  the scheduler piles pods there for the most free CPU is weakly supported.
+- **Control-plane impact of a storm is unmeasured:** the apiserver request histograms returned no data when this was checked.
+- **Before blaming the network for a slow pull on this node, query `sda` write latency and utilisation first** (the 2026-08-30
+  audacity pull, 15m50s, was blamed on east-west networking; its disk metrics were never checked).
+
 ## What the alert cannot see
 
 - Any device other than `sda`, including Longhorn's data disks.
