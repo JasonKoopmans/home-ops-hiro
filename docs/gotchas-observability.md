@@ -81,6 +81,19 @@ and MiB). A per-container sum is wrong in three ways:
   CNPG's `bootstrap-controller` repeats the main container's request, so summing init containers double-counts: use `max`.
 - Nodes are CPU-asymmetric (cmp-01/02 = 3, cmp-03/04 = 2, cmp-05 = 4), so the same request is a different fraction per node.
 
+When one fires (the 2026-10-03/04 `NodeCpuRequestsHigh`/`Critical` pages on cmp-03 read as "high CPU" but were 95% **requested** against
+about 37% real use):
+
+- Compare the alert to `kubectl describe node` in mCPU first. If they disagree the rule is wrong, not the node.
+- cmp-03 fills first because memory is uniform while CPU is not, and the default scheduler weighs the two fractions equally, so
+  absolute CPU requests end up near-equal (about 1.8 cores on cmp-01/02/03) and the smallest nodes hit the CPU wall first.
+- Free capacity by right-sizing **measured** over-reservations (rank request minus the 7-day p95 through Thanos) before moving pods.
+  #741 cut the CNPG request 500m to 250m (primary p99 71m, max 296m) and #746 cut five more requests, each with a full 7-day usage
+  window; cmp-03 went 95.0% to 83.7% to 68%. Margin stays thin (85% is about 1657m of 1950m).
+- A partial `resources.requests.cpu` override deep-merges with some charts' defaults (flux-operator 0.61.0, verified with `helm template`)
+  and replaces them wholesale in others, so render before assuming.
+- Expect a rolling pod to hold its request while Terminating: the knative activator has `terminationGracePeriodSeconds: 600`.
+
 ## Loki and Alloy
 
 - **`| regexp` keeps lines that do not match.** The extracted labels are simply absent, and `| __error__=""` does not remove

@@ -575,3 +575,6 @@ and every daily count is quietly wrong at the edges.
   gone," other than a manual `DELETE` outside these documented conventions. (The
   work-calendar tables are the exception: they have a scheduled purge, see
   *Append, don't update*.)
+
+- **`core.health_metrics` carries two spellings of one source.** `Apple Health` (rows to 2026-08-27) and `AppleHealth` (from
+  2026-08-21) overlap by a week. Normalise the source in the view, or filter on both, before charting across that boundary.
