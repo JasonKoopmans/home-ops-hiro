@@ -28,8 +28,10 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           # CPU-only inference: keep it off the 2-CPU nodes (cmp-03/04), whose
-          # CPU is already dominated by Longhorn I/O, and off cmp-05's slow
-          # system disk.
+          # CPU is already dominated by Longhorn I/O. cmp-05 is allowed (4 CPU,
+          # most free CPU/RAM): its slow system disk only slows the one-time
+          # image pull and model load, and steady-state inference does no disk
+          # I/O. Revisit if cmp-05 shows disk or etcd trouble while this runs.
           affinity:
             nodeAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
@@ -37,7 +39,7 @@ spec:
                   - matchExpressions:
                       - key: kubernetes.io/hostname
                         operator: In
-                        values: ["hiro-cmp-01", "hiro-cmp-02"]
+                        values: ["hiro-cmp-01", "hiro-cmp-02", "hiro-cmp-05"]
         containers:
           app:
             image:
