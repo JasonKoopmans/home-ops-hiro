@@ -317,3 +317,21 @@ of config. Two preconditions: CNPG's backups are still marked **unverified**
 pending a restore drill (`docs/plan-cloudnative-pg.md` §1b), and the migration
 itself is a one-way data move that needs its own snapshot. Not a v1 change, but
 the right destination.
+
+## Editing a dashboard's JSON Model by hand
+
+Settings ➔ JSON Model on Grafana v13.2.1 has constraints that took three wrong attempts to find (2026-09-05). This is for a
+one-off direct edit; the `task lifeos:dashboard:export` promotion flow targets the classic ConfigMap shape and is unaffected.
+
+1. **The editor validates against the V2 dashboard schema**, whatever is stored (this instance's dashboards are stored as
+   classic/V1). Panels live under `spec.elements` (keyed by an id such as `"panel-1"`) plus `spec.layout` (a `GridLayout`
+   referencing elements by name), not `panels[]`. `spec.annotations` is a flat array. A panel's query fields (`rawSql` etc.)
+   nest under `elements.<id>.spec.data.spec.queries[].spec.query.spec`, and a query's datasource is `{name: "<uid>"}` with the
+   plugin type in a sibling `group` field, not `{type, uid}`.
+2. **Do not hand-author the shape: pull it.** `GET /apis/dashboard.grafana.app/v2beta1/namespaces/default/dashboards/<uid>`
+   returns Grafana's own conversion of the stored dashboard (check `status.conversion.failed: false`). The classic
+   equivalent is the `v1beta1` path. This is more reliable than the grafana.com docs, which lag the shipped schema.
+3. **The tab refuses metadata edits on an existing dashboard** ("Editing dashboard metadata is not yet supported"), even when the
+   pasted values are byte-identical. Strip `metadata` to `{"name": "<uid>"}` and drop the read-only `status` block.
+4. **`apiVersion` must be the unsuffixed `dashboard.grafana.app/v2`**, not the `v2beta1` the API serves it as.
+5. **A threshold step's base `value` must be a real number** (`0`), not `null`, which the editor's validator rejects.

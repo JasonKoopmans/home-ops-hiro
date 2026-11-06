@@ -41,14 +41,26 @@ New docs: name them `runbook-<topic>`, `incident-<topic>`, `plan-<topic>`, `spik
 | [runbook-postgres-recovery](runbook-postgres-recovery.md) | How to recover PostgreSQL, and how the weekly restore drill proves backups | live |
 | [postgres-failure-modes](postgres-failure-modes.md) | What breaks, what self-heals and what needs a human on the CNPG cluster | reference |
 
+## Gotchas by area
+
+Things that bit this cluster and will bite again: what happens, why, what to do. Read the one for the area you are changing.
+
+| Doc | Covers |
+|---|---|
+| [gotchas-flux-helm](gotchas-flux-helm.md) | Rollback on one-way charts, dead per-app `upgrade:` blocks, hook Jobs that stall an upgrade, what static validation cannot catch, PVC growth, chart sources, private images |
+| [gotchas-storage](gotchas-storage.md) | Trim versus snapshot-chain removal, why a volume grow is rejected, manager-outage amplifiers, silent chart changes, engine upgrades, node and disk config, shared RWO volumes |
+| [gotchas-observability](gotchas-observability.md) | Alertmanager routing, PodMonitor ports, node request alerts, Loki and Alloy, Thanos, known monitoring blind spots |
+| [gotchas-cluster](gotchas-cluster.md) | Dormant BGP, the `Database` CRD clash, the 50-image cap on `node.status.images` |
+
 ## Storage, backup and the Silo swap
 
 | Doc | Use it when | Status |
 |---|---|---|
 | [backup-recovery](backup-recovery.md) | Backup and recovery of `recording-annotator` (its dedicated Silo/MinIO instance and index) | reference |
+| [minio-exit-assessment](minio-exit-assessment.md) | Why MinIO was replaced, the options ruled out and why, what the swap established, and the 6-12 month migration target still open | design |
 | [silo-qualification](silo-qualification.md) | Evidence behind swapping both MinIO instances to Silo; re-run `scripts/silo-qualify/` after any pin change | reference |
-| [runbook-minio-silo-swap-recording-annotator](runbook-minio-silo-swap-recording-annotator.md) | Dedicated RecordingAnnotator instance. Done 2026-10-30/31; section 7 lists the soak cleanup still open | in progress |
-| [runbook-minio-silo-swap-shared](runbook-minio-silo-swap-shared.md) | Shared `storage/minio` (Thanos + Loki). Merging PR #900 is the trigger | in progress |
+| [runbook-minio-silo-swap-recording-annotator](runbook-minio-silo-swap-recording-annotator.md) | Dedicated RecordingAnnotator instance. Done 2026-10-30/31, soak cleanup merged 2026-11-04 | historical |
+| [runbook-minio-silo-swap-shared](runbook-minio-silo-swap-shared.md) | Shared `storage/minio` (Thanos + Loki). Done 2026-10-31 (#900), soak cleanup merged 2026-11-04 | historical |
 | [incident-thanos-compactor-disk-pressure](incident-thanos-compactor-disk-pressure.md) | The July 2026 compactor eviction loop and MinIO ghost-block loop; resolved 2026-07-19 | historical |
 | [ephemeral-apps-keda](ephemeral-apps-keda.md) | audacity / freecad / openreel scale to zero: how, why it is not a GitOps violation, what it does not cover | design |
 
@@ -83,7 +95,7 @@ Each is an `AGENTS.md` with a one-line `CLAUDE.md` (`@AGENTS.md`) beside it. Cla
 
 | Directory | Holds |
 |---|---|
-| [`talos/`](../talos/AGENTS.md) | topf, the 1.14 config contract, the apply procedure |
+| [`talos/`](../talos/AGENTS.md) | topf, the 1.14 config contract, the apply procedure, what to check before rolling a release |
 | [`kubernetes/apps/monitoring/kube-prometheus-stack/`](../kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md) | Alert rule shape, routing, promtool testing, listing what already alerts |
 | [`kubernetes/apps/monitoring/alloy/`](../kubernetes/apps/monitoring/alloy/AGENTS.md) | Testing a log pipeline change before it hot-reloads cluster-wide |
 | [`kubernetes/apps/lifeos/`](../kubernetes/apps/lifeos/AGENTS.md) | The one app whose PVC holds state Git lacks |

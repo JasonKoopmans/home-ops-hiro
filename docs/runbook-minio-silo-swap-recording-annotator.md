@@ -1,8 +1,13 @@
 # Runbook: swap the RecordingAnnotator MinIO to Silo
 
+> **Status:** historical. Executed 2026-10-30/31; the soak cleanup merged 2026-11-04 (#960, #961). On 2026-11-05 both MinIO
+> HelmReleases were Ready on the Silo pin, no keeper pods or pre-swap PVC remained, and `upgrade.disableWait` was gone. Kept
+> for the reasoning and as the template for the next Silo bump; do not follow it as a live procedure. Why Silo and what is
+> left: [minio-exit-assessment](minio-exit-assessment.md).
+
 > **Post-soak status (2026-11-04, PR #960):** `upgrade.disableWait` is gone from the HelmRelease, so every mention of it below (D1d, "the wait is off", "Flux will not roll back") describes the swap window only. Flux can now roll a failed upgrade back onto the previous Silo revision: before a Silo bump take a Longhorn snapshot and `flux suspend hr` first.
 
-**Status: DONE 2026-10-30/31 (PR #899, follow-ups #903 and #925). In soak; §7 lists what is left.** Silo
+**Status: DONE 2026-10-30/31 (PR #899, follow-ups #903 and #925). Soak cleanup finished 2026-11-04 (§7 is the record of it).** Silo
 `RELEASE.2026-10-26` has served `recordings` since 2026-10-31 04:10Z (about 23:10 CDT on 10-30); the swap itself took
 seconds, the whole window about 80 minutes. Result: `format.json` byte-identical, 83 objects / 2,030,030,689 B
 identical before and after, admin export diff only new Silo defaults, mirror dry-run and real run clean, a genuine

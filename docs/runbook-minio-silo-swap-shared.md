@@ -1,13 +1,19 @@
 # Runbook: swap the shared MinIO (Thanos + Loki) to Silo
 
+> **Status:** historical. #900 merged 2026-10-31 04:15Z and the Deployment's current ReplicaSet became available at 04:16Z;
+> `upgrade.disableWait` was removed in #960. On 2026-11-05 `storage/minio` was Ready on the Silo pin with no keeper pods left.
+> Not verified: whether the Day-3 cleanup in section 7 (delete the `pre-silo-*` Longhorn snapshots, patch
+> `unmapMarkSnapChainRemoved`) was done; check the volume in the Longhorn UI if the space matters. The instructions below were
+> written 2026-10-29 before the run. Why Silo and what is left: [minio-exit-assessment](minio-exit-assessment.md).
+
 > **Post-soak status (2026-11-04, PR #960):** `upgrade.disableWait` is gone from the HelmRelease, so every mention of it below (D1d, "the wait is off", "Flux will not roll back") describes the swap window only. Flux can now roll a failed upgrade back onto the previous Silo revision: before a Silo bump take a Longhorn snapshot and `flux suspend hr` first.
 
 Instance `storage/minio` (Deployment `minio`, PVC `minio`, 120Gi, class `longhorn-2-no-backup`). The dedicated
 RecordingAnnotator instance has its own runbook, `docs/runbook-minio-silo-swap-recording-annotator.md`; nothing here
 touches it. Manifest changes: draft PR #900. **Merging that PR is the trigger** (section 4, M6).
 
-Qualification results live in `docs/silo-qualification.md` (PR #902, not duplicated here; updated 2026-10-30 from its results). The pin is final (report, Recommendation). What the report left untested for this instance is closed by section 9 (clone rehearsal) or is named where it applies. Times are **UTC**; Longhorn's recurring jobs run in UTC too. Written 2026-10-29, unexecuted:
-treat every command as a draft until you have run its read-only half.
+Qualification results live in `docs/silo-qualification.md` (PR #902, not duplicated here; updated 2026-10-30 from its results). The pin is final (report, Recommendation). What the report left untested for this instance is closed by section 9 (clone rehearsal) or is named where it applies. Times are **UTC**; Longhorn's recurring jobs run in UTC too. Written 2026-10-29, before the run:
+treat every command as a draft until you have run its read-only half (relevant if you reuse it for a later Silo bump).
 
 Setup for every shell block below:
 
