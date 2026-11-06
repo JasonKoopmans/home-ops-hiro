@@ -23,6 +23,30 @@ and the Alloy pipeline rules are in [`kubernetes/apps/monitoring/alloy/AGENTS.md
 - **A rule that aggregates away `namespace` lands in the namespace-less digest.** That is by design for the Flux alert; see the
   Routing bullet in the `AGENTS.md`.
 
+## Alerts that cannot clear on their own
+
+Established with #414 (2026-08-08), after #410 restored Telegram delivery and exposed what would have been sent. The rule is in
+`kubernetes/apps/monitoring/kube-prometheus-stack/AGENTS.md`; these are the details behind it.
+
+- **`kube_job_failed > 0` keys on a failed Job *existing*, not on a recent failure.** `failedJobsHistory: N` caps how *many* failed
+  Jobs are kept, **not for how long**: with no `ttlSecondsAfterFinished` Kubernetes keeps them indefinitely. Three transient
+  recording-annotator failures on 2026-08-01 held a **critical** firing for a week, and only deleting the Job objects by hand cleared
+  it. An alert that cannot resolve itself trains you to ignore the channel.
+- **Prefer `time() - kube_cronjob_status_last_successful_time{cronjob="..."} > <threshold>`.** It self-clears and reads the CronJob's
+  status through kube-state-metrics, an independent path from any app-exposed gauge. **That series does not exist until the CronJob
+  has succeeded once**, so a monthly job that has never succeeded (the restore drill) gives an empty expression that silently never
+  fires: check `kubectl get cronjob -o custom-columns=NAME:.metadata.name,LASTSUCCESS:.status.lastSuccessfulTime` before re-keying,
+  and add the `...NeverSucceeded` twin.
+- **When keying on an object's existence is unavoidable, bound it by recency:**
+  `kube_job_failed{...} > 0 and on (namespace, job_name) (time() - kube_job_created{...} < <window>)`. Check the join really filters:
+  the same shape against `kube_job_complete` gave 6 series at a 7d window and 0 at 1s.
+- **A rule must not depend on the TTL being right.** `ttlSecondsAfterFinished` is still worth setting: bjw-s app-template renders it from
+  the `cronjob:` key into `jobTemplate.spec`. Scale it to the schedule (recording-annotator uses 24h for hourly jobs, 48h for daily,
+  7d for monthly). It deletes the Job **and its pods**, so their logs go with it.
+- **Pair a rule that reads an app's own gauge with a second rule on a different data path.** The `recording_annotator_*_timestamp_seconds`
+  series comes from the app's ServiceMonitor; if that scrape breaks, the `*Stale` expressions go empty and stop alerting with no
+  dead-man. Give the backstop a looser threshold and a lower severity, so a real outage pages once and not twice.
+
 ## Scraping
 
 - **A PodMonitor target is dropped silently unless the container declares the port.** No error, no `up` series, nothing to

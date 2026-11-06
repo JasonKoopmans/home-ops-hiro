@@ -40,6 +40,13 @@ Minutes instead of tens of minutes, and an unintended chart change shows up imme
 - A `TimeoutError` from `flux_local/command.py run_piped` means the machine was busy (kubeconform and other docker runs in
   parallel): rerun that one app alone.
 
+## Fetching a chart by hand
+
+`helm pull` or `helm template` against `oci://ghcr.io/bjw-s-labs/helm/app-template` was extremely slow from the Mac (it timed out at 300s
+and finished in the background minutes later). Run it in the background from the start. When you only need to confirm that a values
+key is wired up, fetch the template straight from `raw.githubusercontent.com/bjw-s-labs/helm-charts/common-<version>/...`, which is
+much faster.
+
 ## Schema-check a HelmRelease field
 
 ```sh

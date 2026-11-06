@@ -70,6 +70,27 @@ uids are `thanos` (default; raw 7d, then 5m and 1h tiers), `prometheus` ("Promet
   `receivers` for each instance; and `increase(alertmanager_notifications_failed_total{integration="telegram"}[1d])` should be 0,
   the only check that a changed notification template actually renders.
 
+### Triage: noise or missing detection?
+
+Run this before writing a rule for something that "was not noticed". On 2026-08-16 the Longhorn outage was fully detected and fully
+delivered: 23 distinct alertnames (about 90 series) and about 200 Telegram notifications in 8 hours (one every 2.4 minutes), zero
+`alertmanager_notifications_failed_total`. Three detectors already covered it (`LonghornManagerDown`, `LonghornNodeNotReady`,
+`KubeDaemonSetRolloutStuck{daemonset="longhorn-manager"}`); the criticals were simply unfindable, and a fourth rule would have made
+it worse. The routing fix is in `alertmanagerconfig.yaml` (its comments carry the reasoning). Against Prometheus (Thanos, or a
+port-forward of `svc/kube-prometheus-stack-prometheus`):
+
+- `ALERTS{alertname="X"}` over a range shows a rule's pending and firing history.
+- `sum by (integration) (increase(alertmanager_notifications_total[1h]))` shows what was actually delivered.
+- `count by (alertname) (max_over_time(ALERTS{alertstate="firing"}[8h] @ <ts>))` ranks the noise.
+
+Two label traps to re-check before writing any matcher or inhibit rule: an inhibit target matched on alertname alone also mutes the
+`critical` instances (`LonghornVolumeUnhealthy` is critical and is the one alert about real data risk), so pair a cascade rule with
+`severity != critical`; and node-level alerts carry the **rule's** namespace, not the node's (`KubeNodeUnreachable` and
+`NodeDiskIOSaturation` arrive as `namespace="monitoring"`), so route them by alertname prefix `(Node|KubeNode|Host|Kubelet).*`, not by
+an absent namespace label. Inhibit rules are not namespace-scoped here only because `alertmanagerConfigMatcherStrategy` is `None`
+(read in prometheus-operator's `amcfg.go`, which the CRD docs get wrong); reverting it silently turns a cluster-wide inhibit rule
+into a no-op.
+
 ### Do not blow the context budget
 
 The MCP `query_prometheus` range result is raw JSON: two series over 7d at a 300s step was 71 KB and overflowed the token limit (the
