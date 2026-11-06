@@ -124,3 +124,37 @@ using the `GHCR_TOKEN` secret from the Mend Developer Portal (a classic PAT with
 work for GHCR). A new private image under that namespace needs no config. If lookups `401` again, suspect an expired token
 before the config. Merge a config change that references a secret only after the secret exists: an undefined one can reject
 the whole config.
+
+## app-template appends the controller name only when there are two
+
+bjw-s app-template builds a resource name from the release name and appends the controller identifier **only when the release has
+more than one controller** (`lib/common/_determineResourceNameFromValues.tpl`, guarded by
+`if or (gt $itemCount 1) .Values.global.alwaysAppendIdentifierToResourceName`). A single-controller release named `pocket-bridge`
+renders its CronJob as `pocket-bridge`, while `recording-annotator`'s four controllers all get suffixes. Verified with
+`helm template`.
+
+- This bit the first draft of the pocket-bridge alert: `cronjob="pocket-bridge-sync"` matched nothing, so the rule never fired and
+  its `absent()` companion fired forever and never cleared.
+- **Adding a second controller later silently renames the first one's resources**, and every selector that named them goes quiet.
+- Render the chart (`helm template`, or flux-local) before writing any PromQL selector, ServiceMonitor or cross-reference that names
+  an app-template resource.
+
+## A stray HelmRelease owns objects of the real release: orphan it, never delete it
+
+2026-10-29: `default` held HelmReleases for `envoy-gateway` (v1.7.1, applied by hand 2026-04-11), `mariadb-operator` and
+`mariadb-operator-crds` (0.35.0) with no Flux Kustomization owner and no Git source; the real ones live in `network` and
+`database`. The envoy one had no Deployment, a Service with no endpoints and a live MutatingWebhookConfiguration
+(`envoy-gateway-topology-injector.default`, `failurePolicy: Ignore`) that failed open on every pod bind: about 132 errors and 132
+warnings a day on the apiserver the scheduler talks to. Noise only; the working injector was the `network` one.
+
+- **Do not delete the HelmRelease or `helm uninstall`.** Each stray release's Flux inventory contains cluster-scoped CRDs,
+  ClusterRoles and webhook configs with the same names as the real release's, annotated as owned by it (envoy: 20 CRDs;
+  mariadb-crds: 9). Deleting normally makes helm-controller uninstall them.
+- **Orphan it:** suspend the HelmRelease, strip the finalizer `finalizers.fluxcd.io`, delete it. Then remove only the dead webhook
+  config and the default-namespace leftovers (Services, stray TLS Secrets); leave the cluster-scoped objects. CRD and ClusterRole
+  counts were identical before and after, and the real releases and Flux stayed Ready.
+- **A `dependsOn` can point at a stray object by accident.** `database/mariadb-operator` listed `dependsOn: mariadb-operator-crds`
+  with `namespace: default`: the stray, never the real `database/mariadb-operator-crds`. It worked until the orphaning, then the
+  HelmRelease went `Ready=False: unable to get 'default/mariadb-operator-crds' dependency ... not found` (pods unaffected, the
+  release just could not reconcile) and tripped the "Flux clean" gate of the Silo runbooks. #950 corrected the namespace. When
+  removing a stray, grep `dependsOn` for its name first.
