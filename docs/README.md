@@ -51,6 +51,7 @@ Things that bit this cluster and will bite again: what happens, why, what to do.
 | [gotchas-storage](gotchas-storage.md) | Trim versus snapshot-chain removal, why a volume grow is rejected, manager-outage amplifiers, silent chart changes, engine upgrades, node and disk config, shared RWO volumes |
 | [gotchas-observability](gotchas-observability.md) | Alertmanager routing, PodMonitor ports, node request alerts, Loki and Alloy, Thanos, known monitoring blind spots |
 | [gotchas-cluster](gotchas-cluster.md) | Dormant BGP, the `Database` CRD clash, the 50-image cap on `node.status.images` |
+| [ollama-oom-rca](ollama-oom-rca.md) | 2026-11-06 Ollama OOMKills: thinking model on CPU, llama-server prompt cache, CPU saturation; fixes and n8n settings |
 
 ## Storage, backup and the Silo swap
 
