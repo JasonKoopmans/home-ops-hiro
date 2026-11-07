@@ -35,7 +35,7 @@ New capabilities in any watched product are surfaced when they match one of thes
   - `inrepo{ <component>: <last-digested-version> }` — so an already-reported delta doesn't repeat until it changes again.
   - `lastRun: <ISO>`.
   On each run: load state → surface only new items / new deltas → write state back. First run (no file) uses a 35-day window.
-- **Fetch method:** GitHub `*.atom` + most blogs = plain HTTPS. **Exceptions needing a browser User-Agent:** Pocket (`heypocket.com`, 403 otherwise). No-RSS products (Todoist, Claude) = fetch the "what's new" page and diff text against state.
+- **Fetch method:** GitHub `*.atom` + most blogs = plain HTTPS. **Exceptions needing a browser User-Agent:** Pocket (`heypocket.com`, 403 otherwise). No-RSS products (Todoist, Claude) = fetch the "what's new" page and diff text against state. **Todoist's changelog is JS-rendered** (`todoist.com/help/categories/product-updates/changelog`): plain `curl` returns no article list, use a headless browser.
 - **Cadence:** weekly, Saturday — pre-briefs Renovate's Saturday PRs. See "Delivery" below.
 
 ## Watched scope
@@ -67,7 +67,7 @@ Consumer/SaaS products — pure feature-watch, no version diff. Where there's no
 | Readwise Reader | Read-later / knowledge | `blog.readwise.io/rss/` ✓ (blog covers Reader) |
 | Obsidian **(product / ecosystem)** | Notes / PKM platform | `github.com/obsidianmd/obsidian-releases/releases.atom` ✓ (release notes = new app capabilities). Watch the **whole product surface** — core app features, sync/publish, plugin platform APIs — not one install. See "Obsidian: product vs instances" below. |
 | Gemini | AI assistant | `blog.google/products/gemini/rss/` ✓ |
-| Todoist | Tasks | no RSS → fetch "What's New" page during run |
+| Todoist | Tasks | no RSS → render `todoist.com/help/categories/product-updates/changelog` in a headless browser during run (old "what's new" URL now redirects to a generic help page) |
 | Claude (Anthropic) | AI assistant / MCP | no RSS → fetch `anthropic.com/news` + docs release notes during run |
 | Apple ecosystem | Devices / OSes | **deferred — ignore for now** (feeds exist: `apple.com/newsroom/rss-feed.rss`, `developer.apple.com/news/releases/rss/releases.rss`; too broad, revisit later) |
 
@@ -90,6 +90,7 @@ Product→product links to watch for enabling features. **Draft below — Jason 
 
 - Home Assistant events and integrations  →  n8n workflow trigger  *(automation hub feeding the workflow engine)*
 - n8n  →  Hermes agent / LLM  *(AI-in-the-loop for workflow decisions)*
+- n8n / Hermes  →  Ollama  *(`default/ollama`: in-cluster CPU-only local inference, a model backend that avoids external API calls; see `docs/ollama-oom-rca.md`)*
 - Cloudflare Access  →  central auth for `envoy-internal` services  *(current access-mgmt layer; watch new Access app/policy features)*
 - Tailscale network mesh  →  connectivity
 - Plex / Home Assistant  →  Homepage dashboard widgets  *(surface external product state on the in-cluster dashboard)*
