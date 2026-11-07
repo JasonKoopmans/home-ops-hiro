@@ -52,6 +52,28 @@ behaviour after rollout:
   `container_cpu_cfs_throttled_periods_total` not climbing hard.
 - Item latency is seconds, not minutes.
 
+## Outcome (checked 2026-11-07)
+
+- Rolled out 2026-11-06 ~21:45 UTC; n8n's Ollama node switched to the instruct model with `think: false` and `numPredict: 256`.
+- Over the next 5h on the replacement pod (a later Renovate bump to 0.40.15 rolled it): 0 restarts, working set peaked 3.49Gi
+  of the 5Gi limit, no `prompt_save` log lines, no `PodMemory*`/`HostHighCpu*`/`NodeSystemSaturation` firing. This is the
+  behavioural proof that `LLAMA_ARG_CACHE_RAM` is honoured.
+- First clean "Readwise Flows" run (03:57 UTC) took 2m22s, against 4.5h runs before. Ollama's own log shows 1.5-2m per request
+  because the Text Classifier sends `batchSize: 10` at once to `NUM_PARALLEL=1`; that is queue wait, not generation time.
+- Not measured: a direct benchmark of the new model (blocked by the lock-in below), so the items/hour figure for #20 still
+  needs a real batch.
+
+## Gotcha: a stuck request pins the old model
+
+Ollama holds one model (`OLLAMA_MAX_LOADED_MODELS=1`, `KEEP_ALIVE=-1`). A request for another model waits until the
+in-flight one finishes, and `ollama ps` shows the old model as `Stopping...`. On 2026-11-06 an n8n run started before the
+workflow edit kept sending thinking-model requests (3000+ tokens, hours at 2-3 tok/s). **Cancelling the n8n execution did not
+stop the generation**: the runner kept going (task still producing tokens 5 min after the cancel). What cleared it was the
+pod being replaced. Next time, after changing the model name, check `ollama ps` and the log for `print_timing` before
+trusting the swap, and delete the pod (`kubectl -n default delete pod -l app.kubernetes.io/name=ollama`, one pod, Flux
+recreates it) if the old model is still loaded. Changing the n8n model name while a run is in flight is the trigger: edit
+between scheduled runs (`:57` every 3h).
+
 ## More than one replica?
 
 Not now, but not ruled out. Scrutiny on 2026-11-06:
