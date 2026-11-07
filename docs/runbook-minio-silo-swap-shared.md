@@ -3,8 +3,9 @@
 > **Status:** historical. #900 merged 2026-10-31 04:15Z and the Deployment's current ReplicaSet became available at 04:16Z;
 > `upgrade.disableWait` was removed in #960. On 2026-11-05 `storage/minio` was Ready on the Silo pin with no keeper pods left.
 > The Day-3 cleanup in section 7 is done (checked on the live cluster 2026-11-07): no `pre-silo-*` snapshot remains,
-> `unmapMarkSnapChainRemoved` is `enabled` on the volume, and the 2026-10-30 Longhorn backup is gone too. The instructions below
-> were written 2026-10-29 before the run. Why Silo and what is left: [minio-exit-assessment](minio-exit-assessment.md).
+> `unmapMarkSnapChainRemoved` is `enabled` on the volume, and the 2026-10-30 Longhorn backup is gone too. P6 (old-image export to
+> `ghcr.io`) was never done, so the old image is not kept offsite. The instructions below were written 2026-10-29 before the run.
+> Why Silo and what is left: [minio-exit-assessment](minio-exit-assessment.md).
 
 > **Post-soak status (2026-11-04, PR #960):** `upgrade.disableWait` is gone from the HelmRelease, so every mention of it below (D1d, "the wait is off", "Flux will not roll back") describes the swap window only. Flux can now roll a failed upgrade back onto the previous Silo revision: before a Silo bump take a Longhorn snapshot and `flux suspend hr` first.
 
