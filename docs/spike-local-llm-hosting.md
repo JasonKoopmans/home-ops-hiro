@@ -48,8 +48,8 @@ Qwen3.6-35B-A3B on a Ryzen 7 CPU or iGPU, ~1.2 tok/s for DeepSeek V4 Flash on a 
 - **The Hermes brain stays on a hosted model for now.** An agent loop needs a 20 to 35B model with reliable tool calls and long
   prompts. That is not viable on these CPUs.
 - **If that changes,** host it off-cluster (a Mac with Apple silicon, or a mini-PC with 32 to 64 GB and NVMe) as an
-  OpenAI-compatible endpoint, reached from the cluster by an `ExternalName` Service plus a base-URL setting in Hermes. The Hermes manifests were not
-  read the Hermes manifests when I wrote this; check how it takes its model settings first.
+  OpenAI-compatible endpoint, reached from the cluster by an `ExternalName` Service plus a base-URL setting in Hermes. How Hermes
+  takes its model settings was not checked here; read its manifests first.
 - A hosted fallback for Hermes was left undecided.
 
 ## What happened next
