@@ -149,11 +149,16 @@ spec:
           chatID: 8854064758
           sendResolved: true
           parseMode: HTML
+          # The workflow_name branch names an n8n workflow (N8nWorkflowFailed keeps
+          # only workflow_id and workflow_name after its `sum by`, so none of the
+          # labels above exist). `| html` because a workflow name is free text and
+          # one raw `<` or `&` makes Telegram reject the whole message with
+          # "can't parse entities".
           # The last branch names a Flux object (FluxResourceNotReady carries
           # kind / exported_namespace / name and none of the labels above).
           # Without it two stuck objects render as two identical lines.
           message: |-
             🟠 <b>{{ .Alerts.Firing | len }} warning(s)</b>{{ if .GroupLabels.namespace }} in <code>{{ .GroupLabels.namespace }}</code>{{ end }}
-            {{ range .Alerts.Firing }}• <b>{{ .Labels.alertname }}</b>{{ if .Labels.job_name }} <code>{{ .Labels.job_name }}</code>{{ else if .Labels.pod }} <code>{{ .Labels.pod }}</code>{{ else if .Labels.node }} <code>{{ .Labels.node }}</code>{{ else if .Labels.instance }} <code>{{ .Labels.instance }}</code>{{ else if .Labels.name }} <code>{{ .Labels.kind }} {{ .Labels.exported_namespace }}/{{ .Labels.name }}</code>{{ end }} — since {{ .StartsAt.Format "15:04" }}
+            {{ range .Alerts.Firing }}• <b>{{ .Labels.alertname }}</b>{{ if .Labels.job_name }} <code>{{ .Labels.job_name }}</code>{{ else if .Labels.pod }} <code>{{ .Labels.pod }}</code>{{ else if .Labels.node }} <code>{{ .Labels.node }}</code>{{ else if .Labels.instance }} <code>{{ .Labels.instance }}</code>{{ else if .Labels.workflow_name }} <code>{{ .Labels.workflow_name | html }}</code>{{ else if .Labels.name }} <code>{{ .Labels.kind }} {{ .Labels.exported_namespace }}/{{ .Labels.name }}</code>{{ end }} — since {{ .StartsAt.Format "15:04" }}
             {{ end }}{{ if gt (len .Alerts.Resolved) 0 }}
             ✅ <b>{{ .Alerts.Resolved | len }} resolved</b>: {{ range .Alerts.Resolved }}{{ .Labels.alertname }} {{ end }}{{ end }}

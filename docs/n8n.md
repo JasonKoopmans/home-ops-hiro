@@ -24,9 +24,8 @@ configuration in the app). What the cluster side needs to know:
   Alertmanager matcher fix ([gotchas-observability](gotchas-observability.md#alert-routing)). Checked 2026-11-07: three workflows
   fired it in the previous 90 days (latest that day), and every Alertmanager Telegram send in the windows after those firings
   succeeded, but no single message was matched to the alert. It is `severity: warning`, so it goes out in the `telegram-warnings`
-  digest, 5 to 35 minutes after the failure. **The digest line names the alert, not the workflow or its id:** `sum by (workflow_id)`
-  leaves only `workflow_id` and `workflow_name` as labels, and that template prints neither. Find the failure in n8n's executions
-  list, or read the labels while the alert is active in Alertmanager.
+  digest, 5 to 35 minutes after the failure. `sum by (workflow_id)` leaves only `workflow_id` and `workflow_name` as labels, so the
+  digest template has a `workflow_name` branch (HTML-escaped); before it was added the line named the alert and nothing else.
 - Bulk assignment is possible through the public API (`GET /api/v1/workflows`, then `PUT` each with `settings.errorWorkflow` merged
   in), but that PUT rewrites the workflow through the public update schema, so **export everything first**.
 
