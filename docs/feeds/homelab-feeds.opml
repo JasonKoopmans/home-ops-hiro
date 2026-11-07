@@ -47,6 +47,7 @@
       <outline type="rss" text="Apache Tika" title="Apache Tika" xmlUrl="https://github.com/apache/tika/tags.atom" htmlUrl="https://github.com/apache/tika/tags"/>
       <outline type="rss" text="Minecraft server image (itzg)" title="Minecraft server image (itzg)" xmlUrl="https://github.com/itzg/docker-minecraft-server/releases.atom" htmlUrl="https://github.com/itzg/docker-minecraft-server/releases"/>
       <outline type="rss" text="Obsidian image (linuxserver)" title="Obsidian image (linuxserver)" xmlUrl="https://github.com/linuxserver/docker-obsidian/releases.atom" htmlUrl="https://github.com/linuxserver/docker-obsidian/releases"/>
+      <outline type="rss" text="Ollama" title="Ollama" xmlUrl="https://github.com/ollama/ollama/releases.atom" htmlUrl="https://github.com/ollama/ollama/releases"/>
       <outline type="rss" text="Hermes Agent" title="Hermes Agent" xmlUrl="https://github.com/NousResearch/hermes-agent/releases.atom" htmlUrl="https://github.com/NousResearch/hermes-agent/releases"/>
       <outline type="rss" text="Audacity image (linuxserver)" title="Audacity image (linuxserver)" xmlUrl="https://github.com/linuxserver/docker-audacity/releases.atom" htmlUrl="https://github.com/linuxserver/docker-audacity/releases"/>
       <outline type="rss" text="FreeCAD image (linuxserver)" title="FreeCAD image (linuxserver)" xmlUrl="https://github.com/linuxserver/docker-freecad/releases.atom" htmlUrl="https://github.com/linuxserver/docker-freecad/releases"/>
