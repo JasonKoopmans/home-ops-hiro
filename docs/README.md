@@ -7,6 +7,22 @@ Rules for one area live beside it in a nested `AGENTS.md` (listed under *Area in
 This folder holds the long form: runbooks, designs and evidence. A fact has **one home**: if a rule is in the instructions, a doc links
 to it instead of restating it, and `docs/revisit-register.md` is the model (an index that points at where each decision lives).
 
+## Words we use for context
+
+"Memory" meant two different things here, so use these terms:
+
+| Term | Means | Who can see it |
+|---|---|---|
+| **Repo knowledge** | Anything committed here that an agent or person reads, in four tiers: *instructions* (`CLAUDE.md`, `.github/copilot-instructions.md`; always loaded), *area rules* (nested `AGENTS.md`; loaded when you work there), *docs* (this folder; read by lookup), *skills* (`.claude/skills/`; loaded on demand) | Every agent, Copilot, CI and review, every machine, and the public |
+| **Local memory** | Notes in an agent's per-machine memory folder, indexed by its `MEMORY.md` | One agent on one machine |
+
+- **Promote** a note: condense its durable facts into the right tier of repo knowledge, then retire the local copy. A fact has one home.
+- **Retire** a note: delete it after promotion, with a `.tgz` backup of the memory folder kept beside it first.
+- **What stays local:** private or sensitive details (the repo is public, so no tokens, chat or account IDs, local paths or the literal
+  domain), personal working preferences, and artifacts Flux does not apply (the test: does Flux apply it? if not, it stays out of the repo).
+- **Picking the tier:** a rule that applies to every change goes in the instructions; one that applies to one directory goes in that
+  directory's `AGENTS.md`; evidence, runbooks and incident lessons go in a doc with a row below; a repeatable procedure goes in a skill.
+
 ## Status vocabulary
 
 | Status | Meaning |
