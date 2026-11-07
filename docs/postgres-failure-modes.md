@@ -103,6 +103,14 @@ a replica, using `pg_rewind` if its PVC survived.
 
 **Reasoned, not observed here** — no failover has been exercised on this cluster.
 
+### A change to the instance pods rolls the primary in place — **observed: about 3 minutes with no writes**
+
+Not a failure, but the same effect. When #741 cut the CPU request from 500m to 250m (2026-10-04), CloudNativePG rolled the replicas
+and then **restarted the primary in place** (`primaryUpdateMethod` is left at its default, `restart`; there was no switchover). The
+primary was down from 12:42 to 12:45Z, about 3 minutes rather than the "seconds to a minute" predicted beforehand. There were no
+errors in its log and replication lag was 0 on all three instances afterwards. Plan about a 3-minute write gap for any change that
+rolls the pods (resources, image, parameters that need a restart).
+
 ### A node is lost entirely — **self-healing, but with a rebuild**
 
 This is where the storage choice bites, and it is worth being precise about.

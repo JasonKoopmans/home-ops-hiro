@@ -71,6 +71,9 @@ freeing them (the child still needs those blocks to represent a valid
 point-in-time image), so the same bytes just reappear as the next snapshot's
 size. Deleting snapshots without a trim will never shrink `actualSize`.
 
+> If the trim job itself fails with `cannot purge snapshots because ... is rebuilding`, a replica is stuck: fix that first
+> ([gotchas-storage](gotchas-storage.md#a-replica-stuck-rebuilding-after-an-outage-blocks-snapshot-purge-and-so-trim)).
+
 ## 3. Reclaim the space with fstrim (works fine on Talos — no host shell needed)
 
 `fstrim` has to run against the **guest filesystem inside the volume**

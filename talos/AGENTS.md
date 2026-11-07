@@ -48,3 +48,15 @@ Line-anchored redaction does not work: a `yq 'del(.secret)'` missed a nested sec
 3. Compare secret fields by hashing the decoded value and print SAME or DIFF only.
 4. Delete rendered output and `clusterconfig/` directories from the scratchpad when done. If a leak happens anyway, say so plainly and let the owner decide about rotation.
 
+## What the topf migration taught
+
+- **A bad config under `MODE=try` still hurts.** On 2026-10-08 talhelper's `key1` render on hiro-cmp-01 auto-reverted at +5 minutes as designed,
+  but meanwhile the apiserver hammered local etcd, etcd health failed for about 5 minutes and the OOM killer hit best-effort pods twice
+  (cmp-01 runs near 97% memory). Try mode bounds the outage; it does not make a wrong config free. Gate on `readyz` returning 200 within
+  about 2 minutes, not on "it reverted".
+- **`talosctl apply-config --dry-run` logs the same "apply config request" dmesg line as a real apply.** A watcher that counts that
+  line fires on dry-runs; check the machineconfig version instead.
+- **Verify from node state, not from a watcher armed beforehand,** when the owner may apply first: the baseline count already included
+  their apply.
+- **go-task dynamic `sh:` variables ignore the task's `dir:`.** #753's Taskfile failed with `clusterconfig/-.yaml not found` (the
+  guard failed closed and nothing was applied; fixed in #754). Run the real `task` before claiming a Taskfile change works.

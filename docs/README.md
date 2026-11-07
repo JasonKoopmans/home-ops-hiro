@@ -7,6 +7,22 @@ Rules for one area live beside it in a nested `AGENTS.md` (listed under *Area in
 This folder holds the long form: runbooks, designs and evidence. A fact has **one home**: if a rule is in the instructions, a doc links
 to it instead of restating it, and `docs/revisit-register.md` is the model (an index that points at where each decision lives).
 
+## Words we use for context
+
+"Memory" meant two different things here, so use these terms:
+
+| Term | Means | Who can see it |
+|---|---|---|
+| **Repo knowledge** | Anything committed here that an agent or person reads, in four tiers: *instructions* (`CLAUDE.md`, `.github/copilot-instructions.md`; always loaded), *area rules* (nested `AGENTS.md`; loaded when you work there), *docs* (this folder; read by lookup), *skills* (`.claude/skills/`; loaded on demand) | Every agent, Copilot, CI and review, every machine, and the public |
+| **Local memory** | Notes in an agent's per-machine memory folder, indexed by its `MEMORY.md` | One agent on one machine |
+
+- **Promote** a note: condense its durable facts into the right tier of repo knowledge, then retire the local copy. A fact has one home.
+- **Retire** a note: delete it after promotion, with a `.tgz` backup of the memory folder kept beside it first.
+- **What stays local:** private or sensitive details (the repo is public, so no tokens, chat or account IDs, local paths or the literal
+  domain), personal working preferences, and artifacts Flux does not apply (the test: does Flux apply it? if not, it stays out of the repo).
+- **Picking the tier:** a rule that applies to every change goes in the instructions; one that applies to one directory goes in that
+  directory's `AGENTS.md`; evidence, runbooks and incident lessons go in a doc with a row below; a repeatable procedure goes in a skill.
+
 ## Status vocabulary
 
 | Status | Meaning |
@@ -50,9 +66,9 @@ Things that bit this cluster and will bite again: what happens, why, what to do.
 | Doc | Covers |
 |---|---|
 | [gotchas-flux-helm](gotchas-flux-helm.md) | Rollback on one-way charts, dead per-app `upgrade:` blocks, hook Jobs that stall an upgrade, what static validation cannot catch, PVC growth, chart sources, private images, app-template resource naming, orphaning a stray HelmRelease |
-| [gotchas-storage](gotchas-storage.md) | Trim versus snapshot-chain removal, why a volume grow is rejected, manager-outage amplifiers, silent chart changes, engine upgrades, node and disk config, shared RWO volumes |
+| [gotchas-storage](gotchas-storage.md) | Trim versus snapshot-chain removal, a replica stuck rebuilding, backup S3 lock contention, the robustness metric shape, hypervisor pool faults behind guest disk errors, why a volume grow is rejected, manager-outage amplifiers, silent chart changes, engine upgrades, node and disk config, shared RWO volumes |
 | [gotchas-observability](gotchas-observability.md) | Alertmanager routing, alerts that cannot clear on their own, PodMonitor ports, node request alerts, Loki and Alloy, Thanos, known monitoring blind spots |
-| [gotchas-cluster](gotchas-cluster.md) | Dormant BGP, the `Database` CRD clash, the 50-image cap on `node.status.images` |
+| [gotchas-cluster](gotchas-cluster.md) | Dormant BGP, the `Database` CRD clash, the 50-image cap on `node.status.images`, a node rebuilt with less RAM, one node's pods unable to reach ClusterIPs, the unexplained all-node drop, high CPU on a 2-CPU node, etcd never defragged |
 | [ollama-oom-rca](ollama-oom-rca.md) | 2026-11-06 Ollama OOMKills: thinking model on CPU, llama-server prompt cache, CPU saturation; fixes and n8n settings |
 
 ## Storage, backup and the Silo swap
