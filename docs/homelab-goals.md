@@ -35,7 +35,7 @@ New capabilities in any watched product are surfaced when they match one of thes
   - `inrepo{ <component>: <last-digested-version> }` — so an already-reported delta doesn't repeat until it changes again.
   - `lastRun: <ISO>`.
   On each run: load state → surface only new items / new deltas → write state back. First run (no file) uses a 35-day window.
-- **Fetch method:** GitHub `*.atom` + most blogs = plain HTTPS. **Exceptions needing a browser User-Agent:** Pocket (`heypocket.com`, 403 otherwise). No-RSS products (Todoist, Claude) = fetch the "what's new" page and diff text against state. **Todoist's changelog is JS-rendered** (`todoist.com/help/categories/product-updates/changelog`): plain `curl` returns no article list, use a headless browser.
+- **Fetch method:** Blogs = plain HTTPS. **GitHub release lookups:** `github.com/*/releases.atom` and `api.github.com` are blocked in routine sessions (the proxy limits GitHub access to this repo, even for public reads), so use `git ls-remote --tags https://github.com/<owner>/<repo>` and keep only exact stable-semver tags (drop alpha/beta/rc/pre/dev, or Talos, Kubernetes and Cilium look behind). **Exceptions needing a browser User-Agent:** Pocket (`heypocket.com`, 403 otherwise). No-RSS products (Todoist, Claude) = fetch the "what's new" page and diff text against state. **Todoist's changelog is JS-rendered** (`todoist.com/help/categories/product-updates/changelog`): plain `curl` returns no article list, use a headless browser.
 - **Cadence:** weekly, Saturday — pre-briefs Renovate's Saturday PRs. See "Delivery" below.
 
 ## Watched scope
