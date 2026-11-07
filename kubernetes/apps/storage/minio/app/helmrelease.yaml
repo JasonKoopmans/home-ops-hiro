@@ -140,11 +140,10 @@ spec:
     # 2026-10-30, for the Silo swap: the 2024 binary's 14d peak under real load is now
     # 1051Mi (75% of 1408Mi). In the clone rehearsal (docs/runbook-minio-silo-swap-shared.md
     # section 9) Silo peaked at 407-428Mi against 310Mi for the old binary on the same
-    # data, at little client load, so Silo's peak under Thanos/Loki traffic is UNMEASURED
-    # and could sit near the old limit. Raised to ~2x the old peak (repo convention) so an
-    # OOM cannot be the swap's failure mode.
-    # Revisit: after the first week on Silo, read max_over_time(container_memory_working_set_bytes
-    # {namespace="storage",pod=~"minio-.*",container="minio"}[7d]) and size to ~2x that.
+    # data, at little client load.
+    # Measured 2026-11-07, first 7d on Silo (pod minio-647954db97-btktl): peak 892Mi
+    # (24h in it was 445Mi, so the peak came later, likely a compaction/scanner cycle).
+    # 2Gi is ~2.2x that, i.e. the repo's ~2x rule: kept, no resize.
     resources:
       requests:
         cpu: 50m
