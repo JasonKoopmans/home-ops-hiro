@@ -100,7 +100,8 @@ Things that bit this cluster and will bite again: what happens, why, what to do.
 | Doc | Read before | Status |
 |---|---|---|
 | [mcp-onboarding](mcp-onboarding.md) | Adding or debugging an MCP server: the contract every server shares (`mcp` namespace, port 3000, auth phases), known traps, per-server notes (proxmox, n8n, grafana, the SSE-only postgres) | reference |
-| [n8n](n8n.md) | Touching n8n: what lives only in its database (workflows, the Telegram Error Workflow), testing a workflow offline, n8n 2.x gotchas | reference |
+| [n8n](n8n.md) | Touching n8n: what lives only in its database (workflows, the Telegram Error Workflow), testing a workflow offline, n8n 2.x gotchas, calling local Ollama from the Text Classifier | reference |
+| [spike-local-llm-hosting](spike-local-llm-hosting.md) | Why local models run as CPU Ollama for n8n classification, why a Hermes-class model does not fit the current hosts, what would change that | design |
 | [event-gateway](event-gateway.md) | Anything on the phone / Power Automate to Cloudflare Queue to n8n path: why it pulls, the Queues limits it depends on | reference |
 | [pocket-bridge](pocket-bridge.md) | The Hey Pocket to RecordingAnnotator to Obsidian CronJob: API constraints, dedupe design, the 2026-09-14 incident | reference |
 | [recording-annotator](recording-annotator.md) | The RecordingAnnotator deployment: scoped-MinIO-user convention, `hiro-` bucket prefix, hostnames, the client API | reference |
