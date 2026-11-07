@@ -46,7 +46,7 @@ spec:
             image:
               # renovate: datasource=docker depName=dbeaver/cloudbeaver
               repository: docker.io/dbeaver/cloudbeaver
-              tag: 26.2.3
+              tag: 26.2.4
             probes:
               liveness: &probe
                 enabled: true
