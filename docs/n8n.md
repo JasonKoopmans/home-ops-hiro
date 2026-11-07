@@ -21,7 +21,12 @@ configuration in the app). What the cluster side needs to know:
 - **n8n OSS has no instance-wide default Error Workflow.** Assignment is per workflow (Settings, Error Workflow), so a new workflow
   silently misses it. Wire every new workflow, and never assign the Error Workflow to itself: n8n will not stop you and it loops.
 - `N8nWorkflowFailed` in `prometheusrule-n8n.yaml` is the metrics-side backstop for workflows nobody wired. It was dead until the
-  Alertmanager matcher fix ([gotchas-observability](gotchas-observability.md#alert-routing)); confirm it delivers before relying on it.
+  Alertmanager matcher fix ([gotchas-observability](gotchas-observability.md#alert-routing)). Checked 2026-11-07: three workflows
+  fired it in the previous 90 days (latest that day), and every Alertmanager Telegram send in the windows after those firings
+  succeeded, but no single message was matched to the alert. It is `severity: warning`, so it goes out in the `telegram-warnings`
+  digest, 5 to 35 minutes after the failure. **The digest line names the alert, not the workflow or its id:** `sum by (workflow_id)`
+  leaves only `workflow_id` and `workflow_name` as labels, and that template prints neither. Find the failure in n8n's executions
+  list, or read the labels while the alert is active in Alertmanager.
 - Bulk assignment is possible through the public API (`GET /api/v1/workflows`, then `PUT` each with `settings.errorWorkflow` merged
   in), but that PUT rewrites the workflow through the public update schema, so **export everything first**.
 

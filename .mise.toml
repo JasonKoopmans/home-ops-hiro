@@ -10,7 +10,7 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 "pipx:makejinja" = "2.9.1"
 "aqua:postfinance/topf" = "0.6.2"
 "aqua:cilium/cilium-cli" = "0.20.2"
-"aqua:cli/cli" = "2.102.0"
+"aqua:cli/cli" = "2.103.3"
 "aqua:cloudflare/cloudflared" = "2026.10.7"
 "aqua:cue-lang/cue" = "0.17.1"
 "aqua:FiloSottile/age" = "1.3.2"
@@ -40,4 +40,4 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 # swaps the native binary in over its bin/claude.exe stub ("claude native binary not installed").
 "npm:@anthropic-ai/claude-code" = { version = "2.1.319", allow_builds = ["@anthropic-ai/claude-code"] }
 node = "26.12.1"
-"aqua:aws/aws-cli" = { version = "2.38.5", symlink_bins = "true" }
+"aqua:aws/aws-cli" = { version = "2.39.6", symlink_bins = "true" }

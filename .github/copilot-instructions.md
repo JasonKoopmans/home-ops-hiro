@@ -209,7 +209,7 @@ Apps surfaced on the Homepage dashboard carry `gethomepage.dev/*` annotations (`
 
 ## Storage
 
-- **Longhorn** is the only storage provisioner. Volumes are backed by dedicated disks on each node (Talos `UserVolumeConfig` in `talos/all/05-machine-volumes.yaml`).
+- **Longhorn** is the only storage provisioner. Volumes are backed by dedicated disks on each node (Talos `UserVolumeConfig` in `talos/all/05-machine-volumes.yaml`). It runs in the **`storage`** namespace although the app directory is `longhorn-system` (the group's namespace transformer decides): `kubectl -n longhorn-system` returns `NotFound`.
 - Backups target **AWS S3** (`s3://hiro-longhorn-backups@us-east-1/`), not the in-cluster MinIO — backup configuration lives in `kubernetes/apps/storage/longhorn-system/app/default-backup-target.yaml`. MinIO is an application object store (Thanos, Loki), not the Longhorn backupstore; do not conflate the two when reasoning about what survives a cluster loss. Telemetry in MinIO (Thanos, Loki) is deliberately not backed up to S3: it is accepted as loseable until deep history matters. Where MinIO later holds general application data, the intended durability is its own S3 sync applied selectively by policy, not Longhorn backups of its PVC.
 - **Several storage classes exist** (defined in `kubernetes/apps/storage/longhorn-system/app/storageclasses.yaml`). Choose by redundancy and backup needs:
 
@@ -353,6 +353,7 @@ Machine config lives in `talos/`, rendered by [topf](https://github.com/postfina
 - **Do not modify files in `talos/`** for application-level issues.
 - **Do not remove Renovate annotations** from HelmReleases or container image references.
 - **Do not `kubectl delete` Flux-managed resources** — use the two-phase removal.
+- **Do not commit exports of configuration that lives inside an app** (n8n workflows, Grafana state edited in the UI, app-internal settings). The test is whether Flux applies it: the `grafana-dashboard-*.yaml` files in `kube-prometheus-stack` are cluster state, a workflow export is not. `docs/` holds cluster-operations material (runbooks, incident write-ups, decisions about the cluster), not copies of app state. Ask before adding a new top-level directory.
 
 ---
 
