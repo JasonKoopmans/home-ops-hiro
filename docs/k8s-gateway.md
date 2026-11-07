@@ -21,6 +21,9 @@ Checked 2026-10-17 (#806):
 - Nodes pull straight from codeberg.org (no Talos registry mirror). A
   Codeberg outage only matters when the pod lands on a node without the image
   cached.
+- **CI pulls the chart too.** Flux Local Test renders every HelmRelease, so a Codeberg `503` fails the check on every open
+  PR, whatever it changes (2026-11-07: #993, #994, #995). Rerun the failed jobs once it answers; triage is in
+  `.github/workflows/AGENTS.md`.
 
 ## Chart 4.x gotchas
 

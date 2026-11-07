@@ -123,7 +123,7 @@ Each is an `AGENTS.md` with a one-line `CLAUDE.md` (`@AGENTS.md`) beside it. Cla
 | [`kubernetes/apps/monitoring/alloy/`](../kubernetes/apps/monitoring/alloy/AGENTS.md) | Testing a log pipeline change before it hot-reloads cluster-wide |
 | [`kubernetes/apps/lifeos/`](../kubernetes/apps/lifeos/AGENTS.md) | The one app whose PVC holds state Git lacks |
 | [`.devcontainer/`](../.devcontainer/AGENTS.md) | The arm64 container, mise, when a rebuild is needed |
-| [`.github/workflows/`](../.github/workflows/AGENTS.md) | What each workflow does and does not gate; rendering manifests for a linter |
+| [`.github/workflows/`](../.github/workflows/AGENTS.md) | What each workflow does and does not gate; rendering manifests for a linter; a red Flux Local from a chart registry outage |
 
 ## Docs outside this folder
 
