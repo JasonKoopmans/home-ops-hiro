@@ -45,7 +45,7 @@ spec:
           app:
             image:
               repository: docker.io/ollama/ollama
-              tag: 0.40.13
+              tag: 0.40.15
             env:
               # HOME must be writable for the non-root user (Ollama writes its
               # id_ed25519 key under ~/.ollama); models live on the PVC.
@@ -127,7 +127,7 @@ spec:
           model-pull:
             image:
               repository: docker.io/ollama/ollama
-              tag: 0.40.13
+              tag: 0.40.15
             env:
               HOME: /models
               OLLAMA_MODELS: /models/models
