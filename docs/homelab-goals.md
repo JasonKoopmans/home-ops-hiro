@@ -40,7 +40,6 @@ New capabilities in any watched product are surfaced when they match one of thes
 
   | Repo | Stable tag pattern |
   |---|---|
-  | `minio/minio` | `RELEASE.<UTC timestamp>Z` (date-based, newest wins; ignore `release-<number>`) |
   | `qbittorrent/qBittorrent` | `release-X.Y.Z` (drop `beta`/`rc`) |
   | `n8n-io/n8n` | `n8n@X.Y.Z` (ignore `stable`, `v1`; drop `-rc`/`-beta`) |
   | `jqlang/jq` | `jq-X.Y.Z` (drop `rc`) |
