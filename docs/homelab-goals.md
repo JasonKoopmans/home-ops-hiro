@@ -36,6 +36,24 @@ New capabilities in any watched product are surfaced when they match one of thes
   - `lastRun: <ISO>`.
   On each run: load state → surface only new items / new deltas → write state back. First run (no file) uses a 35-day window.
 - **Fetch method:** Blogs = plain HTTPS. **GitHub release lookups:** `github.com/*/releases.atom` and `api.github.com` are blocked in routine sessions (the proxy limits GitHub access to this repo, even for public reads), so use `git ls-remote --tags https://github.com/<owner>/<repo>` and keep only exact stable-semver tags (drop alpha/beta/rc/pre/dev, or Talos, Kubernetes and Cilium look behind). **Exceptions needing a browser User-Agent:** Pocket (`heypocket.com`, 403 otherwise). No-RSS products (Todoist, Claude) = fetch the "what's new" page and diff text against state. **Todoist's changelog is JS-rendered** (`todoist.com/help/categories/product-updates/changelog`): plain `curl` returns no article list, use a headless browser.
+- **Non-semver tag patterns (ls-remote):** the stable-semver filter returns nothing for these repos, so match their own pattern and still drop alpha/beta/rc/pre/dev. Floating tags (`stable`, `v1`, `latest`) are not versions.
+
+  | Repo | Stable tag pattern |
+  |---|---|
+  | `qbittorrent/qBittorrent` | `release-X.Y.Z` (drop `beta`/`rc`) |
+  | `n8n-io/n8n` | `n8n@X.Y.Z` (ignore `stable`, `v1`; drop `-rc`/`-beta`) |
+  | `jqlang/jq` | `jq-X.Y.Z` (drop `rc`) |
+  | `linuxserver/docker-obsidian`, `-audacity`, `-freecad` | `[v]X.Y.Z-lsNNN` (version, then the image build; a new `-lsNNN` alone is a rebuild, not a release) |
+  | `bjw-s-labs/helm-charts` | `<chart>-X.Y.Z` per chart; read only `app-template-X.Y.Z` (the only bjw-s chart in use; Multus is tracked via `k8snetworkplumbingwg/multus-cni`) |
+
+- **Release notes without the atom feed:** `git ls-remote` gives versions, not notes, and GitHub Release bodies are only on the blocked atom/API hosts. For repos where the notes matter to the analysis (**Ollama** first: model support, memory behavior), read the commit subjects between the last-digested tag (from state) and the newest stable tag, via a blobless fetch that stays inside the allowed git protocol:
+  ```
+  git init -q w && cd w && git remote add o https://github.com/<owner>/<repo>
+  git fetch -q --filter=blob:none --shallow-exclude=<last-tag> o refs/tags/<last-tag>:refs/tags/<last-tag> refs/tags/<new-tag>:refs/tags/<new-tag>
+  git log --no-merges --format=%s <last-tag>..<new-tag>
+  ```
+  Name both tags in the fetch and use `--shallow-exclude`, not a date: it states the boundary directly, so the range cannot be cut off by a tag date that differs from its commit date. If the fetch or `git log` fails, treat it as "notes unavailable, version delta only", never as an empty range. Summarize those subjects as the notes (group by feature / fix / docs; call out anything touching memory, context size, model formats or the API). State in the digest that these are commit subjects, not the published release notes. Dry-run 2026-11-12: `v0.40.14..v0.40.16` returned the expected commits from an interactive session; `ollama.com` was unreachable there and `raw.githubusercontent.com` only serves file contents, so confirm it in the first routine run.
+- **Blocked hosts in routine sessions:** `docs.n8n.io`, `community.n8n.io` and `forum.opnsense.org` are not on the outbound allowlist there, so the n8n migration docs, n8n forum and OPNsense Announcements feed cannot be read. This is accepted, not fixed (#1011): fall back to the GitHub tags of `n8n-io/n8n` and `opnsense/core` via `git ls-remote` as above, report a version delta only, and note in the digest that release notes were unreadable. For a breaking-change check (n8n v3, an OPNsense major), flag it for a manual read instead of guessing. These hosts do respond from an interactive session.
 - **Cadence:** weekly, Saturday — pre-briefs Renovate's Saturday PRs. See "Delivery" below.
 
 ## Watched scope
