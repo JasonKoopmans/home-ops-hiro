@@ -46,6 +46,13 @@ New capabilities in any watched product are surfaced when they match one of thes
   | `linuxserver/docker-obsidian`, `-audacity`, `-freecad` | `[v]X.Y.Z-lsNNN` (version, then the image build; a new `-lsNNN` alone is a rebuild, not a release) |
   | `bjw-s-labs/helm-charts` | `<chart>-X.Y.Z` per chart; read only `app-template-X.Y.Z` (the only bjw-s chart in use; Multus is tracked via `k8snetworkplumbingwg/multus-cni`) |
 
+- **Release notes without the atom feed:** `git ls-remote` gives versions, not notes, and GitHub Release bodies are only on the blocked atom/API hosts. For repos where the notes matter to the analysis (**Ollama** first: model support, memory behavior), read the commit subjects between the last-digested tag (from state) and the newest stable tag, via a blobless fetch that stays inside the allowed git protocol:
+  ```
+  git init -q w && cd w && git remote add o https://github.com/<owner>/<repo>
+  git fetch -q --filter=blob:none --shallow-since=<last-digested tag date> o 'refs/tags/*:refs/tags/*'
+  git log --no-merges --format=%s <last-tag>..<new-tag>
+  ```
+  Summarize those subjects as the notes (group by feature / fix / docs; call out anything touching memory, context size, model formats or the API). State in the digest that these are commit subjects, not the published release notes. Dry-run 2026-11-12: this fetch works from an interactive session; `ollama.com` was unreachable there and `raw.githubusercontent.com` only serves file contents, so confirm it in the first routine run.
 - **Blocked hosts in routine sessions:** `docs.n8n.io`, `community.n8n.io` and `forum.opnsense.org` are not on the outbound allowlist there, so the n8n migration docs, n8n forum and OPNsense Announcements feed cannot be read. This is accepted, not fixed (#1011): fall back to the GitHub tags of `n8n-io/n8n` and `opnsense/core` via `git ls-remote` as above, report a version delta only, and note in the digest that release notes were unreadable. For a breaking-change check (n8n v3, an OPNsense major), flag it for a manual read instead of guessing. These hosts do respond from an interactive session.
 - **Cadence:** weekly, Saturday — pre-briefs Renovate's Saturday PRs. See "Delivery" below.
 
