@@ -45,7 +45,7 @@ New capabilities in any watched product are surfaced when they match one of thes
   | `n8n-io/n8n` | `n8n@X.Y.Z` (ignore `stable`, `v1`; drop `-rc`/`-beta`) |
   | `jqlang/jq` | `jq-X.Y.Z` (drop `rc`) |
   | `linuxserver/docker-obsidian`, `-audacity`, `-freecad` | `[v]X.Y.Z-lsNNN` (version, then the image build; a new `-lsNNN` alone is a rebuild, not a release) |
-  | `bjw-s-labs/helm-charts` | `<chart>-X.Y.Z` per chart; read only the charts in use (`app-template`, `multus`) |
+  | `bjw-s-labs/helm-charts` | `<chart>-X.Y.Z` per chart; read only `app-template-X.Y.Z` (the only bjw-s chart in use; Multus is tracked via `k8snetworkplumbingwg/multus-cni`) |
 
 - **Blocked hosts in routine sessions:** `docs.n8n.io`, `community.n8n.io` and `forum.opnsense.org` are not on the outbound allowlist there, so the n8n migration docs, n8n forum and OPNsense Announcements feed cannot be read. This is accepted, not fixed (#1011): fall back to the GitHub tags of `n8n-io/n8n` and `opnsense/core` via `git ls-remote` as above, report a version delta only, and note in the digest that release notes were unreadable. For a breaking-change check (n8n v3, an OPNsense major), flag it for a manual read instead of guessing. These hosts do respond from an interactive session.
 - **Cadence:** weekly, Saturday — pre-briefs Renovate's Saturday PRs. See "Delivery" below.
