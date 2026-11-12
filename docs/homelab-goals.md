@@ -36,6 +36,18 @@ New capabilities in any watched product are surfaced when they match one of thes
   - `lastRun: <ISO>`.
   On each run: load state → surface only new items / new deltas → write state back. First run (no file) uses a 35-day window.
 - **Fetch method:** Blogs = plain HTTPS. **GitHub release lookups:** `github.com/*/releases.atom` and `api.github.com` are blocked in routine sessions (the proxy limits GitHub access to this repo, even for public reads), so use `git ls-remote --tags https://github.com/<owner>/<repo>` and keep only exact stable-semver tags (drop alpha/beta/rc/pre/dev, or Talos, Kubernetes and Cilium look behind). **Exceptions needing a browser User-Agent:** Pocket (`heypocket.com`, 403 otherwise). No-RSS products (Todoist, Claude) = fetch the "what's new" page and diff text against state. **Todoist's changelog is JS-rendered** (`todoist.com/help/categories/product-updates/changelog`): plain `curl` returns no article list, use a headless browser.
+- **Non-semver tag patterns (ls-remote):** the stable-semver filter returns nothing for these repos, so match their own pattern and still drop alpha/beta/rc/pre/dev. Floating tags (`stable`, `v1`, `latest`) are not versions.
+
+  | Repo | Stable tag pattern |
+  |---|---|
+  | `minio/minio` | `RELEASE.<UTC timestamp>Z` (date-based, newest wins; ignore `release-<number>`) |
+  | `qbittorrent/qBittorrent` | `release-X.Y.Z` (drop `beta`/`rc`) |
+  | `n8n-io/n8n` | `n8n@X.Y.Z` (ignore `stable`, `v1`; drop `-rc`/`-beta`) |
+  | `jqlang/jq` | `jq-X.Y.Z` (drop `rc`) |
+  | `linuxserver/docker-obsidian`, `-audacity`, `-freecad` | `[v]X.Y.Z-lsNNN` (version, then the image build; a new `-lsNNN` alone is a rebuild, not a release) |
+  | `bjw-s-labs/helm-charts` | `<chart>-X.Y.Z` per chart; read only the charts in use (`app-template`, `multus`) |
+
+- **Blocked hosts in routine sessions:** `docs.n8n.io`, `community.n8n.io` and `forum.opnsense.org` are not on the outbound allowlist there, so the n8n migration docs, n8n forum and OPNsense Announcements feed cannot be read. This is accepted, not fixed (#1011): fall back to the GitHub tags of `n8n-io/n8n` and `opnsense/core` via `git ls-remote` as above, report a version delta only, and note in the digest that release notes were unreadable. For a breaking-change check (n8n v3, an OPNsense major), flag it for a manual read instead of guessing. These hosts do respond from an interactive session.
 - **Cadence:** weekly, Saturday — pre-briefs Renovate's Saturday PRs. See "Delivery" below.
 
 ## Watched scope
