@@ -242,6 +242,41 @@
       automerge: false,
     },
     {
+      // The CRDs lead and the stack follows, so the CRDs soak on the running
+      // operator before the chart that needs them rolls. That is why this is
+      // not a Renovate group: a group is one commit, and Flux would apply both
+      // in one reconcile with no soak between (`dependsOn` only checks that the
+      // CRD release is Ready). Order and soak checks: docs/runbook-renovate-prs.md.
+      //
+      // The PR opens any day, so it is waiting by the time the stack PR arrives,
+      // but it is never auto-merged: the chart renders its CRDs as templates, so
+      // a failed upgrade can be rolled back onto the old schemas, which may fail
+      // or be unsafe once objects were written under the new ones. Same
+      // reasoning as Longhorn and Silo.
+      description: "Prometheus CRDs lead the stack: open the PR any day, merge by hand",
+      matchDatasources: ["helm"],
+      matchPackageNames: ["prometheus-operator-crds"],
+      schedule: ["at any time"],
+      automerge: false,
+    },
+    {
+      // Gives the CRD PR above time to be merged and soak first. Covers both pins
+      // of the stack (the HelmRelease chart and the bootstrap helmfile image), so
+      // the two PRs still appear together. 5 days is a starting value, not a
+      // measured one: revisit it after a few Saturdays (runbook-renovate-prs.md).
+      // Unverified: the bootstrap pin is an OCI image, and if ghcr gives Renovate
+      // no release timestamp for it, Renovate may hold that PR indefinitely with
+      // no error. It touches nothing in the cluster, but the pins would drift:
+      // if no bootstrap PR appears beside the stack PR, check the Dependency
+      // Dashboard for it under pending/awaiting release age.
+      description: "Hold the Prometheus stack until its release is 5 days old",
+      matchPackageNames: [
+        "kube-prometheus-stack",
+        "ghcr.io/prometheus-community/charts/kube-prometheus-stack",
+      ],
+      minimumReleaseAge: "5 days",
+    },
+    {
       matchUpdateTypes: ["digest"],
       semanticCommitType: "chore",
       commitMessageExtra: "( {{currentDigestShort}} ➔ {{newDigestShort}} )",
