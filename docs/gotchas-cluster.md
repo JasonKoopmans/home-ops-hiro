@@ -81,6 +81,46 @@ Lessons that outlive the incident (closed 2026-08-23, host RAM raised to 16 GiB,
 - `longhorn-manager` exiting 137 with no liveness probe configured means the kernel killed it, not Kubernetes.
 - Keep heavy stateful I/O off a starved control-plane node: a flapping etcd member is the real danger.
 
+## Two nodes cordoned for 11 days: cmp-01 starved, pods restarted, requests alerts fired (2026-11-14)
+
+`hiro-cmp-03` and `-04` sat `SchedulingDisabled` from 2026-11-03 03:04 UTC (the two taints were added 3 s apart, so a script or one
+command; nothing in Git or the docs says why) until 2026-11-14 23:09 UTC. Three nodes carried a five-node cluster: memory *requests*
+97-99% on cmp-01/02/05 (`NodeMemoryRequestsCritical`) against 44% and 28% on the cordoned pair. No alert named the cordon; only its
+symptoms fired. Run `kubectl get nodes` before reading any node alert.
+
+What the starved node (cmp-01) showed, all measured on 2026-11-14:
+
+- Real memory 93-95%, page cache squeezed to about 1 GiB, `node_vmstat_pgmajfault` at 2,000-3,500/s from about 17:00 UTC (near 0
+  before), system CPU 38%, `NodeMemoryMajorPagesFaults` firing.
+- Talos's OOM controller SIGKILLed whole pod cgroups under `kubepods/besteffort/` five times between 11-10 and 11-14
+  (`talosctl dmesg | grep -E "OOMController|Sending SIGKILL"`). The victims were `longhorn-manager` and `longhorn-csi-plugin`, which
+  set no resources and so are BestEffort. This is Talos's userspace OOM controller, not a container limit, so `kubectl describe`
+  shows only exit 137.
+- Restarts concentrated on that one node (`engine-image` 216, `longhorn-csi-plugin` 123, `operator-webhook` 60,
+  `kustomize-controller` 51, `helm-controller` 47, `keda-operator` 46): lease losses (exit 0 or 1) and liveness-probe kills (137).
+  The Flux, KEDA and Longhorn controllers on it all exited within six minutes of each other (21:56-22:02 UTC). etcd read-only
+  ranges on that member took 2-10 s. Prometheus was killed by its own liveness probe and Grafana's probes failed, both on cmp-01,
+  so the stack that would have shown this went dark while it was happening.
+- Moving six light pods off cmp-01 (n8n, Grafana, obsidian, changedetection, two MCP servers) took it from 95% to 72-76% memory
+  and from 100% to 19-26% CPU within ten minutes. Major faults stayed near 2,100/s; the suspect is etcd's 566 MB mmapped database
+  competing for page cache (not confirmed).
+
+Lessons:
+
+- **The scheduler books requests, not usage.** Prometheus requested 512Mi and averaged 1.5Gi (14d peak 2.7Gi), so cmp-01 looked
+  to have room. Size requests near the 14d average, not the floor.
+- **A pod with no resources anywhere is BestEffort and is the first thing the OOM controller kills.** One container with a request
+  makes the pod Burstable. `longhornManager.resources` exists in chart 1.13.0; the CSI plugin and engine-image DaemonSets have no
+  chart key for it.
+- **Raising a DaemonSet's request needs headroom on every node.** The kubelet rejects the replacement pod (`OutOfmemory`) if the
+  new request pushes a node past allocatable. cmp-05 sat at 98%, so a manager request bump there would have failed until requests
+  were moved off it.
+- **etcd leader history is gone within minutes.** Talos keeps only a few thousand lines of etcd log. The 24h `changes()` of
+  `etcd_server_leader_changes_seen_total` showed one change seen by cmp-01 alone; the rest could not be reconstructed because
+  Prometheus was down. Raft term was 117 with every member in sync.
+- What set the 17:00 UTC ramp off is **not established**. It was a Saturday Renovate day (kube-prometheus-stack 93.3.0 rolled the
+  monitoring pods around 22:18 UTC), which is a guess.
+
 ## Pods on one node cannot reach ClusterIPs: restart that node's cilium-agent
 
 2026-08-25: pods on `hiro-cmp-05` could not reach `10.43.0.1:443` (the apiserver ClusterIP) or other nodes' IPs, while the node was
