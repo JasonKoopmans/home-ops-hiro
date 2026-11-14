@@ -44,7 +44,6 @@ spec:
         containers:
           app:
             image:
-              # renovate: datasource=docker depName=dbeaver/cloudbeaver
               repository: docker.io/dbeaver/cloudbeaver
               tag: 26.2.4
             probes:
