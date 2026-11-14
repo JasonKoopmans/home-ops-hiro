@@ -69,3 +69,25 @@ n8n) and looks like a hang. The Bash sandbox must be off for docker.
 - A test OAuth2 credential (`googleCalendarOAuth2Api` with `oauthTokenData: {access_token, refresh_token, token_type}` and no
   expiry) never tries to refresh; the HTTP node sends `Authorization: Bearer`.
 - A new workflow that reuses an existing credential's id and name binds to it automatically on import.
+
+## Calling local Ollama from n8n
+
+`default/ollama` ([ollama-oom-rca](ollama-oom-rca.md), [spike-local-llm-hosting](spike-local-llm-hosting.md)) is reachable in-cluster
+at `http://ollama.default.svc.cluster.local:11434` from the n8n pod only (NetworkPolicy; a blocked caller sees a hang, then a timeout).
+
+- **Use the native route, not HTTP Request.** The Text Classifier node takes any chat model sub-node, so replace the Anthropic Chat
+  Model with an **Ollama Chat Model**. Its credential holds just the base URL above (no key). The model name must match what the
+  pod serves exactly ([ollama-oom-rca](ollama-oom-rca.md) has the current one and why).
+- **Thinking and length.** Set `think: false` and a small `numPredict` as that doc says; Qwen3's reasoning text otherwise breaks the
+  classifier's JSON and takes minutes per item on CPU. Check `ollama ps` after any model change.
+- **The classifier parses JSON out of a prompt, not a schema.** A small model sometimes returns malformed output. The node's
+  `onError: continueErrorOutput` only helps if that output goes somewhere harmless that leaves the item for the next run.
+- **A smoke test without a node dependency:** a manual workflow that GETs `/api/tags`, then POSTs a few sample summaries to
+  `/api/chat` with `think: false` and a JSON-schema `format`, and scores the labels against the expected ones. Keep it in n8n.
+
+Gaps seen in the exported "Readwise Flows" workflow (export of 2026-10-30; re-check in n8n, it may have changed). Like every
+workflow it is not in Git, and an export carries credential ids, so do not commit one:
+
+- The `Format` node uses `hh` (12-hour, no AM/PM), so afternoon timestamps shift 12 hours earlier and the feed window is wider than intended.
+- The classifier's fallback (`other`) and error outputs, and the first Switch's fallback, connect to nothing. Those items are never
+  marked seen and are looked at again on every run.
