@@ -21,7 +21,8 @@ First seen 2026-10-16: 15 CRs named `pvc-<uuid>-manual-1791583232-15005-23394`
 The denial is logged on whichever node owns that volume's engine (cmp-03, cmp-01 before it), which is why one node's
 apiserver and longhorn-manager logs looked chatty; the node is not busier. If you are asked about that noise, check for
 a stuck Snapshot CR first and do not drop the line in Alloy. The minecraft CR was cleared with the procedure below on
-2026-10-29; 14 healthy 70-byte CRs from the 2026-10-09 run remained then, and the same exemption works if one goes stale.
+2026-10-29; 14 healthy 70-byte CRs from the 2026-10-09 run remained then, and by 2026-11-14 one was left
+(`pvc-94a41b9f-...-manual-1791583232-15005-23394`, readyToUse). The same exemption works if one goes stale.
 
 ## Recognise it
 
@@ -31,6 +32,16 @@ kubectl -n storage get snapshots.longhorn.io -o custom-columns=NAME:.metadata.na
 ```
 
 Loki: `{instance=~"storage/longhorn-manager-.*"} |= "Rejected operation" |= "operation: DELETE"`.
+
+## Before clearing a CR whose snapshot is still in the engine
+
+Since 2026-11-14 the policy denies CREATE of a name over 63 bytes. If you delete a
+70-byte CR while its volume engine still holds the snapshot, longhorn-manager's
+`syncSnapshotCRs` may try to re-create the CR under the same name and be refused.
+That path has **not** been tested. Remove the snapshot from the engine first
+(Longhorn UI, volume Snapshots), or be ready to set the binding back to
+`[Warn, Audit]` while you clear it, and watch that volume's snapshot sync and
+replica state afterwards.
 
 ## Fix (a runtime change to Longhorn's webhook, not in Git)
 
