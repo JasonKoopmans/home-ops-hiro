@@ -1,11 +1,4 @@
 ---
-# DRAFT: written without a running Grafana to test against. The field names
-# (created_at, merged_at, title) and the timeField numbers (1 = created,
-# 2 = merged) are from memory of the grafana-github-datasource plugin; open the
-# dashboard after the first sync and fix whatever the plugin names differently.
-# The is:open panels override their own time range to 10y: the plugin may scope
-# results by the dashboard range on the chosen time field, and an open PR older
-# than the range (the ones worth seeing) would otherwise drop out.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,17 +13,31 @@ data:
         "list": []
       },
       "editable": true,
-      "graphTooltip": 0,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": [
+        "renovate",
+        "github"
+      ],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-30d",
+        "to": "now"
+      },
+      "timezone": "utc",
+      "title": "Renovate PRs",
+      "uid": "renovate-prs",
+      "version": 1,
+      "description": "Renovate PR counts and ages from the renovate-exporter (polls the GitHub API every 5 minutes).",
       "panels": [
         {
           "id": 1,
           "type": "stat",
           "title": "Open Renovate PRs",
-          "description": "Count of open PRs authored by Renovate.",
-          "datasource": {
-            "type": "grafana-github-datasource",
-            "uid": "github"
-          },
+          "description": "Renovate PRs currently open.",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -39,39 +46,19 @@ data:
           },
           "targets": [
             {
-              "refId": "A",
-              "datasource": {
-                "type": "grafana-github-datasource",
-                "uid": "github"
-              },
-              "queryType": "Pull_Requests",
-              "owner": "JasonKoopmans",
-              "repository": "home-ops-hiro",
-              "query": "author:app/renovate is:open",
-              "timeField": 1,
-              "options": {}
+              "expr": "count(renovate_pr_open_created_timestamp_seconds) or vector(0)",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
             }
           ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "count"
-              ],
-              "fields": "/title/i",
-              "values": false
-            },
-            "colorMode": "value",
-            "graphMode": "none",
-            "textMode": "auto"
-          },
           "fieldConfig": {
             "defaults": {
-              "unit": "none",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
+                    "color": "blue",
                     "value": null
                   }
                 ]
@@ -79,18 +66,23 @@ data:
             },
             "overrides": []
           },
-          "timeFrom": "10y",
-          "hideTimeOverride": true
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
         },
         {
           "id": 2,
           "type": "stat",
           "title": "Oldest open PR",
-          "description": "Creation time of the oldest open Renovate PR, as time since.",
-          "datasource": {
-            "type": "grafana-github-datasource",
-            "uid": "github"
-          },
+          "description": "Age of the oldest open Renovate PR. Majors wait for a manual merge, so a long age is not always a fault.",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -99,58 +91,52 @@ data:
           },
           "targets": [
             {
-              "refId": "A",
-              "datasource": {
-                "type": "grafana-github-datasource",
-                "uid": "github"
-              },
-              "queryType": "Pull_Requests",
-              "owner": "JasonKoopmans",
-              "repository": "home-ops-hiro",
-              "query": "author:app/renovate is:open",
-              "timeField": 1,
-              "options": {}
+              "expr": "time() - min(renovate_pr_open_created_timestamp_seconds)",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
             }
           ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "min"
-              ],
-              "fields": "/created/i",
-              "values": false
-            },
-            "colorMode": "value",
-            "graphMode": "none",
-            "textMode": "auto"
-          },
           "fieldConfig": {
             "defaults": {
-              "unit": "dateTimeFromNow",
+              "unit": "s",
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
                     "color": "green",
                     "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 604800
+                  },
+                  {
+                    "color": "red",
+                    "value": 1209600
                   }
                 ]
               }
             },
             "overrides": []
           },
-          "timeFrom": "10y",
-          "hideTimeOverride": true
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
         },
         {
           "id": 3,
           "type": "stat",
-          "title": "Merged in time range",
-          "description": "Renovate PRs merged inside the dashboard time range (time field: merged).",
-          "datasource": {
-            "type": "grafana-github-datasource",
-            "uid": "github"
-          },
+          "title": "Merged in range",
+          "description": "Renovate PRs merged in the dashboard time range.",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -159,56 +145,44 @@ data:
           },
           "targets": [
             {
-              "refId": "A",
-              "datasource": {
-                "type": "grafana-github-datasource",
-                "uid": "github"
-              },
-              "queryType": "Pull_Requests",
-              "owner": "JasonKoopmans",
-              "repository": "home-ops-hiro",
-              "query": "author:app/renovate is:merged",
-              "timeField": 2,
-              "options": {}
+              "expr": "round(increase(renovate_prs_merged_total[$$__range]))",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
             }
           ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "count"
-              ],
-              "fields": "/title/i",
-              "values": false
-            },
-            "colorMode": "value",
-            "graphMode": "none",
-            "textMode": "auto"
-          },
           "fieldConfig": {
             "defaults": {
-              "unit": "none",
+              "decimals": 0,
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
+                    "color": "blue",
                     "value": null
                   }
                 ]
               }
             },
             "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
           }
         },
         {
           "id": 4,
           "type": "stat",
-          "title": "Opened in time range",
-          "description": "Renovate PRs created inside the dashboard time range (any state).",
-          "datasource": {
-            "type": "grafana-github-datasource",
-            "uid": "github"
-          },
+          "title": "Opened in range",
+          "description": "Renovate PRs opened in the dashboard time range (merged or not).",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -217,173 +191,243 @@ data:
           },
           "targets": [
             {
-              "refId": "A",
-              "datasource": {
-                "type": "grafana-github-datasource",
-                "uid": "github"
-              },
-              "queryType": "Pull_Requests",
-              "owner": "JasonKoopmans",
-              "repository": "home-ops-hiro",
-              "query": "author:app/renovate",
-              "timeField": 1,
-              "options": {}
+              "expr": "round(increase(renovate_prs_created_total[$$__range]))",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
             }
           ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "count"
-              ],
-              "fields": "/title/i",
-              "values": false
-            },
-            "colorMode": "value",
-            "graphMode": "none",
-            "textMode": "auto"
-          },
           "fieldConfig": {
             "defaults": {
-              "unit": "none",
+              "decimals": 0,
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
+                    "color": "blue",
                     "value": null
                   }
                 ]
               }
             },
             "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
           }
         },
         {
           "id": 5,
-          "type": "table",
-          "title": "Open Renovate PRs, oldest first",
-          "datasource": {
-            "type": "grafana-github-datasource",
-            "uid": "github"
-          },
+          "type": "timeseries",
+          "title": "Open Renovate PRs over time",
+          "description": "Merges land in a wave on Saturdays; the count should drop back after each one.",
           "gridPos": {
-            "h": 14,
-            "w": 24,
+            "h": 8,
+            "w": 12,
             "x": 0,
             "y": 5
           },
           "targets": [
             {
-              "refId": "A",
-              "datasource": {
-                "type": "grafana-github-datasource",
-                "uid": "github"
-              },
-              "queryType": "Pull_Requests",
-              "owner": "JasonKoopmans",
-              "repository": "home-ops-hiro",
-              "query": "author:app/renovate is:open",
-              "timeField": 1,
-              "options": {}
+              "expr": "count(renovate_pr_open_created_timestamp_seconds) or vector(0)",
+              "legendFormat": "open",
+              "refId": "A"
             }
           ],
-          "transformations": [
-            {
-              "id": "sortBy",
-              "options": {
-                "sort": [
-                  {
-                    "field": "created_at",
-                    "desc": false
-                  }
-                ]
-              }
-            }
-          ],
-          "options": {
-            "showHeader": true,
-            "cellHeight": "sm"
-          },
           "fieldConfig": {
             "defaults": {
               "custom": {
-                "filterable": true
-              }
+                "drawStyle": "line",
+                "lineInterpolation": "stepAfter",
+                "fillOpacity": 15
+              },
+              "decimals": 0,
+              "min": 0
             },
             "overrides": []
           },
-          "timeFrom": "10y",
-          "hideTimeOverride": true
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
         },
         {
           "id": 6,
-          "type": "table",
-          "title": "Recently merged",
-          "datasource": {
-            "type": "grafana-github-datasource",
-            "uid": "github"
-          },
+          "type": "timeseries",
+          "title": "Merged per day",
+          "description": "Renovate PRs merged per day.",
           "gridPos": {
-            "h": 10,
-            "w": 24,
-            "x": 0,
-            "y": 19
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 5
           },
           "targets": [
             {
-              "refId": "A",
-              "datasource": {
-                "type": "grafana-github-datasource",
-                "uid": "github"
+              "expr": "round(increase(renovate_prs_merged_total[1d]))",
+              "legendFormat": "merged",
+              "refId": "A"
+            }
+          ],
+          "interval": "1h",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 60
               },
-              "queryType": "Pull_Requests",
-              "owner": "JasonKoopmans",
-              "repository": "home-ops-hiro",
-              "query": "author:app/renovate is:merged",
-              "timeField": 2,
-              "options": {}
+              "decimals": 0,
+              "min": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "Open Renovate PRs, oldest first",
+          "description": "One row per open PR. Type comes from the type/* label; PRs without one show unknown.",
+          "gridPos": {
+            "h": 9,
+            "w": 16,
+            "x": 0,
+            "y": 13
+          },
+          "targets": [
+            {
+              "expr": "time() - renovate_pr_open_created_timestamp_seconds",
+              "legendFormat": "",
+              "instant": true,
+              "format": "table",
+              "refId": "A"
             }
           ],
           "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "job": true,
+                  "instance": true,
+                  "namespace": true,
+                  "pod": true,
+                  "service": true,
+                  "endpoint": true,
+                  "container": true
+                },
+                "renameByName": {
+                  "number": "PR",
+                  "type": "Type",
+                  "Value": "Age"
+                }
+              }
+            },
             {
               "id": "sortBy",
               "options": {
                 "sort": [
                   {
-                    "field": "merged_at",
+                    "field": "Age",
                     "desc": true
                   }
                 ]
               }
             }
           ],
-          "options": {
-            "showHeader": true,
-            "cellHeight": "sm"
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Age"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
           },
+          "options": {
+            "showHeader": true
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Exporter data age",
+          "description": "Seconds since the exporter last polled GitHub successfully. Over ~15 minutes means the numbers above are stale.",
+          "gridPos": {
+            "h": 5,
+            "w": 8,
+            "x": 16,
+            "y": 13
+          },
+          "targets": [
+            {
+              "expr": "time() - max(renovate_exporter_last_success_timestamp_seconds)",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
           "fieldConfig": {
             "defaults": {
-              "custom": {
-                "filterable": true
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 900
+                  }
+                ]
               }
             },
             "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
           }
         }
-      ],
-      "refresh": "15m",
-      "schemaVersion": 39,
-      "tags": [
-        "renovate",
-        "github"
-      ],
-      "time": {
-        "from": "now-30d",
-        "to": "now"
-      },
-      "timepicker": {},
-      "timezone": "utc",
-      "title": "Renovate PRs",
-      "uid": "renovate-prs",
-      "description": "DRAFT. Live GitHub API queries via the GitHub datasource; field names and timeField values are unverified against a running plugin."
+      ]
     }

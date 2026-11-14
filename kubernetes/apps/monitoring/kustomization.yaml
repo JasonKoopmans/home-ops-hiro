@@ -12,4 +12,5 @@ resources:
   - ./blackbox-exporter/ks.yaml
   - ./kube-prometheus-stack/ks.yaml
   - ./loki/ks.yaml
+  - ./renovate-exporter/ks.yaml
   - ./thanos/ks.yaml
