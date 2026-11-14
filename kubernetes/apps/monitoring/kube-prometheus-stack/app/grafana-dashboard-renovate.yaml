@@ -3,6 +3,9 @@
 # (created_at, merged_at, title) and the timeField numbers (1 = created,
 # 2 = merged) are from memory of the grafana-github-datasource plugin; open the
 # dashboard after the first sync and fix whatever the plugin names differently.
+# The is:open panels override their own time range to 10y: the plugin may scope
+# results by the dashboard range on the chosen time field, and an open PR older
+# than the range (the ones worth seeing) would otherwise drop out.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -75,7 +78,9 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "timeFrom": "10y",
+          "hideTimeOverride": true
         },
         {
           "id": 2,
@@ -133,7 +138,9 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "timeFrom": "10y",
+          "hideTimeOverride": true
         },
         {
           "id": 3,
@@ -304,7 +311,9 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "timeFrom": "10y",
+          "hideTimeOverride": true
         },
         {
           "id": 6,
