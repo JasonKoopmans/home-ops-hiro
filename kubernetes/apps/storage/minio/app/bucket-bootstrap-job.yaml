@@ -48,7 +48,7 @@ spec:
           # or after a deliberate delete-to-rerun (`kubectl -n storage delete job minio-bucket-bootstrap`,
           # then reconcile); docs/runbook-minio-silo-swap-shared.md says when that is safe.
           # Pin is final (docs/silo-qualification.md, Recommendation), same as helmrelease.yaml.
-          image: docker.io/pgsty/mc:RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8
+          image: docker.io/pgsty/mc:RELEASE.2026-11-12T00-00-00Z@sha256:b532278b7a3747dbab6fe45eebb40a653efa704e6758e24e9d9ec54fc96c1800
           command:
             - /bin/sh
             - -c
