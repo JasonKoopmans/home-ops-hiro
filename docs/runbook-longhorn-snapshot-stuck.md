@@ -21,7 +21,8 @@ First seen 2026-10-16: 15 CRs named `pvc-<uuid>-manual-1791583232-15005-23394`
 The denial is logged on whichever node owns that volume's engine (cmp-03, cmp-01 before it), which is why one node's
 apiserver and longhorn-manager logs looked chatty; the node is not busier. If you are asked about that noise, check for
 a stuck Snapshot CR first and do not drop the line in Alloy. The minecraft CR was cleared with the procedure below on
-2026-10-29; 14 healthy 70-byte CRs from the 2026-10-09 run remained then, and the same exemption works if one goes stale.
+2026-10-29; the other 14 healthy 70-byte CRs from the 2026-10-09 run were cleared over the following
+weeks, and the last one (audacity-config's volume) on 2026-11-14. None are left; any new one is a fresh bug.
 
 ## Recognise it
 
@@ -31,6 +32,26 @@ kubectl -n storage get snapshots.longhorn.io -o custom-columns=NAME:.metadata.na
 ```
 
 Loki: `{instance=~"storage/longhorn-manager-.*"} |= "Rejected operation" |= "operation: DELETE"`.
+
+## Clearing a CR on a detached volume
+
+Learned 2026-11-14 on `audacity-config` (scaled to zero by KEDA). Deleting the CR of a detached volume
+does not finish: longhorn-manager reports `snapshot deletion delayed: volume engine ... is upgrading`
+and waits for an engine, and removing its finalizer is an UPDATE the webhook denies (500) unless the
+exemption is still in place. So keep the exemption until the CR is gone, and give the volume an engine
+by attaching it in maintenance mode (a ticket on its `volumeattachments.longhorn.io`, no pod needed):
+
+```bash
+V=<volume>; NODE=<a node holding a replica>
+kubectl -n storage patch volumeattachments.longhorn.io $V --type=merge -p \
+  '{"spec":{"attachmentTickets":{"clear":{"id":"clear","type":"longhorn-api","nodeID":"'$NODE'","generation":0,"parameters":{"disableFrontend":"true","lastAttachedBy":""}}}}}'
+# the CR was gone ~10 s after the attach; then drop the ticket and the exemption
+kubectl -n storage patch volumeattachments.longhorn.io $V --type=merge -p '{"spec":{"attachmentTickets":{"clear":null}}}'
+```
+
+Save the webhook config somewhere that survives (not `mktemp`: the copy vanished twice). The policy
+`Deny` only matches CREATE, so it does not block this; the old worry that a deleted CR gets re-created by
+`syncSnapshotCRs` did not happen (snapshot count stayed at 5, none over 63 bytes afterwards).
 
 ## Fix (a runtime change to Longhorn's webhook, not in Git)
 
