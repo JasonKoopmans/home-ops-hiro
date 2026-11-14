@@ -54,7 +54,7 @@ checkable, not aspirational — "once 14d of data exists" rather than "later".
 | CNPG backups unproven (no base backup had ever fired) | Closed 2026-08-25 — first backup verified, restore drill passed, now automated weekly |
 | `cmp-05` undersized RAM | Closed 2026-08-23 — verified ~10.7Gi, matches the other nodes |
 | Longhorn "no-backup" storage classes silently opted *in* to backups | Fixed in #311 |
-| Binding `longhorn-snapshot-name-length` still `Warn` + `Audit` (old row 19) | Closed 2026-11-14 — flipped to `Deny` in #1076 after 14d with no warn/audit hits. A failed restore, clone or rebuild with "Snapshot name ... bytes" is this policy (see the binding comment); a throwaway clone and restore on 2026-11-14 passed |
+| Binding `longhorn-snapshot-name-length` still `Warn` + `Audit` (old row 19) | Closed 2026-11-14 — flipped to `Deny` in #1076 after 14d with no warn/audit hits. A failed restore, clone or rebuild with "Snapshot name ... bytes" is this policy (see the binding comment); a throwaway clone and restore on 2026-11-14 passed, and the last 70-byte CR was cleared the same day (runbook: detached-volume case) |
 | Longhorn `prometheus` volume left `ignored`/unpatched; 30Gi→15Gi resize never done | Closed 2026-10-28 — both premises were already false. The PVC was recreated 2026-08-21 at 15Gi on `longhorn-tsdb`, whose class sets `unmapMarkSnapChainRemoved: enabled` (live volume confirmed `enabled`, 2 replicas, healthy). Trim now runs every 6h (#889); 2-day peak `actualSize` 7.5Gi of 15Gi |
 
 ---
