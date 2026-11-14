@@ -249,8 +249,10 @@
       // CRD release is Ready). Order and soak checks: docs/runbook-renovate-prs.md.
       //
       // The PR opens any day, so it is waiting by the time the stack PR arrives,
-      // but it is never auto-merged: Helm does not touch CRDs on rollback, so
-      // Flux cannot back out a bad one. Same reasoning as Longhorn and Silo.
+      // but it is never auto-merged: the chart renders its CRDs as templates, so
+      // a failed upgrade can be rolled back onto the old schemas, which may fail
+      // or be unsafe once objects were written under the new ones. Same
+      // reasoning as Longhorn and Silo.
       description: "Prometheus CRDs lead the stack: open the PR any day, merge by hand",
       matchDatasources: ["helm"],
       matchPackageNames: ["prometheus-operator-crds"],
