@@ -433,7 +433,7 @@ spec:
         # .renovaterc.json5 reads only the next line. It used to sit above
         # `image:`, matched nothing, and no update PR was ever opened.
         # renovate: datasource=docker depName=grafana/grafana-image-renderer
-        tag: v5.12.3
+        tag: v5.12.11
       # Chart default (networkPolicy.limitIngress: true) restricts inbound
       # traffic to this instance's own Grafana pod only — which also blocks
       # Prometheus's own scrape from the monitoring namespace, since that's
