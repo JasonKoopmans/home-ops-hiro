@@ -107,9 +107,37 @@ on five different Proxmox hosts; vm02-04 never rebooted, vm01's syslog was clean
 in a vzdump. The cause was never found. The fallout that lasted was a stuck Longhorn replica
 ([gotchas-storage](gotchas-storage.md#a-replica-stuck-rebuilding-after-an-outage-blocks-snapshot-purge-and-so-trim)).
 
-## etcd has never been defragged
+## etcd was defragged by hand on 2026-11-14 (it had never been before)
 
-On 2026-10-18 the etcd database was 539 MiB on disk with 84 MiB in use, and nothing defragments it. The stock
-`etcdDatabaseHighFragmentationRatio` alert is gated on the in-use size, so it stays quiet below 100 MiB and will fire once real
-data passes that. Re-check the two sizes before acting: the etcd series were not returned by the Prometheus MCP on 2026-11-06,
-so this is a dated observation, not live state. A defrag is a per-member operation (`talosctl etcd defrag`, one member at a time).
+Nothing defragments etcd on its own. On 2026-10-18 the database was 539 MiB on disk with 84 MiB in use; on 2026-11-14 it was
+566 MB on every member with 91 MB in use (16%). The stock `etcdDatabaseHighFragmentationRatio` alert is gated on the in-use
+size, so it stayed quiet below 100 MiB and will fire once real data passes that. All five members were defragged on 2026-11-14
+between 23:09Z and 23:21Z; the sizes are dated observations, so re-read `talosctl etcd status` before acting on them.
+
+| Order | Node (IP) | Started (Z) | DB SIZE before | DB SIZE after | Role |
+|---|---|---|---|---|---|
+| 1 | cmp-02 (`192.168.25.22`) | 23:09:41 | 566 MB | 94 MB | follower |
+| 2 | cmp-04 (`192.168.25.24`) | 23:11:57 | 566 MB | 100 MB | follower; took up to 48 s (2-CPU node) |
+| 3 | cmp-05 (`192.168.25.25`) | 23:14:59 | 566 MB | 105 MB | follower |
+| 4 | cmp-03 (`192.168.25.23`) | 23:17:27 | 567 MB | 90 MB | leader |
+| 5 | cmp-01 (`192.168.25.21`) | 23:20:56 | 566 MB | 85 MB | follower, held back until it stopped thrashing |
+
+Right after each defrag the member's DB SIZE equalled its IN USE. Raft term stayed 117 and the leader stayed cmp-03 throughout,
+`etcd alarm list` was empty and `kubectl get --raw /readyz` returned `ok` after every step, with at least 2 minutes between
+members. Each run was `talosctl -e <another healthy node> -n <ip> etcd defrag`; the leader was re-read from `etcd status`
+immediately before it was touched.
+
+- **A defrag is per member.** `-n` takes one node's address and it blocks that member only (1 to 3 s on most, up to 48 s on the
+  2-CPU cmp-04). Do one at a time, followers first, the leader last, and read the leader from `etcd status` rather than assuming.
+  A changed leader or Raft term between steps means stop and look.
+- **A memory-starved node goes last, and only once it settles.** bbolt memory-maps the whole database file, so a 566 MB file that
+  holds 91 MB of live data competes for page cache with the workloads on the node. cmp-01 was at 95% memory with thousands of
+  major page faults per second and etcd reads taking 2-10 s that day, so it was left until `kubectl top nodes` showed it below
+  85% (77%), `rate(node_vmstat_pgmajfault[5m])` was down to about 6/s and its Prometheus pod had gone 10 minutes without a
+  restart. `kubectl top` returned `<unknown>` for cmp-01 at 23:09Z, so a missing reading is itself a "not yet".
+- **The effect on page-cache pressure is not shown.** cmp-01 read 77% before and 79% after a minute later, and the saving, if
+  any, shows up in major faults and etcd read latency over hours. Check those before claiming the defrag fixed the starvation.
+- **The file grew back to roughly 105-110 MB within minutes**, against 85-91 MB in use: at 23:21Z cmp-02, cmp-04 and cmp-05 read
+  108-109 MB against 86-87 MB in use. This is most likely the compaction sawtooth (freed pages stay in the file), not
+  re-fragmentation; it was not investigated further. Judge a future defrag by the DB SIZE to IN USE gap staying wide (the 566 vs 91 MB pattern), not by
+  the file being larger than in use.
