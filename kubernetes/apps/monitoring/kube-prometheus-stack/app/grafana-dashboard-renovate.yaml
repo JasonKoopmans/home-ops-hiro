@@ -385,7 +385,7 @@ data:
           "title": "Exporter data age",
           "description": "Seconds since the exporter last polled GitHub successfully. Over ~15 minutes means the numbers above are stale.",
           "gridPos": {
-            "h": 5,
+            "h": 4,
             "w": 8,
             "x": 16,
             "y": 13
@@ -411,6 +411,60 @@ data:
                   {
                     "color": "red",
                     "value": 900
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Since last merge",
+          "description": "Time since the newest merged Renovate PR. RenovateNotMerging fires past 10 days.",
+          "gridPos": {
+            "h": 5,
+            "w": 8,
+            "x": 16,
+            "y": 17
+          },
+          "targets": [
+            {
+              "expr": "time() - max(renovate_last_merged_timestamp_seconds)",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 432000
+                  },
+                  {
+                    "color": "red",
+                    "value": 864000
                   }
                 ]
               }

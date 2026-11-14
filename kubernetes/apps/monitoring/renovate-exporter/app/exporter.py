@@ -8,6 +8,7 @@ call. Standard library only; it runs on the stock python image.
 Metrics:
   renovate_pr_open_created_timestamp_seconds{number,type}  one series per open PR
   renovate_prs_created_total / renovate_prs_merged_total   all-time counts (search API)
+  renovate_last_merged_timestamp_seconds                   newest merge among recent closed PRs
   renovate_exporter_up                                     1 if the last poll worked
   renovate_exporter_last_success_timestamp_seconds
 """
@@ -27,7 +28,7 @@ INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "300"))
 TOKEN = os.environ.get("GITHUB_TOKEN", "")  # optional; public repo reads work without it
 PORT = int(os.environ.get("PORT", "9100"))
 
-state = {"up": 0, "last_success": 0.0, "open": [], "created": None, "merged": None}
+state = {"up": 0, "last_success": 0.0, "open": [], "created": None, "merged": None, "last_merged": None}
 lock = threading.Lock()
 
 
@@ -63,10 +64,17 @@ def poll():
         for p in pulls
         if p["user"]["login"] == BOT_LOGIN
     ]
+    # The 100 most recently updated closed PRs: a Saturday wave merges ~30, so the newest
+    # merge is always in here unless nothing has merged for a long while, in which case the
+    # previous value is kept below.
+    closed = get("https://api.github.com/repos/%s/pulls?state=closed&sort=updated&direction=desc&per_page=100" % REPO)
+    merge_times = [epoch(p["merged_at"]) for p in closed if p["user"]["login"] == BOT_LOGIN and p.get("merged_at")]
     created = search_count("")
     merged = search_count("is:merged")
     with lock:
         state.update(up=1, last_success=time.time(), open=open_prs, created=created, merged=merged)
+        if merge_times:
+            state["last_merged"] = max(merge_times)
 
 
 def poll_forever():
@@ -108,6 +116,12 @@ def render():
             "# TYPE renovate_prs_merged_total counter",
             "renovate_prs_merged_total %d" % s["merged"],
         ]
+        if s["last_merged"] is not None:
+            out += [
+                "# HELP renovate_last_merged_timestamp_seconds Merge time of the newest merged Renovate PR.",
+                "# TYPE renovate_last_merged_timestamp_seconds gauge",
+                "renovate_last_merged_timestamp_seconds %d" % s["last_merged"],
+            ]
     return "\n".join(out) + "\n"
 
 
