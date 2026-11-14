@@ -69,7 +69,7 @@ spec:
     # a fresh install of this release would sit in ImagePullBackOff.
     mcImage:
       repository: docker.io/pgsty/mc
-      tag: RELEASE.2026-10-26T00-00-00Z@sha256:ce62c9053c69ce12a527a322345b5ad9f44b5f8a7b8189f82e516f2e3f30f1d8
+      tag: RELEASE.2026-11-12T00-00-00Z@sha256:b532278b7a3747dbab6fe45eebb40a653efa704e6758e24e9d9ec54fc96c1800
 
     # Read rootUser and rootPassword from the existing SOPS-encrypted secret
     existingSecret: minio-root-credentials
