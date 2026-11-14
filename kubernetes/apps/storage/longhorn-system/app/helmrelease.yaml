@@ -60,6 +60,20 @@ spec:
       updateStrategy:
         rollingUpdate:
           maxUnavailable: 1
+      # The chart ships `resources: ~`, which made the manager pod QoS BestEffort,
+      # the first cgroup Talos's OOM controller SIGKILLs when a node runs short of
+      # memory. longhorn-manager-8nxdm on cmp-01 was killed this way five times
+      # between 2026-11-10 and 2026-11-14 (its `pre-pull-share-manager-image`
+      # sidecar has no resources either, but one container with a request is
+      # enough to make the pod Burstable). Measured 2026-11-14 through Thanos:
+      # manager container 14d peak 255Mi, typically 150-170Mi. Limit is ~2x the
+      # peak. The CPU request is a small booking, not a measurement.
+      resources:
+        requests:
+          cpu: 50m
+          memory: 192Mi
+        limits:
+          memory: 512Mi
     longhornGlobalManager:
       # New in chart 1.13: a stateless Deployment (one active leader, the rest warm
       # standbys). The chart ships `resources: ~`, so unbounded by default.

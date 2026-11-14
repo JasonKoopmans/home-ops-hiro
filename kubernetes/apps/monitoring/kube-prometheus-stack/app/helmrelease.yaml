@@ -344,14 +344,19 @@ spec:
         # chart's own Probe resource (release: minio) doesn't carry — it would
         # be created but silently never scraped.
         probeSelectorNilUsesHelmValues: false
-        # Measured 2026-09-28: 7d peak 1926Mi against this 2Gi limit (94%).
-        # Bumped to ~1.5x that peak.
+        # Measured 2026-11-14 over 14d through Thanos: average 1511Mi, p95 2073Mi,
+        # peak 2742Mi (94% of the previous 2912Mi limit). The request was 512Mi, so
+        # the scheduler booked Prometheus about 1Gi short and its node (cmp-01) ran
+        # out of real memory while showing room on paper. Request is now about the
+        # 14d average; limit is 1.5x the peak (the 2x rule would be 5.4Gi, half a
+        # node, so it is not applied). Revisit with
+        #   max_over_time(container_memory_working_set_bytes{pod="prometheus-kube-prometheus-stack-prometheus-0",container="prometheus"}[14d])
         resources:
           requests:
             cpu: 100m
-            memory: 512Mi
+            memory: 1536Mi
           limits:
-            memory: 2912Mi
+            memory: 4096Mi
         storageSpec:
           volumeClaimTemplate:
             spec:
