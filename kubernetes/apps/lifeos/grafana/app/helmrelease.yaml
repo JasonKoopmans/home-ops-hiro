@@ -428,8 +428,11 @@ spec:
     # follow-up decision rather than bundled in here.
     imageRenderer:
       enabled: true
-      # renovate: datasource=docker depName=grafana/grafana-image-renderer
       image:
+        # The hint must be the line directly above `tag:`: the regex manager in
+        # .renovaterc.json5 reads only the next line. It used to sit above
+        # `image:`, matched nothing, and no update PR was ever opened.
+        # renovate: datasource=docker depName=grafana/grafana-image-renderer
         tag: v5.12.3
       # Chart default (networkPolicy.limitIngress: true) restricts inbound
       # traffic to this instance's own Grafana pod only — which also blocks
