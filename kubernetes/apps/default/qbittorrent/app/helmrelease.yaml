@@ -95,10 +95,17 @@ spec:
               QBT_TORRENTING_PORT: &torrentPort 53712
             nameOverride: *app
 
+            # Request measured 2026-11-14 through Thanos over the 7.5 days of data
+            # that exist: working set max 49.6Mi, average 25Mi; CPU max 1.9m over
+            # 5m rates (the client sat idle, so this says nothing about an active
+            # download). Was 200m / 1Gi, which booked ~900Mi it never touched. The
+            # 4Gi limit stays: a busy torrent session with a large piece cache can
+            # use far more than an idle one, and the limit, not the booking,
+            # contains that. Revisit after a real download batch.
             resources:
               requests:
-                cpu: 200m
-                memory: 1Gi
+                cpu: 50m
+                memory: 128Mi
               limits:
                 memory: 4Gi
 
