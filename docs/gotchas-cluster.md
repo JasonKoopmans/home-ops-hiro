@@ -164,6 +164,34 @@ selected nothing and the connection was dropped. #851 worked around it with `ndo
 - `pods verified` in the kubernetes plugin was there for autopath and still keeps CoreDNS watching every pod. Switching it to
   `disabled` is possible once nothing is shown to use `*.pod.cluster.local` names; nobody has checked yet.
 
+## Cilium drops blocked egress, so the client hangs
+
+A pod under a `CiliumNetworkPolicy` egress allowlist gets no reset or ICMP error for a host the policy does not allow: Cilium
+drops the packets, so the client waits for its TCP timeout and retries. Tools that reach hosts besides the obvious one then look
+stuck, not failed. Seen with the agent-pipeline pods ([agent-pipeline](agent-pipeline.md)), whose policy allowed NuGet's HTTPS feed:
+
+- **NuGet package-signature revocation checks.** Installing signed packages fetches OCSP/CRL data from the certificate
+  authorities over plain HTTP. With the policy, a restore installed 92 packages in 5 minutes; without it, 339 in 22 seconds,
+  while all 539 HTTPS requests to `api.nuget.org` were fast either way. `NUGET_CERT_REVOCATION_MODE=offline` skips only the
+  online revocation lookup; signatures are still verified.
+- **Build-time downloads.** eShopOnWeb's Web project runs LibMan during `dotnet build`, fetching front-end libraries from cdnjs.
+  `LibraryRestore=false` (an MSBuild property, read from the environment) skips it.
+
+To find the host, run the same command in two throwaway pods on one node, one with the policy's labels and one without, and
+compare (recipe in [agent-pipeline](agent-pipeline.md)). Then either allow the host or turn the fetch off. Cilium's
+`policy-deny-response` agent option can make denied egress fail fast with ICMP instead; it is not set here and nobody has
+weighed it.
+
+## `RuntimeDefault` seccomp blocks user namespaces in pods
+
+Rootless sandboxes that create a user namespace (bubblewrap, which Claude Code's Bash sandbox uses, `unshare --user`) fail
+in a pod with the `RuntimeDefault` seccomp profile: `unshare: Operation not permitted`, and bwrap's "No permissions to create
+a new namespace". **The nodes are not the cause:** `/proc/sys/user/max_user_namespaces` is 11255, and the same commands
+succeed in the same image with `seccompProfile: Unconfined` (probe, 2026-11-15, `runAsUser: 1000`, all capabilities dropped).
+The runtime's default profile forbids creating a user namespace without privilege on purpose, since user namespaces are a
+common route to kernel exploits. Enabling one for a workload means a custom `Localhost` seccomp profile, a deliberate
+security decision ([revisit-register](revisit-register.md) #23).
+
 ## Unexplained: all five nodes dropped within 25 seconds (2026-10-17)
 
 At about 02:29Z every node dropped within roughly 25 s and returned at 03:00:44Z (cmp-01) and 03:13:51-03:14:05Z (the rest). They sit
