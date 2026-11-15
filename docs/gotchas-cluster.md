@@ -181,3 +181,11 @@ immediately before it was touched.
   108-109 MB against 86-87 MB in use. This is most likely the compaction sawtooth (freed pages stay in the file), not
   re-fragmentation; it was not investigated further. Judge a future defrag by the DB SIZE to IN USE gap staying wide (the 566 vs 91 MB pattern), not by
   the file being larger than in use.
+
+## `kubectl run -i --rm` can return nothing for a short-lived pod
+
+Running an `mc` export as `kubectl run <pod> --rm -i --restart=Never ...` (2026-10-30) wrote only `pod "<pod>" deleted` to the
+output file: the pod finished before `-i` attached and `--rm` removed it, so the output was lost. For anything that must be
+captured, apply a Pod manifest with `restartPolicy: Never`, wait for `Succeeded`/`Failed`, then `kubectl logs <pod> > out` and
+delete it. The `minio` Silo runbook's `mcpod.sh` (P7 in [runbook-minio-silo-swap-shared](runbook-minio-silo-swap-shared.md)) is a
+worked example, with the root credentials read through `secretKeyRef` and never printed.

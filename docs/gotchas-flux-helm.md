@@ -139,6 +139,22 @@ work for GHCR). A new private image under that namespace needs no config. If loo
 before the config. Merge a config change that references a secret only after the secret exists: an undefined one can reject
 the whole config.
 
+## Pushing an image from a container on the Mac: `docker login` is invisible to it
+
+Docker Desktop here uses `credsStore: desktop`, so `docker login ghcr.io` keeps the token in the macOS keychain, not in
+`~/.docker/config.json`. A container started with `-v ~/.docker:/root/.docker` (skopeo, crane, oras) therefore has no
+credentials and fails with an auth error. Pass a token with `write:packages` as an environment variable and hand it to the tool
+directly; never write it to a file or expand it into a host command line:
+
+```sh
+read -rs GHCR_TOKEN; export GHCR_TOKEN
+docker run --rm -e GHCR_TOKEN -v "$PWD/layout:/o:ro" --entrypoint sh quay.io/skopeo/stable \
+  -c 'skopeo copy --dest-creds "JasonKoopmans:$GHCR_TOKEN" oci:/o docker://ghcr.io/jasonkoopmans/<name>:<tag>'
+```
+
+(`--entrypoint sh` because that image's entrypoint is `/usr/bin/skopeo`.) Host `docker` commands still use the keychain login.
+Revoke the token afterwards. A new package under that namespace starts private.
+
 ## app-template appends the controller name only when there are two
 
 bjw-s app-template builds a resource name from the release name and appends the controller identifier **only when the release has
