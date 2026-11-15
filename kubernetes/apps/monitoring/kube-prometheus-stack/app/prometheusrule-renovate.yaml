@@ -1,0 +1,64 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: renovate-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: renovate.rules
+      rules:
+        # Keyed on the time of the newest merge, not on the age of open PRs. Several
+        # update classes are never auto-merged by design (.renovaterc.json5: Longhorn,
+        # LifeOS, the Prometheus CRD chart, Flux Operator, Talos and Kubernetes versions,
+        # Cilium minor/major, and every major), so an open PR of any age can be perfectly
+        # healthy and a per-PR age alert would page for waiting on the owner. What cannot
+        # be healthy is the whole automerge pipeline going quiet: a normal Saturday wave
+        # merges 26-33 PRs (docs/runbook-renovate-prs.md), so ten days without a single
+        # merge means Renovate stopped, Flux Local is failing every PR, or automerge is off.
+        # Ten days = one missed Saturday plus most of the next week.
+        #
+        # `max()` drops pod and instance, which change on every restart and would reset
+        # `for:`; the static `name` label is what the warning digest prints. The `unless`
+        # keeps this quiet while the exporter itself is stale (RenovateExporterPollFailing
+        # owns that case), since a frozen timestamp would otherwise read as "no merges".
+        - alert: RenovateNotMerging
+          expr: |
+            (time() - max(renovate_last_merged_timestamp_seconds) > 864000)
+            unless on()
+            (time() - max(renovate_exporter_last_success_timestamp_seconds) > 7200)
+          for: 1h
+          labels:
+            severity: warning
+            name: renovate-merges
+          annotations:
+            summary: Renovate has not merged a PR for over 10 days
+            description: The newest merged Renovate PR is {{ $$value | humanizeDuration }} old, against a weekly Saturday wave of dozens. Check that Renovate is still running (Mend portal, the Dependency Dashboard issue), that the required Flux Local check is passing on open Renovate PRs (`gh pr list --author app/renovate`), and that automerge is not blocked by a rule in .renovaterc.json5.
+
+        # The exporter is up but GitHub reads are failing (rate limit, outage, egress). The
+        # value is 0 until the first successful poll, so a deploy that never reaches GitHub
+        # fires this too. Two hours is 8 missed polls at the 15 minute interval.
+        - alert: RenovateExporterPollFailing
+          expr: time() - max(renovate_exporter_last_success_timestamp_seconds) > 7200
+          for: 15m
+          labels:
+            severity: warning
+            name: renovate-exporter
+          annotations:
+            summary: renovate-exporter has not read GitHub successfully for over 2 hours
+            description: The Renovate PR dashboard and RenovateNotMerging are working from old numbers. Check `kubectl -n monitoring logs deploy/renovate-exporter` for "poll failed" (rate limit 403, DNS or egress), and the GitHub status page.
+
+        # Every rule above depends on this one scrape: a vanished series makes them all
+        # evaluate empty, which looks exactly like healthy. The second branch covers an
+        # exporter that polls fine but never found a merged PR to report.
+        - alert: RenovateExporterMetricsMissing
+          expr: absent(renovate_exporter_up) or absent(renovate_last_merged_timestamp_seconds)
+          for: 1h
+          labels:
+            severity: warning
+            name: renovate-exporter
+          annotations:
+            summary: renovate-exporter metrics are missing from Prometheus
+            description: No renovate_exporter_up or renovate_last_merged_timestamp_seconds series for an hour, so the Renovate alerts cannot fire. Check the renovate-exporter pod and its ServiceMonitor target in Prometheus.

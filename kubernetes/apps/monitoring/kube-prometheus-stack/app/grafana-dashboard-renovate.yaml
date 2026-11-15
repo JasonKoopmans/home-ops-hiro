@@ -1,0 +1,487 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-renovate
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  renovate-prs.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "graphTooltip": 1,
+      "schemaVersion": 39,
+      "style": "dark",
+      "tags": [
+        "renovate",
+        "github"
+      ],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-30d",
+        "to": "now"
+      },
+      "timezone": "utc",
+      "title": "Renovate PRs",
+      "uid": "renovate-prs",
+      "version": 1,
+      "description": "Renovate PR counts and ages from the renovate-exporter (polls the GitHub API every 15 minutes).",
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Open Renovate PRs",
+          "description": "Renovate PRs currently open. Shows no data, not 0, while the exporter is absent.",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "count(renovate_pr_open_created_timestamp_seconds) or (0 * max(renovate_exporter_up))",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Oldest open PR",
+          "description": "Age of the oldest open Renovate PR. Majors wait for a manual merge, so a long age is not always a fault.",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "time() - min(renovate_pr_open_created_timestamp_seconds)",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 604800
+                  },
+                  {
+                    "color": "red",
+                    "value": 1209600
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Merged in range",
+          "description": "Renovate PRs merged in the dashboard time range. Counted from the exporter's own history, so it under-reports until the exporter has run for the whole range (first deployed 2026-11); read it as a floor until then.",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 12,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "round(increase(renovate_prs_merged_total[$$__range]))",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Opened in range",
+          "description": "Renovate PRs opened in the dashboard time range (merged or not). Counted from the exporter's own history, so it under-reports until the exporter has run for the whole range (first deployed 2026-11); read it as a floor until then.",
+          "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 18,
+            "y": 0
+          },
+          "targets": [
+            {
+              "expr": "round(increase(renovate_prs_created_total[$$__range]))",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Open Renovate PRs over time",
+          "description": "Merges land in a wave on Saturdays; the count should drop back after each one. Shows no data, not 0, while the exporter is absent.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 5
+          },
+          "targets": [
+            {
+              "expr": "count(renovate_pr_open_created_timestamp_seconds) or (0 * max(renovate_exporter_up))",
+              "legendFormat": "open",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "stepAfter",
+                "fillOpacity": 15
+              },
+              "decimals": 0,
+              "min": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Merged per day",
+          "description": "Renovate PRs merged per UTC day (one bar per day; the Saturday wave is one bar). Starts at the day the exporter was first deployed.",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 5
+          },
+          "targets": [
+            {
+              "expr": "round(increase(renovate_prs_merged_total[1d]))",
+              "legendFormat": "merged",
+              "refId": "A"
+            }
+          ],
+          "interval": "1d",
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "drawStyle": "bars",
+                "fillOpacity": 60
+              },
+              "decimals": 0,
+              "min": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          }
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "Open Renovate PRs, oldest first",
+          "description": "One row per open PR. Type comes from the type/* label; PRs without one show unknown.",
+          "gridPos": {
+            "h": 9,
+            "w": 16,
+            "x": 0,
+            "y": 13
+          },
+          "targets": [
+            {
+              "expr": "time() - renovate_pr_open_created_timestamp_seconds",
+              "legendFormat": "",
+              "instant": true,
+              "format": "table",
+              "refId": "A"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "job": true,
+                  "instance": true,
+                  "namespace": true,
+                  "pod": true,
+                  "service": true,
+                  "endpoint": true,
+                  "container": true
+                },
+                "renameByName": {
+                  "number": "PR",
+                  "type": "Type",
+                  "Value": "Age"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "sort": [
+                  {
+                    "field": "Age",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Age"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true
+          }
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Exporter data age",
+          "description": "Seconds since the exporter last polled GitHub successfully. Over ~45 minutes (three missed polls) means the numbers above are stale.",
+          "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 16,
+            "y": 13
+          },
+          "targets": [
+            {
+              "expr": "time() - max(renovate_exporter_last_success_timestamp_seconds)",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 2700
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Since last merge",
+          "description": "Time since the newest merged Renovate PR. RenovateNotMerging fires past 10 days.",
+          "gridPos": {
+            "h": 5,
+            "w": 8,
+            "x": 16,
+            "y": 17
+          },
+          "targets": [
+            {
+              "expr": "time() - max(renovate_last_merged_timestamp_seconds)",
+              "legendFormat": "",
+              "instant": true,
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 432000
+                  },
+                  {
+                    "color": "red",
+                    "value": 864000
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        }
+      ]
+    }
