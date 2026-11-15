@@ -45,6 +45,15 @@ spec:
           resources:
             requests:
               cpu: 100m
+              # A memory limit with no memory request makes Kubernetes set the
+              # request equal to the limit, so each of the six proxies booked
+              # 1Gi (1056Mi with the shutdown-manager sidecar) while the envoy
+              # container used 96Mi at most. Measured 2026-11-14 through Thanos
+              # over the 8 days of data that exist: working set max 96Mi, p95
+              # 91Mi. Request is ~2.7x the max; the 1Gi limit still contains a
+              # spike. Revisit with
+              #   max_over_time(container_memory_working_set_bytes{pod=~"envoy-(external|internal)-.*",container="envoy"}[14d])
+              memory: 256Mi
             limits:
               memory: 1Gi
       envoyService:
