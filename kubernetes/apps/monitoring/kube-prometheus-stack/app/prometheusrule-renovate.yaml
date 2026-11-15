@@ -35,7 +35,7 @@ spec:
             name: renovate-merges
           annotations:
             summary: Renovate has not merged a PR for over 10 days
-            description: The newest merged Renovate PR is {{ $value | humanizeDuration }} old, against a weekly Saturday wave of dozens. Check that Renovate is still running (Mend portal, the Dependency Dashboard issue), that the required Flux Local check is passing on open Renovate PRs (`gh pr list --author app/renovate`), and that automerge is not blocked by a rule in .renovaterc.json5.
+            description: The newest merged Renovate PR is {{ $$value | humanizeDuration }} old, against a weekly Saturday wave of dozens. Check that Renovate is still running (Mend portal, the Dependency Dashboard issue), that the required Flux Local check is passing on open Renovate PRs (`gh pr list --author app/renovate`), and that automerge is not blocked by a rule in .renovaterc.json5.
 
         # The exporter is up but GitHub reads are failing (rate limit, outage, egress). The
         # value is 0 until the first successful poll, so a deploy that never reaches GitHub
