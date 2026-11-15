@@ -89,6 +89,20 @@ retried, and both releases reached `RetriesExceeded` (minio restarted four times
   inline script, run the image once (`kubectl run x --rm -i --restart=Never --image=<img> --command -- sh -c '...'`) and
   confirm every utility the script uses exists. Give the pull a generous timeout: a cold pull can look like a missing tag.
 
+- **A chart value in the wrong place is dropped without a word.** Helm ignores keys the chart template never reads, and
+  `values.schema.json` rarely rejects them. #909 shipped three of these for the minecraft chart and every check passed: `extraPorts`
+  at the top level (the chart reads `minecraftServer.extraPorts`, so the Service never got 19132), `storageClass` under
+  `mcbackup.persistence.backupDir` (read one level up, so the backup PVC landed on `longhorn`), and a comma list in `JVM_DD_OPTS`
+  (itzg splits on spaces, so Geyser logged `Invalid transport` and stayed on RakNet). Before merging, `helm template` the chart
+  with the HelmRelease's `values:` and grep the rendered object for the exact field you meant to set; after merging, read the
+  live object or the app's startup log. The rendered diff Flux Local posts on the PR shows the same thing if you read the
+  Service, PVC and env lines, not only the values.
+- **An immutable field of a chart-owned object cannot be fixed by editing Git.** Helm cannot patch `storageClassName`, so the
+  upgrade fails and rolls back. With an empty or disposable PVC, do it in this order: `flux suspend helmrelease <app>`, scale the
+  Deployment to 0, delete the PVC, merge the fix, `flux resume`, then check the Deployment is back at 1 replica (Helm leaves the
+  live 0 because the manifest's replica count did not change) and the new PVC has the right class. A PVC that holds data needs a
+  Longhorn backup or restore first.
+
 ## Growing a PVC
 
 Check how the PVC is created before saying a manual resize is needed.
