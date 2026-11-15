@@ -23,10 +23,15 @@ spec:
             command: ["python", "/app/exporter.py"]
             env:
               GITHUB_REPO: JasonKoopmans/home-ops-hiro
-              # Reads of a public repo need no token. Unauthenticated limits
-              # (60 core requests/hour, 10 search requests/minute, per egress IP) are far
-              # above one poll of 3 requests every 5 minutes.
-              POLL_INTERVAL_SECONDS: "300"
+              # Reads of a public repo need no token. One poll is 4 requests (2 core:
+              # open and closed pulls; 2 search). Every 15 minutes that is 8 of the 60
+              # unauthenticated core requests an hour. The limit is per egress IP, so it
+              # is shared with anything else on the home network that calls
+              # api.github.com unauthenticated (gh, mise installs, helm pulls). Nothing
+              # here needs fresher data: the merge wave is weekly and the alerts use 2h
+              # and 10d windows. If 403s show up in the pod logs, wire GITHUB_TOKEN
+              # (read by exporter.py) from a SOPS Secret.
+              POLL_INTERVAL_SECONDS: "900"
               PORT: &port 9100
             probes:
               liveness: &probes

@@ -39,7 +39,7 @@ spec:
 
         # The exporter is up but GitHub reads are failing (rate limit, outage, egress). The
         # value is 0 until the first successful poll, so a deploy that never reaches GitHub
-        # fires this too. Two hours is 24 missed polls at the 5 minute interval.
+        # fires this too. Two hours is 8 missed polls at the 15 minute interval.
         - alert: RenovateExporterPollFailing
           expr: time() - max(renovate_exporter_last_success_timestamp_seconds) > 7200
           for: 15m

@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 REPO = os.environ["GITHUB_REPO"]  # owner/name
 BOT_LOGIN = os.environ.get("RENOVATE_LOGIN", "renovate[bot]")  # login in the pulls API
 SEARCH_AUTHOR = os.environ.get("RENOVATE_SEARCH_AUTHOR", "app/renovate")  # author: qualifier
-INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "300"))
+INTERVAL = int(os.environ.get("POLL_INTERVAL_SECONDS", "900"))
 TOKEN = os.environ.get("GITHUB_TOKEN", "")  # optional; public repo reads work without it
 PORT = int(os.environ.get("PORT", "9100"))
 

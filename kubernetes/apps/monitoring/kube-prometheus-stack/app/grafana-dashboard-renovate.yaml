@@ -31,7 +31,7 @@ data:
       "title": "Renovate PRs",
       "uid": "renovate-prs",
       "version": 1,
-      "description": "Renovate PR counts and ages from the renovate-exporter (polls the GitHub API every 5 minutes).",
+      "description": "Renovate PR counts and ages from the renovate-exporter (polls the GitHub API every 15 minutes).",
       "panels": [
         {
           "id": 1,
@@ -383,7 +383,7 @@ data:
           "id": 8,
           "type": "stat",
           "title": "Exporter data age",
-          "description": "Seconds since the exporter last polled GitHub successfully. Over ~15 minutes means the numbers above are stale.",
+          "description": "Seconds since the exporter last polled GitHub successfully. Over ~45 minutes (three missed polls) means the numbers above are stale.",
           "gridPos": {
             "h": 4,
             "w": 8,
@@ -410,7 +410,7 @@ data:
                   },
                   {
                     "color": "red",
-                    "value": 900
+                    "value": 2700
                   }
                 ]
               }
