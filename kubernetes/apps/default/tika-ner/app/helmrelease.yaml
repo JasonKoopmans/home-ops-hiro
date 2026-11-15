@@ -121,7 +121,11 @@ spec:
             resources:
               requests:
                 cpu: 250m
-                memory: 1Gi
+                # Measured 2026-11-14 through Thanos over 8 days: working set
+                # p95 191Mi, average 193Mi, max 838Mi (a burst). Request is ~2x
+                # the steady state; the burst runs against the 4Gi limit, not the
+                # booking. Was 1Gi.
+                memory: 384Mi
               limits:
                 cpu: 2000m
                 memory: 4Gi

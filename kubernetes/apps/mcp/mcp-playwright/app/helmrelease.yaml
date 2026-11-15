@@ -142,17 +142,17 @@ spec:
               readOnlyRootFilesystem: true
               capabilities: { drop: ["ALL"] }
             resources:
-              # Labelled guess, not a measurement — no pod has run yet. Set
-              # well above the Go/Python MCP servers in this namespace
-              # (64–512Mi) because this one carries an actual Chromium
-              # process, not an HTTP client. Limit leaves headroom over the
-              # 1Gi /dev/shm reservation below plus Node+Chromium heap.
-              # Revisit against
+              # Request measured 2026-11-14 through Thanos over 8 days: working
+              # set max 152Mi, p95 91Mi, average 82Mi. Request sits just above
+              # the max. Was a labelled guess of 512Mi, set before any pod had
+              # run. Limit is unchanged: it leaves headroom over the 1Gi
+              # /dev/shm reservation below plus Node+Chromium heap, which a busy
+              # page load can use and an idle pod does not. Revisit against
               # max_over_time(container_memory_working_set_bytes{...}[14d])
-              # once this has served real traffic.
+              # once 14 days of real traffic exist.
               requests:
                 cpu: 100m
-                memory: 512Mi
+                memory: 192Mi
               limits:
                 memory: 2Gi
 
