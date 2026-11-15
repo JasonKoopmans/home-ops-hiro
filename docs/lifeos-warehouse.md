@@ -164,9 +164,19 @@ as "the same record". Pick it by the source's **grain**:
 Todoist recurring tasks keep the same `object_id` forever, so keying on it alone makes every later completion overwrite or hide
 the earlier one: days dominated by recurring tasks looked nearly empty on the Todos dashboard (2026-09-16 and 09-17). The n8n
 node now builds the key as `object_id` plus `event_date`. A key change does not fix rows already written under the old key.
-Repair (2026-09): truncate `raw.todoist_completed_tasks`, then run the n8n backfill again over the full range. `lifeos_ingest`
-cannot truncate, and the read-only MCP role cannot read `raw.*` at all, so this is a human step with a privileged role.
-Before repairing, count one day's completions in the Todoist app against the warehouse to confirm the key is the cause.
+Repair, as done in 2026-09: truncate `raw.todoist_completed_tasks`, then run the n8n backfill again over the full range.
+`lifeos_ingest` cannot truncate, and the read-only MCP role cannot read `raw.*` at all, so this is a human step with a privileged
+role. Truncating destroys the history of record, so it is only safe if the backfill can refill it. Treat it as a one-off, not a
+standing procedure, and before repeating it:
+
+1. Count one day's completions in the Todoist app against the warehouse to confirm the key is the cause.
+2. Keep a copy: `CREATE TABLE raw.todoist_completed_tasks_old AS TABLE raw.todoist_completed_tasks;`
+3. Confirm the Todoist completed-items API can return back to the table's earliest `completed_at` (`SELECT min(completed_at)`).
+   Completions older than the API's window cannot be recovered once truncated.
+4. After the backfill, compare row counts and the earliest `completed_at` against the copy, then drop the copy.
+
+The 2026-09 repair was not recorded as verified against the old row count, so whether anything older than the API window was lost
+is unknown.
 
 ### Last write wins (open hazard)
 
