@@ -46,16 +46,22 @@ only local copy of media). Verdict for both in August: migrate within 6-12 month
 
 ## What the swap established
 
-- Both instances run Silo `RELEASE.2026-10-26`. The RecordingAnnotator swap took seconds (about 80 minutes for the window), with
-  object count, bytes and `format.json` identical before and after; the app needed no change.
+- Both instances were swapped to Silo `RELEASE.2026-10-26` and moved to `RELEASE.2026-11-12` on 2026-11-14 (#1049/#1050). The
+  RecordingAnnotator swap took seconds (about 80 minutes for the window), with object count, bytes and `format.json` identical
+  before and after; the app needed no change.
+- **No deliberate copy of the old MinIO image is kept.** Its registries (quay 401, Docker Hub 404) no longer serve it, the keeper
+  pods that pinned the cached copies on two nodes were deleted at the end of the soak (image GC may now evict them), and the
+  optional export to `ghcr.io` (runbook step P6) was never done. The undo is therefore a snapshot revert or backup restore only (next bullet).
 - **Going back is not clean.** Re-pointing the old image at a volume Silo touched fails on the shared volume (`Unknown xl meta
   version 3`); the real undo is a Longhorn snapshot revert or backup restore. Rolling downgrade is unsupported. That is why both
   HelmReleases carried `upgrade.disableWait: true` during the window (removed in #960/#961) and why a Silo bump now means a
   Longhorn snapshot and `flux suspend hr` first.
 - Silo rejects new or updated policies with bare ARN prefixes, requires `s3:DeleteObjectVersion` for explicit version deletes,
-  and adds per-bucket CORS (the global default still applies). Renovate must not automerge Silo bumps (one-way metadata) and
-  its helm-values manager does not recognise a `tag@sha256` value, so `image.tag` and `mcImage.tag` are bumped by hand with the
-  digest, never the tag alone. Watch `github.com/pgsty/silo/releases` and re-run `scripts/silo-qualify/` before bumping.
+  and adds per-bucket CORS (the global default still applies). Silo bumps are one-way (persistent metadata), so `.renovaterc.json5`
+  holds them behind `dependencyDashboardApproval` with `automerge: false`; a custom regex manager reads the `tag@sha256` pins
+  (the stock helm-values manager does not), and each PR moves tag and digest together in both HelmReleases (Silo and `mc` are
+  separate PRs). Merge by hand after a Longhorn snapshot and `flux suspend hr`. Watch `github.com/pgsty/silo/releases` and re-run `scripts/silo-qualify/`
+  before approving a bump.
 
 ## Still open
 

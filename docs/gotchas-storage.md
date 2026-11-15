@@ -163,6 +163,20 @@ ran 24 minutes and ended `BackoffLimitExceeded`. Both attempts for the `n8n` vol
 - Do not confuse it with stuck snapshot CRs (names over 63 bytes can be created but never deleted):
   [runbook-longhorn-snapshot-stuck](runbook-longhorn-snapshot-stuck.md).
 
+## A running backup has no `volumeName` yet: find it by label
+
+A `backups.longhorn.io` object left empty `.status.volumeName` while it was `InProgress` (2026-10-30, the 80 GB `minio` volume), so
+`-o jsonpath` filters on `.status.volumeName` reported "no backup" for a backup that was 10% done. The volume is on the
+**label** `backup-volume=<pv name>` from creation; `.status.state` and `.status.progress` (percent) are filled in as it runs:
+
+```sh
+kubectl -n storage get backups.longhorn.io -l backup-volume=<pv name>
+```
+
+The backup read from one replica at about 0.4% a minute (roughly four hours for 80 GB), so start a pre-change backup the evening
+before. It needs a snapshot to read from; that one was made in the Longhorn UI (volume, snapshot, Back Up). Creating a `Backup`
+object by hand was not tried.
+
 ## `longhorn_volume_robustness` is one series per state
 
 It carries one series per (volume, state) with values 0 or 1. Healthy is `count by (state) (longhorn_volume_robustness == 1)`;
