@@ -41,6 +41,18 @@ second Service with `loadBalancerClass: tailscale` carrying TCP+UDP 19132, and
 Still unproven: restore test (below), Longhorn snapshot of `minecraft-pvc` before risky changes, and
 `Kubeworld` size on the 1Gi volume.
 
+## Open items
+
+- **Allowlist survives restarts only if it is in Git.** Bedrock UUIDs and hand-added Java names (`MicroGachou`) are lost
+  on a pod restart. Check that the chart's `whitelist` value accepts Floodgate UUIDs before relying on it.
+- **Tailscale** for remote play (above); not started. Public access and a DDNS or relay option are undecided.
+- **Resources are guesses.** Heap 3G, memory request 4Gi and limit 5Gi, CPU request 500m, view distance 9, 20 players. Revisit
+  with `max_over_time(container_memory_working_set_bytes{pod=~"minecraft-.*"}[14d])` (limit near 2x the peak) after a
+  week of real play with several players online, and watch CPU on `hiro-cmp-03`.
+- **Homepage widget** on `app/tcproute.yaml` uses `udp://minecraft.default:25565`; the Java port is TCP, so the widget is
+  probably wrong. Not changed.
+- **World PVC is 1Gi** and also holds the old `Kubeworld`; see Sizing.
+
 ## Allowlist
 
 `ENFORCE_WHITELIST=TRUE`. Java names live in `minecraftServer.whitelist`; the list in Git is the
