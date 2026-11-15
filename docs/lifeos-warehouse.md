@@ -142,6 +142,42 @@ hardening if a workflow ever gets it wrong. It was left out for now because
 PL/pgSQL bodies need dollar-quoting, which Flux's postBuild substitution
 rewrites (see the note at the top of `schema.yaml`).
 
+### Choosing a natural key
+
+`core.*` views keep one row per `(source, natural_key)` (`DISTINCT ON`, newest `ingested_at` wins), so the key decides what counts
+as "the same record". Pick it by the source's **grain**:
+
+| Grain | Key | Example |
+|---|---|---|
+| One row per day per metric | `YYYY-MM-DD:Metric` | `raw.health_metrics` |
+| One row per event | an id **unique per event**, not per object | Todoist completions: `object_id` + event date |
+
+Todoist recurring tasks keep the same `object_id` forever, so keying on it alone makes every later completion overwrite or hide
+the earlier one: days dominated by recurring tasks looked nearly empty on the Todos dashboard (2026-09-16 and 09-17). The n8n
+node now builds the key as `object_id` plus `event_date`. A key change does not fix rows already written under the old key.
+Repair (2026-09): truncate `raw.todoist_completed_tasks`, then run the n8n backfill again over the full range. `lifeos_ingest`
+cannot truncate, and the read-only MCP role cannot read `raw.*` at all, so this is a human step with a privileged role.
+Before repairing, count one day's completions in the Todoist app against the warehouse to confirm the key is the cause.
+
+### Last write wins (open hazard)
+
+The ingest contract above skips a write only when it equals the *latest* payload. A different value, including a zero, is a new
+row and becomes the winner. The activity-ring Shortcut can run from an iPhone or an iPad; the user's report is that the iPad
+posts zeros because the ring data lives on the phone, and a later zero then replaces a real value (Exercise 9/26 to 9/30 showed
+0 after the warehouse had held 36 for 9/26). The overwrite is only a theory until `raw.health_metrics` shows a good-then-zero pair:
+
+```sql
+SELECT observed_on, natural_key, payload->>'value' AS value, ingested_at
+FROM raw.health_metrics
+WHERE natural_key LIKE '2026-09-2%:Exercise'
+ORDER BY natural_key, ingested_at;
+```
+
+The real values are still in `raw`, since nothing is updated in place. Two fixes, not yet made: have the Shortcut skip the POST when
+the device is not the data owner or the value is 0, or make `core.health_metrics` prefer the highest value per key for metrics
+that only grow during a day (Move, Exercise, Stand). The second protects against any bad writer but changes `schema.yaml`, so it
+needs its own PR and a decision about legitimate corrections downward.
+
 **Use n8n's Postgres node in parameterized mode — never build this query by
 string-concatenating a field from `payload` into the SQL.** `:source`,
 `:natural_key` and `:payload` above are bind parameters, which is what makes
