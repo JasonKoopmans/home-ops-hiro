@@ -120,8 +120,12 @@ spec:
                   failureThreshold: 90
             resources:
               requests:
-                cpu: 250m
-                # Measured 2026-11-14 through Thanos over 8 days: working set
+                # CPU measured 2026-11-14 over 8 days (5m rates): p95 0.5m, max
+                # 78m. Request sits just above the max; the 2000m limit bounds a
+                # parse burst. Was 250m, which on 2-CPU cmp-03 helped push CPU
+                # requests to 96% while it used under 1m.
+                cpu: 100m
+                # Memory measured 2026-11-14 through Thanos over 8 days: working set
                 # p95 191Mi, average 193Mi, max 838Mi (a burst). Request is ~2x
                 # the steady state; the burst runs against the 4Gi limit, not the
                 # booking. Was 1Gi.
