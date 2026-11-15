@@ -37,7 +37,7 @@ data:
           "id": 1,
           "type": "stat",
           "title": "Open Renovate PRs",
-          "description": "Renovate PRs currently open.",
+          "description": "Renovate PRs currently open. Shows no data, not 0, while the exporter is absent.",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -46,7 +46,7 @@ data:
           },
           "targets": [
             {
-              "expr": "count(renovate_pr_open_created_timestamp_seconds) or vector(0)",
+              "expr": "count(renovate_pr_open_created_timestamp_seconds) or (0 * max(renovate_exporter_up))",
               "legendFormat": "",
               "instant": true,
               "refId": "A"
@@ -136,7 +136,7 @@ data:
           "id": 3,
           "type": "stat",
           "title": "Merged in range",
-          "description": "Renovate PRs merged in the dashboard time range.",
+          "description": "Renovate PRs merged in the dashboard time range. Counted from the exporter's own history, so it under-reports until the exporter has run for the whole range (first deployed 2026-11); read it as a floor until then.",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -182,7 +182,7 @@ data:
           "id": 4,
           "type": "stat",
           "title": "Opened in range",
-          "description": "Renovate PRs opened in the dashboard time range (merged or not).",
+          "description": "Renovate PRs opened in the dashboard time range (merged or not). Counted from the exporter's own history, so it under-reports until the exporter has run for the whole range (first deployed 2026-11); read it as a floor until then.",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -228,7 +228,7 @@ data:
           "id": 5,
           "type": "timeseries",
           "title": "Open Renovate PRs over time",
-          "description": "Merges land in a wave on Saturdays; the count should drop back after each one.",
+          "description": "Merges land in a wave on Saturdays; the count should drop back after each one. Shows no data, not 0, while the exporter is absent.",
           "gridPos": {
             "h": 8,
             "w": 12,
@@ -237,7 +237,7 @@ data:
           },
           "targets": [
             {
-              "expr": "count(renovate_pr_open_created_timestamp_seconds) or vector(0)",
+              "expr": "count(renovate_pr_open_created_timestamp_seconds) or (0 * max(renovate_exporter_up))",
               "legendFormat": "open",
               "refId": "A"
             }
@@ -268,7 +268,7 @@ data:
           "id": 6,
           "type": "timeseries",
           "title": "Merged per day",
-          "description": "Renovate PRs merged per day.",
+          "description": "Renovate PRs merged per UTC day (one bar per day; the Saturday wave is one bar). Starts at the day the exporter was first deployed.",
           "gridPos": {
             "h": 8,
             "w": 12,
@@ -282,7 +282,7 @@ data:
               "refId": "A"
             }
           ],
-          "interval": "1h",
+          "interval": "1d",
           "fieldConfig": {
             "defaults": {
               "custom": {

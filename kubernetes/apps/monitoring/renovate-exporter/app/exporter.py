@@ -7,7 +7,8 @@ call. Standard library only; it runs on the stock python image.
 
 Metrics:
   renovate_pr_open_created_timestamp_seconds{number,type}  one series per open PR
-  renovate_prs_created_total / renovate_prs_merged_total   all-time counts (search API)
+  renovate_prs_created_total / renovate_prs_merged_total   all-time counts (search API),
+                                                           never reported lower than before
   renovate_last_merged_timestamp_seconds                   newest merge among recent closed PRs
   renovate_exporter_up                                     1 if the last poll worked
   renovate_exporter_last_success_timestamp_seconds
@@ -53,7 +54,20 @@ def pr_type(labels):
 
 def search_count(extra):
     q = urllib.parse.quote("repo:%s is:pr author:%s %s" % (REPO, SEARCH_AUTHOR, extra))
-    return get("https://api.github.com/search/issues?per_page=1&q=" + q)["total_count"]
+    r = get("https://api.github.com/search/issues?per_page=1&q=" + q)
+    if r.get("incomplete_results"):  # the index timed out; the count is a lower bound
+        raise RuntimeError("search returned incomplete_results for %r" % extra)
+    return r["total_count"]
+
+
+def monotonic(name, new):
+    """The search index is eventually consistent, so total_count can briefly dip. A counter
+    that dips reads as a reset and makes increase() add the whole value (~700) on top."""
+    old = state[name]
+    if old is not None and new < old:
+        print("%s went backwards (%d -> %d); keeping %d" % (name, old, new, old), flush=True)
+        return old
+    return new
 
 
 def poll():
@@ -72,7 +86,13 @@ def poll():
     created = search_count("")
     merged = search_count("is:merged")
     with lock:
-        state.update(up=1, last_success=time.time(), open=open_prs, created=created, merged=merged)
+        state.update(
+            up=1,
+            last_success=time.time(),
+            open=open_prs,
+            created=monotonic("created", created),
+            merged=monotonic("merged", merged),
+        )
         if merge_times:
             state["last_merged"] = max(merge_times)
 
