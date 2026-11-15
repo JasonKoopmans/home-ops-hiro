@@ -267,8 +267,8 @@ data:
         {
           "id": 6,
           "type": "timeseries",
-          "title": "Merged per day",
-          "description": "Renovate PRs merged per UTC day (one bar per day; the Saturday wave is one bar). Starts at the day the exporter was first deployed.",
+          "title": "Merged per week",
+          "description": "Renovate PRs merged per week, one bar per 7-day step (Thursday to Thursday, UTC), so each Saturday wave lands in one bar. A bar appears once its Thursday boundary has passed, so the newest wave shows up to 5 days late: use \"Merged in range\" for the current week. Counted from the exporter's own history, so the first bar is partial. Needs a range of a few weeks to be useful.",
           "gridPos": {
             "h": 8,
             "w": 12,
@@ -277,12 +277,12 @@ data:
           },
           "targets": [
             {
-              "expr": "round(increase(renovate_prs_merged_total[1d]))",
+              "expr": "round(increase(renovate_prs_merged_total[1w]))",
               "legendFormat": "merged",
               "refId": "A"
             }
           ],
-          "interval": "1d",
+          "interval": "7d",
           "fieldConfig": {
             "defaults": {
               "custom": {
