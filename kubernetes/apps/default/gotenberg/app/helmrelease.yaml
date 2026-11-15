@@ -78,10 +78,14 @@ spec:
             resources:
               requests:
                 cpu: 50m
-                # Measured: ~215Mi idle (LibreOffice resident), effectively flat
-                # across 4 concurrent trivial conversions since LibreOffice
-                # serializes. 512Mi leaves room for real documents.
-                memory: 512Mi
+                # Measured 2026-11-14 through Thanos over the 8 days of data that
+                # exist: working set max 29Mi, average 10Mi. An earlier reading
+                # saw ~215Mi with LibreOffice resident during conversions, so this
+                # is a request between idle and a converting pod, not the ceiling:
+                # the 2Gi limit below is what bounds a big document. Was 512Mi,
+                # which booked ~480Mi that the pod never touched. Revisit when
+                # 14 days of real conversions exist.
+                memory: 128Mi
               limits:
                 # DELIBERATE EXCEPTION to the repo's "no CPU limits" convention.
                 # That convention exists because CFS throttling hurts latency-
