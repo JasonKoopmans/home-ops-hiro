@@ -318,6 +318,8 @@ pending a restore drill (`docs/plan-cloudnative-pg.md` §1b), and the migration
 itself is a one-way data move that needs its own snapshot. Not a v1 change, but
 the right destination.
 
+Building the dashboards themselves (panel patterns, date boundary traps, Todoist semantics) is `docs/lifeos-dashboards.md`.
+
 ## Editing a dashboard's JSON Model by hand
 
 Settings ➔ JSON Model on Grafana v13.2.1 has constraints that took three wrong attempts to find (2026-09-05). This is for a

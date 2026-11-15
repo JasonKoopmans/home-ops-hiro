@@ -106,6 +106,7 @@ Things that bit this cluster and will bite again: what happens, why, what to do.
 | [pocket-bridge](pocket-bridge.md) | The Hey Pocket to RecordingAnnotator to Obsidian CronJob: API constraints, dedupe design, the 2026-09-14 incident | reference |
 | [recording-annotator](recording-annotator.md) | The RecordingAnnotator deployment: scoped-MinIO-user convention, `hiro-` bucket prefix, hostnames, the client API | reference |
 | [lifeos-grafana](lifeos-grafana.md) | Touching the LifeOS Grafana. It is the one app where the PVC holds state Git does not | reference |
+| [lifeos-dashboards](lifeos-dashboards.md) | Building or changing a LifeOS history dashboard: the repeatable panel set, date/timezone/week-boundary traps, Todoist priority and recurring-task semantics | reference |
 | [lifeos-warehouse](lifeos-warehouse.md) | Changing the `lifeos` Postgres schema or what n8n writes into it | reference |
 | [lifeos-calendar](lifeos-calendar.md) | The Outlook to Google calendar mirror design (one-way, warehouse side in this repo) | design |
 | [obsidian-n8n-v1-blueprint](obsidian-n8n-v1-blueprint.md) | Obsidian sync and n8n automation V1 scope: read vault files, create new files only | design |

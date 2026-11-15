@@ -21,4 +21,6 @@ Builds Grafana dashboards against the `lifeos-warehouse` Postgres datasource (sc
 5. **Deliver via `SendUserFile`**, never claim success without validating first. New dashboard → user does Dashboards → New → Import → paste. Adding a panel to an existing one → full JSON Model tab replace (see gotcha #4 for the metadata-edit restriction).
 6. **Keep dashboards scoped.** One dashboard per goal/metric family (e.g. "Habit History" for Move/Exercise/Stand daily-metric goals, "Todos History" for Todoist completion data) rather than one giant dashboard — keeps JSON small and iteration fast. Confirm with the user before merging metrics into one dashboard.
 
+Reusable SQL for every panel above is in `references/sql-patterns.md`. The design rationale and the date/timezone traps are in `docs/lifeos-dashboards.md`; read it before writing a panel.
+
 See `references/gotchas.md` for the full list of real bugs hit building these — read it before debugging a panel that "looks wrong" rather than re-deriving the fix from scratch.
