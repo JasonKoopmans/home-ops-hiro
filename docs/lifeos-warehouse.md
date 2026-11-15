@@ -142,6 +142,15 @@ hardening if a workflow ever gets it wrong. It was left out for now because
 PL/pgSQL bodies need dollar-quoting, which Flux's postBuild substitution
 rewrites (see the note at the top of `schema.yaml`).
 
+**Use n8n's Postgres node in parameterized mode — never build this query by
+string-concatenating a field from `payload` into the SQL.** `:source`,
+`:natural_key` and `:payload` above are bind parameters, which is what makes
+arbitrary content in a Todoist task title or a Sheets cell safe to insert
+regardless of what characters it contains. The moment any of this is
+assembled as a string (an n8n Expression building a raw query, `+`-concatenating
+values into `rawSql`, etc.) that guarantee is gone and untrusted API content is
+executing as SQL.
+
 ### Choosing a natural key
 
 `core.*` views keep one row per `(source, natural_key)` (`DISTINCT ON`, newest `ingested_at` wins), so the key decides what counts
@@ -177,15 +186,6 @@ The real values are still in `raw`, since nothing is updated in place. Two fixes
 the device is not the data owner or the value is 0, or make `core.health_metrics` prefer the highest value per key for metrics
 that only grow during a day (Move, Exercise, Stand). The second protects against any bad writer but changes `schema.yaml`, so it
 needs its own PR and a decision about legitimate corrections downward.
-
-**Use n8n's Postgres node in parameterized mode — never build this query by
-string-concatenating a field from `payload` into the SQL.** `:source`,
-`:natural_key` and `:payload` above are bind parameters, which is what makes
-arbitrary content in a Todoist task title or a Sheets cell safe to insert
-regardless of what characters it contains. The moment any of this is
-assembled as a string (an n8n Expression building a raw query, `+`-concatenating
-values into `rawSql`, etc.) that guarantee is gone and untrusted API content is
-executing as SQL.
 
 ---
 
