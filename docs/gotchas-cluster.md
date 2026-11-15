@@ -140,6 +140,30 @@ kube-system/cilium-l2announce-*` and `leaseClient.List: the server was unable to
 - The root cause was never found: the restart cleared a stale or wedged datapath. A recurrence, on any node, is the next
   diagnostic signal. When a workload on one node fails with in-cluster connectivity errors, run this check before debugging the workload.
 
+## CoreDNS `autopath` breaks Cilium `toFQDNs` (removed in #853)
+
+The agent-pipeline pods' first live run (2026-10-17, #837) could not reach `api.github.com` although their
+CiliumNetworkPolicy had `toFQDNs: matchName: api.github.com`. The Corefile carried `autopath @kubernetes` from the initial
+commit. For a query on the asking pod's first search domain, autopath walks the search path inside CoreDNS and answers
+`api.github.com.<ns>.svc.cluster.local CNAME api.github.com` plus the A records. The resolver (glibc and musl alike) stops
+there, and Cilium's DNS proxy caches the IPs under the name the pod asked for, the suffixed one. `matchName: api.github.com`
+selected nothing and the connection was dropped. #851 worked around it with `ndots:1` on the agent pods; #853 removed autopath.
+
+- **Expected behaviour now:** `<outside-name>.<ns>.svc.cluster.local` is NXDOMAIN and the resolver goes on to the bare name.
+  Check from any pod: `dig api.github.com.default.svc.cluster.local` returns `status: NXDOMAIN`, not a CNAME.
+- **Verified end to end on 2026-11-15:** throwaway glibc and musl pods in `default` with the default `ndots:5` and a temporary
+  CNP allowing only `api.github.com`. `curl https://api.github.com` returned 200 and `https://github.com` timed out. The node's
+  `cilium-dbg fqdn cache list` held only bare names (`api.github.com.`, `github.com.`), with no `*.svc.cluster.local` entries.
+- **Do not add autopath back** (for example when copying a Corefile from another cluster), or every `toFQDNs` policy silently
+  stops matching for pods on the default `ndots`. A `matchPattern` such as `*.github.com` would not catch the suffixed name
+  either.
+- **Cost of removing it was nil.** The impact review on #853 predicted about 4x the client query rate. The rate measured
+  afterwards stayed at about 6.8 req/s (6h rate, 2026-11-15; NXDOMAIN went from about 0.02/s to 2.7/s), CoreDNS used about
+  3 mCPU in total, and p99 was 0.84 ms.
+- `ndots:1` on the agent pods (#851) stays: it saves queries, but it is no longer needed for correctness.
+- `pods verified` in the kubernetes plugin was there for autopath and still keeps CoreDNS watching every pod. Switching it to
+  `disabled` is possible once nothing is shown to use `*.pod.cluster.local` names; nobody has checked yet.
+
 ## Unexplained: all five nodes dropped within 25 seconds (2026-10-17)
 
 At about 02:29Z every node dropped within roughly 25 s and returned at 03:00:44Z (cmp-01) and 03:13:51-03:14:05Z (the rest). They sit
