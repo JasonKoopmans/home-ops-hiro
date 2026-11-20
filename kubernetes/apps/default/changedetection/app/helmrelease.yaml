@@ -54,12 +54,14 @@ spec:
               capabilities:
                 add:
                   - SYS_ADMIN
-            # sockpuppetbrowser (headless Chrome) grows until it is killed: 2026-11-14
-            # to 11-16 it was OOMKilled 4 times, each exactly 12h after start, with
-            # working-set peaks of 1.06-1.07GiB against the old 1Gi limit
-            # (PodMemoryRestartedWhileHot, critical). 14d peaks on 0.0.3 were
-            # 0.68-0.82GiB. 2Gi is ~2x the observed peak (repo rule); revisit if the
-            # peak climbs toward it.
+            # sockpuppetbrowser (headless Chrome) idles at 100-310MiB, then steps to
+            # the limit within one 30m window and is OOMKilled (2026-11-14 to 11-16:
+            # 4 kills, then 12 restarts by 11-19; PodMemoryRestartedWhileHot,
+            # critical). Not steady growth. Every peak reads exactly the old 1Gi
+            # limit, so real demand is UNKNOWN; 14d peaks on 0.0.3 were
+            # 0.68-0.82GiB. 2Gi is a guess at ~2x that, not a measured ceiling.
+            # If the working set still hits 2Gi, raising it again will not help:
+            # cap concurrent Chrome sessions or restart the sidecar instead.
             resources:
               requests:
                 cpu: 100m
