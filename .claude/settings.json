@@ -4,6 +4,7 @@
     "prometheus",
     "grafana-monitoring",
     "grafana-lifeos",
+    "freshrss",
     "playwright",
     "proxmox"
   ],

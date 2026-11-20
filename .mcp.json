@@ -30,6 +30,13 @@
         "Authorization": "Bearer ${MCP_N8N_TOKEN}"
       }
     },
+    "freshrss": {
+      "type": "http",
+      "url": "https://mcp-freshrss.koopmans.co/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_FRESHRSS_TOKEN}"
+      }
+    },
     "playwright": {
       "type": "http",
       "url": "https://mcp-playwright.koopmans.co/mcp"
