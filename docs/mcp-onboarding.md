@@ -57,7 +57,8 @@ Renovate tracks the image tag normally, and startup depends on nothing external.
 `mcp-kubernetes` is this, and it is the proven path.
 
 **`stdio`** — the server speaks stdio only, so `supergateway` fronts it.
-**Unverified: no app in this repo uses it yet.** Two things to understand before
+`mcp/mcp-freshrss` is the first app to use it (see the
+[init-copy pattern](#the-init-copy-supergateway-pattern) below). Two things to understand before
 choosing it:
 
 - supergateway is **not a sidecar**. It launches the stdio server as a child
@@ -69,6 +70,29 @@ choosing it:
 
 If either bites, build a thin per-server image (see the `containers/` pattern)
 and use `native-http` against it instead.
+
+### The init-copy supergateway pattern
+
+Used by `mcp/mcp-freshrss`; reuse it when a stdio server ships its own image.
+The supergateway image is `node:20-alpine`, and `ni-c/freshrss-mcp` needs Node
+24 or newer, so supergateway cannot launch it from its own image. The reverse
+(running the server from supergateway's image) would need Node 24 there. So:
+
+1. An init container from `ghcr.io/supercorp-ai/supergateway` copies its global
+   install, dependencies included (`/usr/local/lib/node_modules/supergateway`,
+   about 116 packages), into an `emptyDir` at `/sg`.
+2. The main container is the server's own image. It runs
+   `node /sg/supergateway/dist/index.js --stdio "node /app/dist/index.js" --outputTransport streamableHttp --stateful --port 3000 --streamableHttpPath /mcp --healthEndpoint /healthz`
+   with its own Node.
+3. Both images are pinned by tag in the HelmRelease, so Renovate tracks both.
+   No registry fetch at pod start.
+
+Tested with Docker before deploying (supergateway 4.2.2 copied into a volume,
+run by the ni-c 0.3.2 image on Node 24, read-only root, tmpfs `/tmp`): `initialize`
+then `tools/list` returned 16 tools; a request without the key got `401`;
+`/healthz` answered `ok`. Auth is supergateway's `SUPERGATEWAY_API_KEY`
+(`Authorization: Bearer` or `X-API-Key`). `--stateful` means one child process
+per session and `replicas: 1` is a real constraint.
 
 ### Check for an HTTP mode before assuming `stdio`
 
@@ -110,7 +134,7 @@ gets `NXDOMAIN`.
 
 | Client | URL |
 |---|---|
-| n8n, Hermes (in-cluster) | `http://mcp-<name>.mcp.svc.cluster.local:3000/mcp` |
+| n8n, Hermes (in-cluster) | `http://mcp-<name>.mcp.svc.cluster.local:3000/mcp` (for `mcp-freshrss`: `http://mcp-freshrss.mcp.svc.cluster.local:3000/mcp`, with the `Authorization: Bearer` token) |
 | Claude Desktop, Claude Code, devcontainer (LAN) | `https://mcp-<name>.${SECRET_DOMAIN}/mcp` |
 
 Service DNS in-cluster matches what every other service-to-service call in this
@@ -186,11 +210,11 @@ interactively, a hang anywhere non-interactive. Adding a server to `.mcp.json`
 therefore means adding its name there too; that second step is deliberate, so a
 new endpoint is an explicit decision rather than an inherited one.
 
-**Three entries need auth-ladder step 2: `grafana-lifeos`, `n8n` and `proxmox`.**
+**Four entries need auth-ladder step 2: `grafana-lifeos`, `n8n`, `proxmox` and `freshrss`.**
 Claude Code expands `${VAR}` in `.mcp.json` string values (including
 `headers`) from the process environment at session start — the file commits
 the *reference*, never the token. Export the real values before launching
-`claude`, e.g. in `~/.zshrc`:
+`claude`, e.g. in `~/.zshenv` (not `~/.zshrc`: zsh reads `.zshenv` for every shell, so Claude launched from an IDE or a non-interactive shell still sees the tokens):
 
 ```sh
 export MCP_GRAFANA_LIFEOS_TOKEN="<MCP_GRAFANA_SERVER_TOKEN from
@@ -199,11 +223,13 @@ export MCP_N8N_TOKEN="<AUTH_TOKEN from
   kubernetes/apps/mcp/mcp-n8n/app/secret.sops.yaml>"
 export MCP_PROXMOX_TOKEN="<MCP_API_KEY from
   kubernetes/apps/mcp/mcp-proxmox/app/secret.sops.yaml>"
+export MCP_FRESHRSS_TOKEN="<SUPERGATEWAY_API_KEY from
+  kubernetes/apps/mcp/mcp-freshrss/app/secret.sops.yaml>"
 ```
 
 Claude Code does not read repo `.env` files for this — it has to be a real
 exported variable in the shell that starts `claude`. `.devcontainer/devcontainer.json`
-forwards all three through `remoteEnv`, so a devcontainer inherits whatever the host
+forwards all four through `remoteEnv`, so a devcontainer inherits whatever the host
 shell exported and nothing more.
 
 An unset variable does not fail loudly: the header is sent with the literal
@@ -230,6 +256,24 @@ kubeconfig exists**. It does not in a fresh clone or a git worktree — the path
 carries its own in-cluster ServiceAccount, so it answers in exactly the
 environments where local `kubectl` cannot.
 
+**`freshrss` wiring, three ways** (same server, same token):
+
+- Repo: the `freshrss` entry in `.mcp.json` plus `MCP_FRESHRSS_TOKEN` exported
+  as above. It is pre-approved in `enabledMcpjsonServers` (connect only; no
+  `mcp__` allow-rules, so every tool call still prompts).
+- User scope, so it works outside this repo. This **stores the token in
+  plaintext** in `~/.claude.json`:
+
+  ```sh
+  claude mcp add --scope user --transport http freshrss https://mcp-freshrss.koopmans.co/mcp --header "Authorization: Bearer ${MCP_FRESHRSS_TOKEN}"
+  ```
+
+- Claude Desktop: `mcp-remote` with `--header-file`, below.
+
+The server loads all 16 tools including subscribe, unsubscribe, mark-as-read,
+OPML import and category deletes. `ELICITATION=false` makes the irreversible
+ones use a two-call confirmation token instead of a dialog.
+
 ### Claude Desktop
 
 **The Settings → Connectors UI cannot reach these endpoints at all.** Use an
@@ -251,7 +295,7 @@ UI or it keeps erroring alongside the working one.
 
 **For a server needing step-2 auth, use `--header-file` rather than `--header`.**
 Desktop is a GUI app: it is launched by launchd, not by your shell, so it does
-not inherit anything exported in `~/.zshrc` — the `${VAR}` expansion that works
+not inherit anything exported in `~/.zshenv` — the `${VAR}` expansion that works
 for Claude Code is unavailable here. The alternatives are the token in plaintext
 inside `claude_desktop_config.json`, or a file you can lock down:
 
@@ -274,7 +318,11 @@ The file takes `Name: Value` lines and ignores blanks and `#` comments:
 Authorization: Bearer <token>
 ```
 
-Keep it outside the repo at mode `600`. `--header` also exists and expands
+For FreshRSS the same shape applies: args
+`["-y", "mcp-remote", "https://mcp-freshrss.koopmans.co/mcp", "--header-file", "/Users/<you>/.config/mcp/freshrss-headers.txt"]`
+and a file holding `Authorization: Bearer <SUPERGATEWAY_API_KEY>`.
+
+Keep it outside the repo at mode `600` (`chmod 600` it). `--header` also exists and expands
 `${VAR}` from the environment, but that environment is launchd's, so it is the
 wrong tool here.
 
@@ -590,6 +638,14 @@ Facts that belong to one image, verified when the server was onboarded. Re-check
 - The SQLite job store needs a writable path (`PROXMOX_JOBS_SQLITE_PATH`) or it dies under `readOnlyRootFilesystem`. `COMMAND_POLICY_MODE` defaults to `deny_all`.
 - Proxmox is a five-node cluster (vm01-vm05) hosting this cluster's five VMs; do not conflate the two. `vm01` (192.168.1.11) is NXDOMAIN from public resolvers and in-cluster CoreDNS forwards to public resolvers, so pods address it by IP. The certificate SAN includes the IP, so TLS still verifies. Run `dig @1.1.1.1` on any LAN hostname before it goes into a manifest.
 
+**mcp-freshrss** (`ni-c/freshrss-mcp` 0.3.2 behind `supergateway` 4.2.2, 2026-11-19).
+Packaging is the [init-copy pattern](#the-init-copy-supergateway-pattern).
+
+- Egress NetworkPolicy allows only CoreDNS and the `freshrss` pod on port 80.
+- `FRESHRSS_URL=http://freshrss.default.svc.cluster.local`. FreshRSS has `BASE_URL` set to the external hostname; the greader endpoint `/api/greader.php` still answers `OK` over the Service (checked by port-forward; login with wrong credentials gave `401`). A real login was not tested: it needs the secret.
+- Not read-only (`FRESHRSS_READ_ONLY` unset). `ELICITATION=false`.
+- **Owner steps before it works:** (1) FreshRSS Settings > Authentication > enable "Allow API access"; (2) Settings > Profile > API management: set the `jake` user's API password (API access is already enabled); (3) fill `FRESHRSS_API_PASSWORD` and `SUPERGATEWAY_API_KEY` (`openssl rand -hex 32`) in `kubernetes/apps/mcp/mcp-freshrss/app/secret.sops.yaml`, then `sops --encrypt --in-place` it. The committed file is a placeholder Flux cannot decrypt, so the app stays unready until then.
+
 **mcp-n8n** (`czlonkowski/n8n-mcp` 2.82.1, 2026-09-06). Tiers and tool filtering are in the Catalog row.
 
 - **It cannot reach anything in-cluster until `WEBHOOK_SECURITY_MODE=permissive`.** The default `strict` refuses every private IP (`moderate` only relaxes localhost). The symptom is a tool call returning `SSRF protection: Private IP addresses not allowed` while the pod looks healthy: probes pass and `tools/list` works. Pair the flag with a NetworkPolicy (egress to CoreDNS and the one backend) so the protection moves to Cilium instead of being dropped. For any MCP server fronting an internal service, make one real tool call before believing it works.
@@ -671,5 +727,6 @@ kubectl auth can-i --list --as=system:serviceaccount:mcp:mcp-kubernetes | grep l
 | `mcp/mcp-playwright` | native-http | none — **ceiling, not phase 1** | `@playwright/mcp` official image. Zero built-in auth upstream (verified against source/README), so there is no app-level-token step 2 for this server; real caller-auth needs an Envoy `SecurityPolicy` (step 3). `--isolated` (no persisted profile/PVC), `--caps vision,pdf` beyond the core toolset, chromium only (the only browser the Docker image bundles). A full browser, not a read-only query against one backend — bigger exposure than its siblings; revisit before anything less trusted reaches this endpoint. Egress-restricted via `networkpolicy.yaml` (blocks the LAN and the cluster's own pod/service CIDRs) so it can't be used to pivot into internal services even while unauthenticated — a separate axis from the still-open auth question |
 | `mcp/mcp-proxmox` | native-http | **step 2** (`MCP_API_KEY` bearer) | `RekklesNA/ProxmoxMCP-Plus` against the five-node Proxmox cluster. **The only server here that can destroy infrastructure** — 47 tools, no read-only mode, including `delete_vm`, `restore_backup` and `execute_vm_command`, and the guests include this cluster's own five VMs. Shipped with a full-privilege API token by explicit decision, so the credential is the boundary: a `PVEAuditor` token makes every mutating tool 403 with no manifest change. `COMMAND_POLICY_MODE=deny_all` gates command execution separately. DNS-rebinding protection stays **on** — its allow-list takes a comma list, unlike `mcp-kubernetes` |
 | `mcp/mcp-n8n` | native-http | **step 2** (`AUTH_TOKEN` bearer) | `czlonkowski/n8n-mcp`. Two tiers gated by `N8N_API_KEY`: without it, 7 read-only reference tools that never touch the instance; with it, 28 that act on real workflows. Ships in a middle tier — `DISABLED_TOOLS` drops `n8n_delete_workflow` and `n8n_manage_credentials`, and `DISABLED_TOOL_OPERATIONS` strips the `delete` operations buried inside `n8n_executions`, `n8n_manage_folders`, `n8n_manage_datatable` and `n8n_manage_agents`. **n8n's workflows exist only on its PVC, with no copy in Git**, so an unwanted edit has no `git revert` — recovery is a Longhorn restore. Telemetry is on by default upstream and feeds their ML training; disabled here |
+| `mcp/mcp-freshrss` | stdio via supergateway (init-copy) | **step 2** (`SUPERGATEWAY_API_KEY` bearer) | `ni-c/freshrss-mcp` against the in-cluster FreshRSS, user `jake`, all 16 tools (full management, not read-only). First supergateway app; see [the pattern](#the-init-copy-supergateway-pattern). Egress limited to CoreDNS and FreshRSS |
 | `mcp/mcp-postgres` | **SSE** (the one exception to the contract) | none (phase 1) | `crystaldba/postgres-mcp` in `--access-mode=restricted` against the CNPG `postgres` cluster, database `lifeos`, as the dedicated `mcp_postgres` role (SELECT on `core` and `mart`, never `raw`). Transport and known issue: see *Per-server notes* |
 | `default/obsidian` | — | none | Existing app exposing `/mcp` at `obsidian-mcp.${SECRET_DOMAIN}` |

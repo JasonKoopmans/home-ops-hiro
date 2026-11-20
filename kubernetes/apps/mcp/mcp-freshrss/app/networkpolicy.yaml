@@ -1,0 +1,45 @@
+---
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/networking.k8s.io/networkpolicy_v1.json
+#
+# Egress only: CoreDNS and the FreshRSS pod. This server has no reason to reach
+# anything else, and FreshRSS content is untrusted input, so a prompt-injected
+# client cannot use this pod as a foothold. Ingress is left untouched (absent
+# from policyTypes), like every sibling in this namespace; who may call the
+# server is SUPERGATEWAY_API_KEY's job.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-freshrss
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-freshrss
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # FreshRSS. Labels from the live Service selector
+    # (kubectl -n default get svc freshrss -o yaml); the Service's port 80
+    # targets pod port 80, and policy matches the pod port.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: freshrss
+              app.kubernetes.io/instance: freshrss
+      ports:
+        - port: 80
+          protocol: TCP

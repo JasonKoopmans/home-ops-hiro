@@ -1,0 +1,163 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/main/charts/other/app-template/schemas/helmrelease-helm-v2.schema.json
+#
+# ni-c/freshrss-mcp — read and manage FreshRSS (feeds, categories, articles)
+# over its Google Reader API. All 16 tools are loaded: FRESHRSS_READ_ONLY is
+# deliberately NOT set, so subscribe/unsubscribe/mark-read/OPML import and the
+# category deletes are available.
+#
+# The server is stdio-only and the cluster contract is Streamable HTTP on
+# :3000/mcp, so supergateway sits in front of it. That is the first such app
+# here; the packaging trick is in docs/mcp-onboarding.md. In short:
+#   * ni-c needs Node >= 24; the supergateway image is node:20-alpine, so
+#     supergateway cannot launch ni-c from its own image.
+#   * An init container copies supergateway's global install (deps included)
+#     into an emptyDir, and the ni-c container runs it with its own node.
+# Auth is supergateway's --apiKey (SUPERGATEWAY_API_KEY): ni-c has no HTTP
+# layer of its own, so without it the endpoint is open on the LAN.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: &app mcp-freshrss
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: *app
+  interval: 1h
+  values:
+    controllers:
+      main:
+        annotations:
+          # Restart on rotation of the bearer token or the FreshRSS API password.
+          reloader.stakater.com/auto: "true"
+        replicas: 1
+        strategy: Recreate
+        initContainers:
+          copy-supergateway:
+            image:
+              repository: ghcr.io/supercorp-ai/supergateway
+              tag: 4.2.2
+            command: ["sh", "-c"]
+            args:
+              - cp -R /usr/local/lib/node_modules/supergateway /sg/
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
+        containers:
+          app:
+            image:
+              repository: ghcr.io/ni-c/freshrss-mcp
+              tag: 0.3.2
+            command: ["node", "/sg/supergateway/dist/index.js"]
+            args:
+              - --stdio
+              - node /app/dist/index.js
+              - --outputTransport
+              - streamableHttp
+              # One child process per client session instead of one per request.
+              - --stateful
+              - --host
+              - 0.0.0.0
+              - --port
+              - "3000"
+              - --streamableHttpPath
+              - /mcp
+              - --healthEndpoint
+              - /healthz
+            env:
+              # In-cluster Service, not the external BASE_URL hostname: the
+              # greader API answers on any Host (checked via port-forward).
+              FRESHRSS_URL: http://freshrss.default.svc.cluster.local
+              FRESHRSS_USER: jake
+              # Irreversible tools then use the two-call confirmation token
+              # instead of an elicitation dialog, which n8n and Hermes cannot
+              # show and supergateway may not relay.
+              ELICITATION: "false"
+              TZ: ${TIMEZONE}
+            envFrom:
+              # FRESHRSS_API_PASSWORD and SUPERGATEWAY_API_KEY.
+              - secretRef:
+                  name: mcp-freshrss-secret
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: &port 3000
+                  initialDelaySeconds: 10
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                # Informed guess, not measured: one Node process plus one child
+                # per session. Revisit with container_memory_working_set_bytes
+                # after a week of use.
+                memory: 128Mi
+              limits:
+                memory: 384Mi
+
+    defaultPodOptions:
+      automountServiceAccountToken: false
+      securityContext:
+        # ni-c image runs as node (uid 1000):
+        #   docker run --rm --entrypoint id ghcr.io/ni-c/freshrss-mcp:0.3.2
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+
+    persistence:
+      supergateway:
+        type: emptyDir
+        advancedMounts:
+          main:
+            copy-supergateway:
+              - path: /sg
+            app:
+              - path: /sg
+                readOnly: true
+      tmp:
+        type: emptyDir
+        advancedMounts:
+          main:
+            app:
+              - path: /tmp
+
+    service:
+      main:
+        controller: main
+        ports:
+          http:
+            port: *port
+
+    route:
+      main:
+        hostnames: ["mcp-freshrss.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - matches:
+              - path:
+                  value: /mcp
+            backendRefs:
+              - identifier: main
+                port: *port
