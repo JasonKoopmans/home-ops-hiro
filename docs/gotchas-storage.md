@@ -163,10 +163,17 @@ The failed Job's pod is gone within minutes, so the reason is only visible by ru
 - **Fix, per volume:** confirm two other replicas are `RW`, `kubectl -n storage delete replicas.longhorn.io <name>`, and wait for
   `replicaModeMap` to show 3 `RW` again (about 1-5 min on these volumes; `obsidian-config` took about 4). Then run the trim by hand.
   A replica in `WO` is mid-rebuild and does not count toward redundancy.
-- **A volume with no mounted workload fails its trim for good.** `failed to find valid mountpoint` (HTTP 500 from
-  `action=trimFilesystem`): Longhorn can only `fstrim` a mounted filesystem. `minecraft-backupdir` (snapshot-only group) stayed
-  attached to hiro-cmp-02 with the `minecraft` Deployment scaled to 0 (not by Git), so the whole weekly Job fails every Sunday
-  until the workload runs or the volume leaves the group.
+- **A volume that is attached but not mounted fails the whole trim Job.** `failed to find valid mountpoint` (HTTP 500 from
+  `action=trimFilesystem`): Longhorn can only `fstrim` a mounted filesystem. A *detached* volume is fine: the Job logs
+  `Cannot create job for <vol> volume in state detached` as a warning and skips it, which is why scaling an app to 0 normally
+  needs nothing (audacity, freecad, hermes, `minecraft-pvc` were all skipped cleanly).
+- **What kept `minecraft-backupdir` attached with the `minecraft` Deployment at 0:** five `snapshot-controller` tickets in its
+  `volumeattachments.longhorn.io` object, one per 05:00 `longhorn-snapshot-only-job` run since 2026-11-15, never released. Healthy
+  attached volumes hold only a `csi-attacher` ticket, so this was specific to that volume. Likely a loop (attached, so the daily
+  snapshot runs, which adds a ticket, so it stays attached); not proven. **Fix:** `kubectl -n storage patch
+  volumeattachments.longhorn.io <vol> --type merge -p '{"spec":{"attachmentTickets":null}}'`. It detached within 10 s and the
+  next trim skipped it (7 volumes finished, 0 errors). If it re-attaches on its own, move the volume out of the `snapshot-only`
+  group instead.
 - **Manual Jobs count as failures too.** A Job created `--from=cronjob` is owned by that CronJob, so a failed test run replaces the
   last failed Job and keeps the alert latched until a later run succeeds.
 
