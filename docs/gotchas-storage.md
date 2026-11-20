@@ -148,6 +148,28 @@ replica waited behind it (`dataLocality: best-effort` plus `replicaAutoBalance` 
   after a trim, climbing about 0.3 GiB an hour, with real filesystem use flat at 4.5-5 GiB. `LonghornVolumeUsageHigh` (85% of
   `actualSize`) fired for 1-3 hours a night and self-cleared: noise, not growth. The n8n volume shows the same ratchet.
 
+### Second occurrence, 2026-11-14 to 11-19: four volumes, and the replica to delete is the one the error names
+
+A node disturbance around 23:00 UTC on 2026-11-14 rebuilt replicas on several volumes. Four came out unable to purge, so both weekly
+Sunday trims failed (`longhorn-snapshot-only-trim-job` 03:00, `longhorn-general-trim-job` 06:30) and `KubeJobFailed` latched for days.
+The failed Job's pod is gone within minutes, so the reason is only visible by running a Job by hand and streaming the pod:
+`kubectl -n storage create job --from=cronjob/<name> <name>-manual`, then `kubectl logs -f` it (macOS has no `timeout`).
+
+- **The error names the replica to delete, by address.** `cannot purge snapshots because tcp://10.42.3.145:12979 is rebuilding`:
+  map that IP:port to a replica with `replicas.longhorn.io -o wide` / `spec.replicaAddressMap` on the engine. The first guess,
+  a 4th replica on `ollama` that never became healthy, was a red herring: deleting it changed nothing. The culprit was a
+  replica shown `RW` in `replicaModeMap` whose `purgeStatus` entry sat at `progress: 0, state: ""` while its peers read
+  `complete`. That `purgeStatus` shape is the fast tell.
+- **Fix, per volume:** confirm two other replicas are `RW`, `kubectl -n storage delete replicas.longhorn.io <name>`, and wait for
+  `replicaModeMap` to show 3 `RW` again (about 1-5 min on these volumes; `obsidian-config` took about 4). Then run the trim by hand.
+  A replica in `WO` is mid-rebuild and does not count toward redundancy.
+- **A volume with no mounted workload fails its trim for good.** `failed to find valid mountpoint` (HTTP 500 from
+  `action=trimFilesystem`): Longhorn can only `fstrim` a mounted filesystem. `minecraft-backupdir` (snapshot-only group) stayed
+  attached to hiro-cmp-02 with the `minecraft` Deployment scaled to 0 (not by Git), so the whole weekly Job fails every Sunday
+  until the workload runs or the volume leaves the group.
+- **Manual Jobs count as failures too.** A Job created `--from=cronjob` is owned by that CronJob, so a failed test run replaces the
+  last failed Job and keeps the alert latched until a later run succeeds.
+
 ## A backup job can fail on S3 lock contention, and the alert clears only on the next scheduled run
 
 2026-10-24: the only non-Watchdog alert was `KubeJobFailed` for `longhorn-default-backup-job-<n>`. At 02:45 four backups hit
