@@ -644,7 +644,7 @@ Packaging is the [init-copy pattern](#the-init-copy-supergateway-pattern).
 - Egress NetworkPolicy allows only CoreDNS and the `freshrss` pod on port 80.
 - `FRESHRSS_URL=http://freshrss.default.svc.cluster.local`. FreshRSS has `BASE_URL` set to the external hostname; the greader endpoint `/api/greader.php` still answers `OK` over the Service (checked by port-forward; login with wrong credentials gave `401`). A real login was not tested: it needs the secret.
 - Not read-only (`FRESHRSS_READ_ONLY` unset). `ELICITATION=false`.
-- **Owner steps before it works:** (1) FreshRSS Settings > Authentication > enable "Allow API access"; (2) Settings > Profile > API management: set the `jake` user's API password (API access is already enabled); (3) fill `FRESHRSS_API_PASSWORD` and `SUPERGATEWAY_API_KEY` (`openssl rand -hex 32`) in `kubernetes/apps/mcp/mcp-freshrss/app/secret.sops.yaml`, then `sops --encrypt --in-place` it. The committed file is a placeholder Flux cannot decrypt, so the app stays unready until then.
+- **Setup state:** FreshRSS "Allow API access" is enabled and the account is the dedicated `jake` user. `FRESHRSS_API_PASSWORD` (Settings > Profile > API management) and `SUPERGATEWAY_API_KEY` (`openssl rand -hex 32`) are in the encrypted `kubernetes/apps/mcp/mcp-freshrss/app/secret.sops.yaml`; `MCP_FRESHRSS_TOKEN` must equal the key. To rotate, set a new value, `sops --encrypt --in-place` the file, and re-export the token; reloader restarts the pod.
 
 **mcp-n8n** (`czlonkowski/n8n-mcp` 2.82.1, 2026-09-06). Tiers and tool filtering are in the Catalog row.
 
