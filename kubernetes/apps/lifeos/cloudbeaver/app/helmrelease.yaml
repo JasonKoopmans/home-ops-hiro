@@ -45,7 +45,7 @@ spec:
           app:
             image:
               repository: docker.io/dbeaver/cloudbeaver
-              tag: 26.2.4
+              tag: 26.2.5
             probes:
               liveness: &probe
                 enabled: true
