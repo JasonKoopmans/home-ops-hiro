@@ -36,7 +36,6 @@
     </outline>
     <outline text="3 - Applications" title="3 - Applications">
       <outline type="rss" text="n8n" title="n8n" xmlUrl="https://github.com/n8n-io/n8n/releases.atom" htmlUrl="https://github.com/n8n-io/n8n/releases"/>
-      <outline type="rss" text="changedetection.io" title="changedetection.io" xmlUrl="https://github.com/dgtlmoon/changedetection.io/releases.atom" htmlUrl="https://github.com/dgtlmoon/changedetection.io/releases"/>
       <outline type="rss" text="Homepage" title="Homepage" xmlUrl="https://github.com/gethomepage/homepage/releases.atom" htmlUrl="https://github.com/gethomepage/homepage/releases"/>
       <outline type="rss" text="qBittorrent" title="qBittorrent" xmlUrl="https://github.com/qbittorrent/qBittorrent/releases.atom" htmlUrl="https://github.com/qbittorrent/qBittorrent/releases"/>
       <outline type="rss" text="Prowlarr" title="Prowlarr" xmlUrl="https://github.com/Prowlarr/Prowlarr/releases.atom" htmlUrl="https://github.com/Prowlarr/Prowlarr/releases"/>
