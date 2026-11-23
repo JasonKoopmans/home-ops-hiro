@@ -102,7 +102,11 @@ spec:
           expr: |
             sum(n8n_active_workflow_count) > 0
             and
-            sum(increase(n8n_workflow_success_total[2h]) + increase(n8n_workflow_failed_total[2h])) == 0
+            # sum() each counter before adding: a bare `a + b` matches on workflow_id,
+            # drops every workflow with no failed series, and left this "== 0" true
+            # while executions were running. `or vector(0)` covers no failed series at all.
+            (sum(increase(n8n_workflow_success_total[2h])) or vector(0))
+            + (sum(increase(n8n_workflow_failed_total[2h])) or vector(0)) == 0
           for: 30m
           labels:
             severity: warning
