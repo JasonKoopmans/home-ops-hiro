@@ -74,8 +74,11 @@ Lessons that outlive the incident (closed 2026-08-23, host RAM raised to 16 GiB,
 - **VM RAM is a Proxmox setting that `talos/topf.yaml` cannot express**, so a rebuilt node comes back with whatever the VM has.
   After building or rebuilding a node compare `kubectl get nodes -o custom-columns=NAME:.metadata.name,MEM:.status.allocatable.memory,CPU:.status.allocatable.cpu`;
   memory should match to a few MiB.
-- **Reported memory can drift down** (5.8, 4.1, 3.5, then 4.5 GiB over three weeks). Proxmox balloon-driver reclaim is the likely
-  cause (not verified), and Kubernetes schedules against whatever the kubelet reported at its last start. Verify in Proxmox before acting.
+- **Reported memory can drift down** (5.8, 4.1, 3.5, then 4.5 GiB over three weeks). The cause is **unproven**: balloon-driver reclaim
+  was suspected, but on 2026-11-24 cmp-01..04 have `balloon: 0` and cmp-05 has no balloon target below its `memory` (12000 MiB), so the
+  host has no mandate to reclaim from it and ballooning as configured cannot explain a drift today. The August drift coincided with
+  the host being short of RAM (since raised to 16 GiB). Optional hygiene: `balloon: 0` on cmp-05 for parity (needs a VM restart).
+  Kubernetes schedules against whatever the kubelet reported at its last start. Verify in Proxmox before acting.
 - **Cordoning has a storage cost.** While cmp-05 was cordoned no `instance-manager` pod ran there, so no Longhorn replica could
   start on it even though it had the most free disk, and a two-replica, no-backup volume ran on a single replica for days.
 - `longhorn-manager` exiting 137 with no liveness probe configured means the kernel killed it, not Kubernetes.
