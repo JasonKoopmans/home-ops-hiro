@@ -51,6 +51,7 @@ New docs: name them `runbook-<topic>`, `incident-<topic>`, `plan-<topic>`, `spik
 | Doc | Use it when | Status |
 |---|---|---|
 | [runbook-flux-not-ready](runbook-flux-not-ready.md) | `FluxResourceNotReady`: a Kustomization/HelmRelease/source is stuck | live |
+| [runbook-talos-demote-control-plane](runbook-talos-demote-control-plane.md) | Demoting a control-plane node to a worker (or promoting): reset, etcd quorum order for 5 to 3, VIP, Longhorn, topf layout; what is unverified | live |
 | [runbook-node-disk-slow](runbook-node-disk-slow.md) | `NodeSystemDiskWriteLatencyHigh`, or the etcd fsync alerts | live |
 | [runbook-longhorn-volume-trim](runbook-longhorn-volume-trim.md) | `instance-manager` CPU pegged, Prometheus rule groups missing evaluations, bloated Longhorn volumes | live |
 | [runbook-longhorn-snapshot-stuck](runbook-longhorn-snapshot-stuck.md) | `AdmissionWebhookRejectingContinuously` on `validator.longhorn.io`: a Snapshot CR that cannot be deleted | live |
