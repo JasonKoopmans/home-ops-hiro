@@ -232,7 +232,7 @@
     },
     {
       // krr is installed from its git tag with its own Python and two pinned
-      // dependencies (`.mise.toml`, `.devcontainer/AGENTS.md`). A bump can move
+      // dependencies (`mise.devcontainer.toml`, `.devcontainer/AGENTS.md`). A bump can move
       // KRR's Python cap or its dependencies, which only breaks at the next
       // devcontainer rebuild, and Flux Local does not exercise the devcontainer.
       // Merge by hand after running `krr --help` and `krr simple --help` in a

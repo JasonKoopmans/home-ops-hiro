@@ -53,6 +53,8 @@
 	"containerEnv": {
 		// The image has no `less`; the default aws pager fails with "Unable to redirect output to pager".
 		"AWS_PAGER": "",
+		// Makes mise also load mise.devcontainer.toml (krr), which CI must not install: jdx/mise-action installs all of .mise.toml.
+		"MISE_ENV": "devcontainer",
 		// Moves ~/.claude.json (settings, folder trust) into the claude-config volume; by default it sits outside it and is lost on rebuild.
 		"CLAUDE_CONFIG_DIR": "/root/.claude"
 	},
