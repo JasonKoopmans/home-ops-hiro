@@ -231,6 +231,20 @@
       automerge: false,
     },
     {
+      // krr is installed from its git tag with its own Python and two pinned
+      // dependencies (`.mise.toml`, `.devcontainer/AGENTS.md`). A bump can move
+      // KRR's Python cap or its dependencies, which only breaks at the next
+      // devcontainer rebuild, and Flux Local does not exercise the devcontainer.
+      // Merge by hand after running `krr --help` and `krr simple --help` in a
+      // container built from the PR branch. Renovate 44.260.0 matches this by the
+      // package name `robusta-dev/krr`; the full `pipx:git+https://...` depName is
+      // listed too, as for topf, but did not match on its own in a test.
+      description: "Never auto-merge krr — a bump can break the devcontainer install",
+      matchManagers: ["mise"],
+      matchPackageNames: ["pipx:git+https://github.com/robusta-dev/krr.git", "robusta-dev/krr"],
+      automerge: false,
+    },
+    {
       // Cilium supports upgrading one minor at a time, and a minor can need
       // manifest changes first (#509 moved the BGP and LB-IPAM CRDs to v2). #530
       // took 1.18 -> 1.19 by hand as phase 2 of #486, and Renovate auto-merged
