@@ -41,3 +41,13 @@ TALOSCONFIG = "{{config_root}}/talos/clusterconfig/talosconfig"
 "npm:@anthropic-ai/claude-code" = { version = "2.1.330", allow_builds = ["@anthropic-ai/claude-code"] }
 node = "26.13.1"
 "aqua:aws/aws-cli" = { version = "2.40.3", symlink_bins = "true" }
+# KRR (robusta-dev/krr) right-sizing CLI. Not on PyPI or in aqua, and its release binaries are linux/amd64 only
+# (no arm64 for the devcontainer), so pipx installs the git tag. Renovate bumps `version` as a github-tags dependency.
+# - python: KRR's pyproject caps Python at <=3.12.9 and 3.15.2 is too new. mise installs this one beside the default
+#   and uses it only for krr. It must be a patch <=3.12.9 ("3.12" resolves to 3.12.16 and pipx refuses it). Re-check
+#   the cap in KRR's pyproject.toml when bumping.
+# - pipx_args: KRR's pyproject leaves its dependencies loose, so a fresh resolve installs a `krr` that crashes on
+#   import. cachetools is imported but undeclared (its lockfile gets it through google-auth, a fresh resolve does
+#   not), and typer 0.7 fails on click >= 8.2 ("Secondary flag is not valid for non-boolean flag"). Drop a pin once
+#   a KRR release declares or fixes it.
+"pipx:git+https://github.com/robusta-dev/krr.git" = { version = "v1.31.3", python = "3.12.9", pipx_args = "--preinstall cachetools --preinstall click<8.2" }

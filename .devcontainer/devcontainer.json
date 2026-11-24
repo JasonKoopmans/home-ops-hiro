@@ -15,7 +15,9 @@
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// groff-base: `aws help` renders man pages and errors with "Could not find executable named groff or mandoc" without it.
 	// libatomic1: node's linux-arm64 builds link libatomic.so.1, which the slim debian image lacks; without it `mise install` fails node (exit 127) and skips npm: tools.
-	"postCreateCommand": "apt-get update && apt-get install -y --no-install-recommends groff-base libatomic1 && rm -rf /var/lib/apt/lists/* && mise trust && mise install",
+	// `mise install python` runs first because pipx:git+https://github.com/robusta-dev/krr.git has its own python (3.12.9). It waits only for that one, starts
+	// pipx while the default python is still extracting, and fails with "env: 'python3': No such file or directory". The second `mise install` is a no-op for python.
+	"postCreateCommand": "apt-get update && apt-get install -y --no-install-recommends groff-base libatomic1 && rm -rf /var/lib/apt/lists/* && mise trust && mise install python && mise install",
 
 	// Extensions VS Code installs into the container automatically on create/rebuild.
 	// Keep in step with .vscode/extensions.json (recommendations only prompt, they don't install).
