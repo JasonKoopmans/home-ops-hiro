@@ -396,8 +396,10 @@ tasks:
 
       Not covered: per-volume dataLocality (best-effort on every volume), and single-replica
       volumes (the Postgres instances, thanos-compactor, metube), which are down until their
-      node is back. Longhorn does not revert these values on its own and Flux does not manage
-      them, so a forgotten `off` stays; do not merge a Longhorn chart bump while on.
+      node is back. Flux does not manage these Settings and Longhorn's docs say chart defaults
+      apply only to a fresh install, so a forgotten `off` stays: run `mode=off` after a failed
+      or abandoned roll too. A longhorn-manager restart while on is unverified (replica-auto-balance
+      is the one to watch): run `mode=status` after one, and do not merge a Longhorn chart bump.
       Full rationale: header of scripts/longhorn-maintenance.sh.
     vars:
       dry_run: '{{.dry_run | default "false"}}'

@@ -46,10 +46,18 @@
 # Where the original values live: on each Setting itself, as the annotation
 # home-ops/maintenance-original-value. Nothing is written to your machine, so
 # `off` works from any checkout, and `on` run twice keeps the first original.
-# Chart defaultSettings only seed a FRESH Longhorn install (see the comment in
-# kubernetes/apps/storage/longhorn-system/app/helmrelease.yaml), so Flux does
-# not revert these values: if you forget `off` they stay until someone does it.
-# Do not merge a Longhorn chart bump while maintenance is on.
+# Flux does not manage Settings, and Longhorn's docs say the chart's
+# default-setting ConfigMap applies only to a system not yet deployed
+# (https://longhorn.io/docs/1.3.4/advanced-resources/deploy/customizing-default-settings;
+# see also the comment in kubernetes/apps/storage/longhorn-system/app/helmrelease.yaml).
+# So a forgotten `off` is expected to stay, and `off` still works later because
+# the annotations stay. What is NOT verified here is what a longhorn-manager
+# restart does. replica-auto-balance is the one to watch: that ConfigMap sets
+# best-effort and `disabled` is Longhorn's own default. Run `status` after any
+# longhorn-manager restart while maintenance is on, and do not merge a Longhorn
+# chart bump meanwhile. Run `off` after a failed or abandoned roll too.
+# `on` reads each annotation back after patching; if one was not stored it
+# reverts that setting and stops, so `off` is never left with nothing to restore.
 #
 # Usage:
 #   longhorn-maintenance.sh on  [--interval <seconds>] [--rebuild-limit <n>] [--dry-run] [--yes]
@@ -83,6 +91,7 @@ log() { printf '%s\n' "$*" >&2; }
 say() { printf '%s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# Prints the header block from the "# Usage:" line to the "# Env:" line; keep both markers.
 usage() {
     sed -n '/^# Usage:/,/^# Env:/p' "$0" | sed 's/^# \{0,1\}//'
 }
@@ -158,11 +167,15 @@ confirm() {
     case "$ans" in y|Y|yes|YES) return 0 ;; *) die "aborted" ;; esac
 }
 
+# Best-effort: runs after the settings were already changed, so a failed read
+# must not make a successful `on`/`off` exit non-zero. A volume with no
+# robustness yet (just created, detaching) is counted as "(none)".
 volume_health() {
     say "Volumes by robustness:"
-    kubectl -n "$LH_NS" get volumes.longhorn.io \
+    { kubectl -n "$LH_NS" get volumes.longhorn.io \
         -o jsonpath='{range .items[*]}{.status.robustness}{"\n"}{end}' \
-        | sort | uniq -c | sed 's/^ */  /'
+        | sed 's/^$/(none)/' | sort | uniq -c | sed 's/^ */  /'; } \
+        || log "  (volume health unavailable: kubectl get volumes.longhorn.io failed)"
 }
 
 # Preflight: fail early and clearly on the wrong cluster.
@@ -242,6 +255,12 @@ confirm
 while IFS='|' read -r name cur new ann; do
     [ -n "$name" ] || continue
     patch_setting "$name" "$new" "$ann"
+    if [ "$ann" != "-" ] && [ "$(get_saved "$name")" != "$ann" ]; then
+        # Longhorn or an admission webhook dropped the annotation: without it `off`
+        # could not restore this setting, so put the value back and stop.
+        patch_setting "$name" "$cur" "-"
+        die "the saved original of $name was not stored; reverted it to $cur and stopped. Settings changed earlier in this run keep their saved originals: run 'off' to restore them."
+    fi
     say "  set $name: $cur -> $new"
 done <<EOF
 $PLAN
