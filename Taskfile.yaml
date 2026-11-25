@@ -364,6 +364,62 @@ tasks:
       - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
       - { msg: "Missing longhorn-backup-all script", sh: "test -f {{.SCRIPTS_DIR}}/longhorn-backup-all.sh" }
 
+  # Pairs with talos:upgrade-node (.taskfiles/talos) for a rolling reboot where
+  # every node is back within the hour. Run `mode=on` once before the first node
+  # and `mode=off` after the last; in between, `task node:predrain` then
+  # `task talos:upgrade-node` per node. Order for the roll: etcd leader last
+  # (`talosctl etcd status`), then the API VIP holder, and the CloudNativePG
+  # primary after a node that carries a replica; re-read all three before each node.
+  # A node with a slow system disk runs longest: hiro-cmp-05's /var and etcd sit on
+  # one spinning SAS disk (slow fsync, ~16 ms writes, collapses under parallel image
+  # pulls), see docs/runbook-node-disk-slow.md. The 7200 s default leaves room for it.
+  longhorn:maintenance:
+    desc: Stop Longhorn relocating replicas during a rolling node operation (mode=on|off|status; off restores the originals)
+    summary: |
+      Args:
+        mode:          on | off | status (required)
+        interval:      replica-replenishment-wait-interval in seconds, mode=on only
+                       (optional, default 7200)
+        rebuild_limit: concurrent-replica-rebuild-per-node-limit, mode=on only
+                       (optional, default 1; 0 would disable rebuilding and is refused)
+        dry_run:       set to "true" to print the plan and change nothing (optional)
+        yes:           set to "true" to skip the confirmation prompt (optional)
+
+      on   saves each setting's current value as an annotation on the Setting itself
+           (home-ops/maintenance-original-value, so any checkout can run `off`), then sets:
+             replica-replenishment-wait-interval         600 -> 7200  no replacement replica is
+                                                                      built elsewhere for 2 h
+             replica-auto-balance                        best-effort -> disabled
+             concurrent-replica-rebuild-per-node-limit   5 -> 1       resyncs run one at a time
+      off  restores the saved values and removes the annotations.
+      status  shows current and saved values and a volume health summary; read-only.
+
+      Not covered: per-volume dataLocality (best-effort on every volume), and single-replica
+      volumes (the Postgres instances, thanos-compactor, metube), which are down until their
+      node is back. Flux does not manage these Settings and Longhorn's docs say chart defaults
+      apply only to a fresh install, so a forgotten `off` stays: run `mode=off` after a failed
+      or abandoned roll too. A longhorn-manager restart while on is unverified (replica-auto-balance
+      is the one to watch): run `mode=status` after one, and do not merge a Longhorn chart bump.
+      Full rationale: header of scripts/longhorn-maintenance.sh.
+    vars:
+      dry_run: '{{.dry_run | default "false"}}'
+      yes: '{{.yes | default "false"}}'
+    # Values go through env, not cmd interpolation, as in alerts:silence below.
+    env:
+      LH_MAINT_MODE: "{{.mode}}"
+      LH_MAINT_INTERVAL: '{{.interval | default "7200"}}'
+      LH_MAINT_REBUILD_LIMIT: '{{.rebuild_limit | default "1"}}'
+    cmd: >-
+      bash {{.SCRIPTS_DIR}}/longhorn-maintenance.sh "$LH_MAINT_MODE"
+      {{if eq .mode "on"}}--interval "$LH_MAINT_INTERVAL" --rebuild-limit "$LH_MAINT_REBUILD_LIMIT"{{end}}
+      {{if eq .dry_run "true"}}--dry-run{{end}}
+      {{if eq .yes "true"}}--yes{{end}}
+    requires:
+      vars: ["mode"]
+    preconditions:
+      - { msg: "Missing kubeconfig", sh: "test -f {{.KUBECONFIG}}" }
+      - { msg: "Missing longhorn-maintenance script", sh: "test -f {{.SCRIPTS_DIR}}/longhorn-maintenance.sh" }
+
   # Pairs with talos:upgrade-node / talos:upgrade-k8s (.taskfiles/talos):
   # run this first so a rolling reboot/upgrade doesn't page Telegram, then
   # run the upgrade. Not composed together automatically — the silence needs

@@ -20,19 +20,39 @@ has actually run (see §7).
 | Item | Value |
 |---|---|
 | Topology | 3 instances, `podAntiAffinityType: required` |
-| Placement | one instance per node, 3 distinct nodes |
+| Placement | one instance per node, 3 distinct nodes; **which nodes is not fixed**, look it up (below) |
 | Storage | `longhorn-1-no-backup` — **1 Longhorn replica per instance** |
 | Backups | Barman Cloud plugin → `s3://hiro-postgres-backups/postgres` |
 | WAL archiving | continuous, `archive_timeout` 5min (operator default) |
 | Retention | 7-day recovery window |
 
-**Observed** placement:
+### Where the instances are: look it up, do not remember it
 
+This document deliberately names no nodes, because neither half of the answer is stable:
+
+- **Which node an instance lives on** is chosen by the scheduler when the instance is first created (anti-affinity only keeps
+  the three apart). With one Longhorn replica per volume, that replica sits on the node where the pod first started, and from then
+  on the instance is **pinned** there: the volume cannot attach anywhere else. It changes only when CloudNativePG builds a
+  replacement instance (node lost, instance deleted and recreated, a restore), and the new one lands wherever the scheduler puts it.
+- **Which instance is primary** changes on every switchover or failover, and a drain of the primary's node causes one (§2).
+  The instance number says nothing about the role: `postgres-1` is not "the primary".
+
+Read both live, and again immediately before each node you take down:
+
+```sh
+# instance, role (primary/replica), node
+kubectl -n database get pods -l cnpg.io/cluster=postgres -L role -o wide
+
+# node holding each instance's single Longhorn replica (it should equal the pod's node)
+for pvc in postgres-1 postgres-2 postgres-3; do
+  vol=$(kubectl -n database get pvc "$pvc" -o jsonpath='{.spec.volumeName}')
+  printf '%s -> ' "$pvc"
+  kubectl -n storage get replicas.longhorn.io -l "longhornvolume=$vol" -o jsonpath='{range .items[*]}{.spec.nodeID}{" "}{end}'
+  echo
+done
 ```
-postgres-1  primary   hiro-cmp-05
-postgres-2  replica   hiro-cmp-04
-postgres-3  replica   hiro-cmp-01
-```
+
+The cluster has five nodes and three instances, so two nodes carry none. Those are the cheapest to take down.
 
 ---
 
@@ -115,14 +135,9 @@ rolls the pods (resources, image, parameters that need a restart).
 
 This is where the storage choice bites, and it is worth being precise about.
 
-**Observed:** each instance's volume has exactly one Longhorn replica, and it
-lives **on the same node as its pod**:
-
-```
-postgres-1 (cmp-05) → replica on cmp-05
-postgres-2 (cmp-04) → replica on cmp-04
-postgres-3 (cmp-01) → replica on cmp-01
-```
+**Observed** (2026-08-24, and again 2026-11-25): each instance's volume has exactly one
+Longhorn replica, and it lives **on the same node as its pod**. The commands in §1 print
+the pairing for whatever the placement is today.
 
 So losing a node **destroys that instance's data outright** — it is not merely
 unavailable, as it would be with a 3-replica Longhorn volume that could reattach
@@ -223,6 +238,23 @@ kubectl -n database get cluster postgres
 kubectl -n database get pdb
 kubectl -n database get pods -l cnpg.io/cluster=postgres -o wide
 ```
+
+### Rolling every node (a Talos upgrade)
+
+**Reasoned, not observed.** The placement lookup in §1 drives all of it.
+
+- **An instance is down for as long as its node is.** Its only replica is on that node, so the pod cannot start elsewhere.
+  Nothing is rebuilt for a reboot; the full re-clone in §3 is the node-*lost* case. The other two instances keep serving.
+  `PostgresReplicationDegraded` fires after 15 minutes with fewer than two streaming replicas, so a reboot that runs longer
+  pages. hiro-cmp-05 is the slow one: its system disk is a spinning SAS disk ([runbook-node-disk-slow.md](runbook-node-disk-slow.md)).
+- **Order:** nodes with no instance first, then nodes with a replica, and the primary's node only after at least one replica
+  node is done, so the drain's switchover lands on an already-upgraded node. If the `kubectl cnpg` plugin is installed (not
+  checked here), `kubectl cnpg promote postgres <instance> -n database` before draining the primary's node chooses which
+  instance that is; otherwise CloudNativePG picks the most advanced replica, which may sit on a node still to be upgraded and
+  costs a second switchover.
+- **Look up the roles again before each node.** The primary may have moved since the last one.
+- `task longhorn:maintenance` changes nothing for these three volumes (one replica, so nothing to relocate or rebuild
+  elsewhere); it quiets the other volumes in the same roll.
 
 ---
 
