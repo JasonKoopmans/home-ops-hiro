@@ -336,7 +336,9 @@ Machine config lives in `talos/`, rendered by [topf](https://github.com/postfina
 - **Resource naming:** lowercase, hyphen-separated (`my-app`, not `myApp` or `my_app`).
 - **Quote strings** that could be misinterpreted (`"true"`, `"yes"`, `"1.0"`).
 - **YAML anchors** are used within a file to avoid repetition (ports, probes) — follow existing app-template examples.
-- **Comments:** add brief comments when a configuration choice is non-obvious.
+- **Comments:** add brief comments when a configuration choice is non-obvious. **Date any claim about live state** ("currently
+  unused", a quota, a size, a version, "X is on Y") as `(checked 2026-11-26)`, so a reader can judge whether it may be stale and
+  needs re-verifying. An undated "currently" is how a comment kept calling Loki's bucket unused for months after Loki moved onto it.
 - **Commits/PRs:** conventional commit format, scope = app or area (`feat(minio): …`, `fix(monitoring): …`).
 
 ---

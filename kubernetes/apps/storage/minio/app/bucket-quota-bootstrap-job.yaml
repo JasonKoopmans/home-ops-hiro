@@ -14,13 +14,20 @@
 # replica moves off it) and minio_bucket_usage_total_bytes (scraped via
 # probe-bucket-metrics.yaml) has a few weeks of real data.
 #
-# observability-loki is currently unused (Loki runs with storage.type: filesystem,
-# see monitoring/loki/app/helmrelease.yaml) — its quota here is just a guard
-# against silent growth if that ever changes, not a tuned value.
+# observability-loki holds Loki's chunks and index: Loki's S3 endpoint is this
+# server (monitoring/loki/app/helmrelease.yaml; chunks moved here at the
+# 2026-07-04 schema period). The quota is a backstop, not a tuned value: the
+# bucket held about 0.18GB on 2026-11-26 with 14d retention
+# (minio_bucket_usage_total_bytes). The server has been Silo, not MinIO, since
+# 2026-10-31 (docs/minio-exit-assessment.md); the name "minio" stays in the
+# Service, Jobs and metrics.
 #
-# Manual equivalent:
-#   mc quota set local/observability-thanos --size 45GiB
-#   mc quota set local/observability-loki --size 2GiB
+# The 45GiB in the paragraph above is the 2026-07-19 value. Both quotas were
+# raised on 2026-07-24 (8d935fb3) to the values the command below sets.
+#
+# Manual equivalent (as of 2026-11-26; the command below is the source of truth):
+#   mc quota set local/observability-thanos --size 100GiB
+#   mc quota set local/observability-loki --size 20GiB
 #
 # Failure detection relies on kube-prometheus-stack's default KubeJobFailed
 # alert (kube_job_failed > 0, for: 15m) — verified this fires for Jobs in any
