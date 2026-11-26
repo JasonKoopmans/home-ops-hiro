@@ -93,9 +93,10 @@ Follow-ups this left:
   restarts inside one pod. The three failed pocket-bridge Jobs still listed on 2026-11-26 had no pods, and the failed mirror pod
   vanished from kube-state-metrics at 17:25Z, which fits the Job controller deleting the still-running pod when the limit is hit.
   Pod logs for these namespaces were not found in Loki either (its label scheme was not investigated). Diagnose a failed run from
-  the other side of the call (here, the annotator's own log), or catch the next failure live. Switching these CronJobs to
-  `restartPolicy: Never` would keep the failed pods for `ttlSecondsAfterFinished`; that is a change to a repo-wide pattern, so it
-  is a decision for the owner, not something done in passing.
+  the other side of the call (here, the annotator's own log), or catch the next failure live. pocket-bridge and the media mirror
+  now use `restartPolicy: Never`, which is the app-template default and keeps each failed pod for `ttlSecondsAfterFinished`
+  (24h), at the cost of a reschedule per retry. The other recurring CronJobs (`lifeos/warehouse`, `mcp-postgres-grants`) still use
+  `OnFailure` and have the same gap until one of them fails and it matters. Whether to ship pod logs to Loki is a separate question, not settled here.
 
 ## Cluster-side traps
 

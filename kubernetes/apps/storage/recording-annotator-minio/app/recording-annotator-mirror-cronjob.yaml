@@ -66,7 +66,11 @@ spec:
       ttlSecondsAfterFinished: 86400
       template:
         spec:
-          restartPolicy: OnFailure
+          # Never, not OnFailure: with OnFailure `backoffLimit` counts container restarts inside one pod, and when
+          # the Job fails its controller deletes that pod, so a failed run leaves no log. The 17:23Z failure on
+          # 2026-11-25 left none and its cause could not be read back. Never keeps each failed pod until
+          # `ttlSecondsAfterFinished`; the same three attempts, each in its own pod.
+          restartPolicy: Never
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
