@@ -45,6 +45,7 @@ New docs: name them `runbook-<topic>`, `incident-<topic>`, `plan-<topic>`, `spik
 | [runbook-renovate-prs](runbook-renovate-prs.md) | Merging Renovate PRs around a maintenance window, paired chart PRs, the CRDs-first Prometheus upgrade order, the updates that never auto-merge | live |
 | [runbook-local-render](runbook-local-render.md) | Rendering or schema-checking manifests with flux-local and kubeconform in Docker, including from a worktree; sizing a memory limit | live |
 | [runbook-alert-rule-testing](runbook-alert-rule-testing.md) | Writing or changing a PrometheusRule: promtool unit tests, mutation testing, listing what already alerts and verifying a merged rule | live |
+| [runbook-talos-rolling-upgrade](runbook-talos-rolling-upgrade.md) | Rolling a Talos release across the five nodes: node order (etcd leader, API VIP, Postgres primary), what to run before the first node, per node and after the last, Longhorn maintenance mode, the slow cmp-05; first roll not yet logged | live |
 
 ## An alert fired or something is broken
 

@@ -248,10 +248,11 @@ kubectl -n database get pods -l cnpg.io/cluster=postgres -o wide
   `PostgresReplicationDegraded` fires after 15 minutes with fewer than two streaming replicas, so a reboot that runs longer
   pages. hiro-cmp-05 is the slow one: its system disk is a spinning SAS disk ([runbook-node-disk-slow.md](runbook-node-disk-slow.md)).
 - **Order:** nodes with no instance first, then nodes with a replica, and the primary's node only after at least one replica
-  node is done, so the drain's switchover lands on an already-upgraded node. If the `kubectl cnpg` plugin is installed (not
-  checked here), `kubectl cnpg promote postgres <instance> -n database` before draining the primary's node chooses which
-  instance that is; otherwise CloudNativePG picks the most advanced replica, which may sit on a node still to be upgraded and
-  costs a second switchover.
+  node is done. **Observed 2026-11-25:** `task node:predrain` on the primary's node reports `BLOCK PDB database/postgres-primary
+  allows 0 disruptions`, so do not leave moving the primary to the drain. Move it first with
+  `kubectl cnpg promote postgres <instance> -n database`, choosing an instance on an already-upgraded node (the plugin was not on
+  the PATH of the machine checked). Whether cordoning alone triggers CloudNativePG's switchover is still unobserved. Full sequence:
+  [runbook-talos-rolling-upgrade](runbook-talos-rolling-upgrade.md).
 - **Look up the roles again before each node.** The primary may have moved since the last one.
 - `task longhorn:maintenance` changes nothing for these three volumes (one replica, so nothing to relocate or rebuild
   elsewhere); it quiets the other volumes in the same roll.
