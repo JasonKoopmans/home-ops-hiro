@@ -14,7 +14,7 @@ Control-plane static-pod logs are shipped by Alloy (#892). Datasource uid `loki`
 ```
 
 - `instance` is `kube-system/<pod>:<container>`, for example `kube-system/kube-controller-manager-hiro-cmp-02:kube-controller-manager`.
-- **Logs written before 2026-11-26 have no `namespace` or `pod` labels**, only `job` and `instance`, and a selector on a
+- **Logs written before #1139 was deployed (merged after 2026-11-26) have no `namespace` or `pod` labels**, only `job` and `instance`, and a selector on a
   missing label returns nothing, which looks exactly like "no logs". Match on `job` and `instance` for anything in that window
   (everything below does). Newer lines also carry `namespace`, `pod`, `container` and `workload`
   (`{namespace="kube-system", workload="kube-controller-manager"}`): see
