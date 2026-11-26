@@ -32,13 +32,6 @@ spec:
           # change), so there is nothing to catch overnight and no reason to poll then.
           schedule: "0 6-21 * * *"
           timeZone: ${TIMEZONE}
-          # TEMPORARY (2026-11-25): suspended while pocket-bridge is fixed for cues over the
-          # annotator's 20000-char limit. Every hourly run re-uploaded audio for the same two
-          # recordings and left new orphan artifacts in recording-annotator (the upload runs
-          # before the note is written; the scoped MinIO user cannot delete objects). Remove
-          # this line once the fixed image is tagged and bumped below. PocketBridgeSyncNotSucceeding
-          # still fires 18h after the last success, which is the reminder to un-suspend.
-          suspend: true
           # A stuck run must not overlap the next tick — spec.md §4.1 notes the in-process
           # RunGate only closes the race WITHIN one process; two overlapping Job pods would
           # still race on the same Obsidian frontmatter check.
@@ -70,7 +63,7 @@ spec:
           app:
             image:
               repository: ghcr.io/jasonkoopmans/pocket-bridge
-              tag: "0.2.3"
+              tag: "0.2.4"
             env:
               # Default per pocket-bridge's README; explicit so a future base-URL change on
               # Pocket's side is a one-line diff here instead of a silent app-side default.
