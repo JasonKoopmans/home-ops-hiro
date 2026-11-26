@@ -42,7 +42,8 @@ Established with #414 (2026-08-08), after #410 restored Telegram delivery and ex
   the same shape against `kube_job_complete` gave 6 series at a 7d window and 0 at 1s.
 - **A rule must not depend on the TTL being right.** `ttlSecondsAfterFinished` is still worth setting: bjw-s app-template renders it from
   the `cronjob:` key into `jobTemplate.spec`. Scale it to the schedule (recording-annotator uses 24h for hourly jobs, 48h for daily,
-  7d for monthly). It deletes the Job **and its pods**, so their logs go with it.
+  7d for monthly). It deletes the Job **and its pods**, so `kubectl logs` goes with them. Their stdout/stderr stays in Loki for 14d
+  (`retention_period`), so a deleted Job pod is still diagnosable: see *Finding a pod's logs in Loki* below.
 - **Pair a rule that reads an app's own gauge with a second rule on a different data path.** The `recording_annotator_*_timestamp_seconds`
   series comes from the app's ServiceMonitor; if that scrape breaks, the `*Stale` expressions go empty and stop alerting with no
   dead-man. Give the backstop a looser threshold and a lower severity, so a real outage pages once and not twice.
@@ -96,6 +97,21 @@ about 37% real use):
 
 ## Loki and Alloy
 
+- **Finding a pod's logs in Loki (checked 2026-11-26).** Every pod's stdout and stderr is shipped, in every namespace, Job and
+  CronJob pods included, and kept for 14d. A stream carries only `job="loki.source.kubernetes.pods"` (the same value on every
+  pod), `instance="<namespace>/<pod>:<container>"`, `stream` (`stdout` or `stderr`) and `service_name` (a copy of `job`, so
+  per-service views in Explore group every pod as one service). **There are no `namespace`, `pod`, `container` or `job_name`
+  labels:** a selector on them returns nothing, which looks exactly like "no logs" (on 2026-11-26 a `{namespace="storage"}`
+  query was read as "Loki holds no pod logs"; the failed media-mirror pod's log was there all along). Match on `instance`:
+  ```logql
+  {job="loki.source.kubernetes.pods", instance=~"storage/recording-annotator-media-mirror-.*"}
+  ```
+  A CronJob pod is `<cronjob>-<scheduled minute since epoch>-<5 chars>`, so the prefix finds every run and the full name reads
+  one. `list_loki_label_values` on `instance`, with that `job` as the matcher and a bounded range, lists the pods that exist.
+  `filename` is dropped before write, so a `/var/log/pods/...` selector matches nothing either. The schema was not a design
+  choice: the first Alloy config (#120, 2026-04-06) had no relabel rules and used whatever `loki.source.kubernetes` emits, and
+  the file-tailing rewrite (0733d07a, 2026-07-26) copied `job` and `instance` so existing queries kept working. Worked example:
+  [runbook-control-plane-logs](runbook-control-plane-logs.md).
 - **`| regexp` keeps lines that do not match.** The extracted labels are simply absent, and `| __error__=""` does not remove
   them (a miss is not an error), so `count_over_time(... | regexp ...)` counts the whole stream and `sum by (dst)` returns an
   extra label-less series holding every non-matching line (65k beside the true 9k+9k). After the parser add
