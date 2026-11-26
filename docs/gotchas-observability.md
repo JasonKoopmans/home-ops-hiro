@@ -110,7 +110,8 @@ about 37% real use):
   one. `list_loki_label_values` on `instance`, with that `job` as the matcher and a bounded range, lists the pods that exist.
   `filename` is dropped before write, so a `/var/log/pods/...` selector matches nothing either. The schema was not a design
   choice: the first Alloy config (#120, 2026-04-06) had no relabel rules and used whatever `loki.source.kubernetes` emits, and
-  the file-tailing rewrite (0733d07a, 2026-07-26) copied `job` and `instance` so existing queries kept working. For pocket-bridge add `!= "ExecutionAttempt"` to the selector: its Polly retry lines are numerous and bury the sync events. Worked example:
+  the file-tailing rewrite (0733d07a, 2026-07-26) copied `job` and `instance` so existing queries kept working. For pocket-bridge
+  add `!= "ExecutionAttempt"` to the selector: its Polly retry lines are numerous and bury the sync events. Worked example:
   [runbook-control-plane-logs](runbook-control-plane-logs.md).
 - **`| regexp` keeps lines that do not match.** The extracted labels are simply absent, and `| __error__=""` does not remove
   them (a miss is not an error), so `count_over_time(... | regexp ...)` counts the whole stream and `sum by (dst)` returns an
