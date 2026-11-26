@@ -59,43 +59,50 @@ need watching.
 
 ## Incident: one cue over 20000 characters failed every hourly run (2026-11-25)
 
-RecordingAnnotator rejects a whole transcript with 400 when any single cue is longer than 20000 UTF-16 code units. A recording
-with one such segment failed every run from the 17:00Z tick (11:00 Chicago) after a clean 16:00Z run. Because the audio is
-uploaded **before** the note is written (the design decision above), each attempt created a new artifact, uploaded the audio,
-failed on the transcript, and left no `pocketRecordingId` note, so the next attempt did it all again: up to three artifacts per
-failing recording per tick (`backoffLimit: 2` restarts the whole process in the same pod). The annotator's scoped MinIO user has
-no `s3:DeleteObject` ([recording-annotator](recording-annotator.md)), so those orphans stay. The count was an estimate of a dozen
-or more and was never measured.
+RecordingAnnotator rejects a whole transcript with 400 (`A cue's text may be at most 20000 characters`) when any single cue is
+longer than 20000 UTF-16 code units. One recording with such a segment failed every run from the 17:00Z tick (11:00 Chicago),
+after a clean 16:00Z run. Everything else was healthy: the 17:00Z run uploaded the audio for 11 recordings, wrote notes for 10 and
+failed the 11th (`10 processed, 9 skipped, 1 failed`, exit 5). Its second attempt in the same pod and the 18:00Z tick (the one read
+in full) skipped the others and failed only that recording, about a second after starting (`0 processed, 19 skipped, 1 failed`,
+exit 6).
+
+**No orphan artifacts piled up.** The pocket-bridge logs show no `upload.completed` event in the 18:00, 19:00 and 20:00Z runs, so
+retries did not re-upload, and the run that finally succeeded (`0.2.4`, 03:00Z) completed the same artifact the 17:00Z run had
+created for that recording (`f23d177b...`). The upload-before-note ordering above is still the design, but here it multiplied
+nothing. An earlier version of this entry said each attempt created a new artifact, estimated "a dozen or more" orphans and said
+their audio sat in the Object-Locked bucket. None of that was measured and the logs contradict it: the objects the media mirror
+copied at 17:23Z were the 11 recordings of the 17:00Z run.
 
 Detection and response: `KubeJobFailed` (warning) was firing from about 17:20Z. `PocketBridgeSyncNotSucceeding` waits 18 hours
-after the last success, which is right for an outage and far too slow for a failure that leaves residue every hour, so the first
-move was to suspend the CronJob (#1129, last scheduled tick 22:00Z) and fix the source afterwards. The alert stays as the reminder
-to un-suspend.
+after the last success. The CronJob was suspended (#1129, last scheduled tick 22:00Z) to stop what was taken to be hourly residue.
+That belief came from the annotator's side only. The run's own log, which is in Loki
+([gotchas-observability](gotchas-observability.md#loki-and-alloy)), shows there was none. The suspension cost about four hourly
+ticks (23:00 to 02:00Z). Read the failing run's own log before suspending a job to stop damage.
 
 Fix: `0.2.4` splits any cue over 19000 UTF-16 code units into pieces, shares the cue's time span between them in proportion to
 their length, and keeps the sequence-aware clamp from `0.2.1`. RecordingAnnotator's validation was again left alone. #1131 bumped
 the image and removed `suspend`. The first live run (2026-11-26 03:00Z) split one segment into four cues and ended
-`1 processed, 19 skipped, 0 failed`. The 12:00, 13:00 and 14:00Z runs each ended `0 processed, 20 skipped, 0 failed`, so nothing
-was re-uploaded. Only one recording has taken the split path, so that is the extent of the proof.
+`1 processed, 19 skipped, 0 failed`. The 12:00, 13:00 and 14:00Z runs each ended `0 processed, 20 skipped, 0 failed`. Only one
+recording has taken the split path, so that is the extent of the proof.
 
 Follow-ups this left:
 
-- **The orphan audio is probably in AWS for the retention period.** The hourly media mirror has no `--remove` and every run since
-  18:23Z succeeded, so the orphans' audio will have been copied into the Object-Locked bucket, where nothing can delete it until
-  the lock expires. Expected, not checked against the bucket.
-- **The media mirror failed once in the same hour, and the cause is unknown.** The 17:23Z run exited 1 three times in about 90
-  seconds after sending about 280 MB. It was not an OOM (memory peaked near 185 MiB against a 512Mi limit), Silo had no restarts,
-  and the failed pod and its successful neighbours all ran on `hiro-cmp-02`. The 18:23Z run succeeded, the longest gap between
-  successes in the 14 days before 2026-11-26 was about two hours, and this is the only `KubeJobFailed` for the mirror in that
-  window. The manifest header says the first real write into the locked bucket with `pgsty/mc` was untested; whether this was that
-  write is not known.
-- **A failed Job here leaves no pod, so there is no log to read.** With `restartPolicy: OnFailure`, `backoffLimit` counts container
-  restarts inside one pod. The three failed pocket-bridge Jobs still listed on 2026-11-26 had no pods, and the failed mirror pod
-  vanished from kube-state-metrics at 17:25Z, which fits the Job controller deleting the still-running pod when the limit is hit.
-  Pod logs for these namespaces were not found in Loki either (its label scheme was not investigated). Diagnose a failed run from
-  the other side of the call (here, the annotator's own log), or catch the next failure live. Switching these CronJobs to
-  `restartPolicy: Never` would keep the failed pods for `ttlSecondsAfterFinished`; that is a change to a repo-wide pattern, so it
-  is a decision for the owner, not something done in passing.
+- **The media mirror failed once at 17:23Z, and its log points at the read from Silo rather than the write to AWS.** It was the
+  first run to copy the 11 new recordings (about 217 MB). `mc` logged `Failed to copy ... Input reader closed pre-maturely.
+  Expected 31865670 bytes, but only received 0 bytes` for `b449f955...`, and in the next attempt the same for `af04b925...`
+  (36151841 bytes): the input side of the copy, the read from Silo, delivered none of the expected bytes for two of the larger
+  objects. The container exited 1 each time and the Job hit its backoff limit about 90 seconds in. It was not an OOM (memory
+  peaked near 185 MiB against a 512Mi limit), Silo had no restarts, and the failed pod and its successful neighbours all ran on
+  `hiro-cmp-02`. The 18:23Z run succeeded, the longest gap between successes in the 14 days before 2026-11-26 was about two hours,
+  and this is the only `KubeJobFailed` for the mirror in that window. Why Silo returned nothing for those reads is not known. An
+  earlier version of this entry guessed at the first write into the locked bucket; the log does not support that.
+- **A failed Job leaves no pod, but its log is in Loki.** With `restartPolicy: OnFailure`, `backoffLimit` counts container restarts
+  inside one pod, and the failed pods here vanished (the failed mirror pod left kube-state-metrics at 17:25Z, and the three failed
+  pocket-bridge Jobs still listed on 2026-11-26 had no pods), which fits the Job controller deleting the still-running pod when the
+  limit is hit. `kubectl logs` then has nothing, but Alloy ships pod logs and they were readable the next day
+  ([how to query them](gotchas-observability.md#loki-and-alloy)). Switching these CronJobs to `restartPolicy: Never` would also keep
+  the failed pods for `kubectl logs` until `ttlSecondsAfterFinished`, at the cost of a reschedule per retry. With the log in Loki
+  that is a convenience, not a gap, and it is a change to a repo-wide pattern, so it is the owner's decision.
 
 ## Cluster-side traps
 

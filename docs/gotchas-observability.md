@@ -96,6 +96,14 @@ about 37% real use):
 
 ## Loki and Alloy
 
+- **Kubernetes pod logs are in Loki, under labels you would not guess.** There is no `namespace` or `pod` label. Select with
+  `{job="loki.source.kubernetes.pods", instance=~"<namespace>/<pod-prefix>.*"}`: `instance` is `<namespace>/<pod>:<container>`,
+  `service_name` repeats the `job`, and `stream` is `stdout` or `stderr`. A deleted pod's log stays queryable: a pod removed at
+  2026-11-25 17:25Z was read back the next afternoon (retention was not checked). On 2026-11-26 this was missed for hours
+  because the label *names* list looks like syslog only (`app_name`, `facility`, `hostname`, `source_ip`...) and the guessed
+  selectors (`namespace`, `pod`, `filename`, a `job` regex) all returned nothing, which was then written up as "no pod logs in
+  Loki". Look at label **values** for `job` before concluding a source is absent. Add `!= "ExecutionAttempt"` for pocket-bridge:
+  its Polly retry lines are numerous and bury the sync events.
 - **`| regexp` keeps lines that do not match.** The extracted labels are simply absent, and `| __error__=""` does not remove
   them (a miss is not an error), so `count_over_time(... | regexp ...)` counts the whole stream and `sum by (dst)` returns an
   extra label-less series holding every non-matching line (65k beside the true 9k+9k). After the parser add
