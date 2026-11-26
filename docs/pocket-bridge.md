@@ -1,6 +1,6 @@
 # pocket-bridge
 
-> **Status:** live in `default` (hourly 06:00-21:00 cron, `Sync__DryRun: "false"`, image `0.2.3` at the time of writing). The
+> **Status:** live in `default` (hourly 06:00-21:00 cron, `Sync__DryRun: "false"`, image `0.2.4` at the time of writing). The
 > source is in its own private repository, `JasonKoopmans/pocket-bridge` (design in its `docs/spec.md`); this page holds what
 > the cluster side needs and the findings that shaped the design. Read the live HelmRelease before trusting a number here.
 
@@ -56,6 +56,46 @@ changed.
 Two process lessons from it: the Job's CI image build is gated on `push` events including tags, so **a merge to `main` alone does
 not publish a semver image** (tag it and push the tag); and a first dry run proves the read path only, so the first live runs
 need watching.
+
+## Incident: one cue over 20000 characters failed every hourly run (2026-11-25)
+
+RecordingAnnotator rejects a whole transcript with 400 when any single cue is longer than 20000 UTF-16 code units. A recording
+with one such segment failed every run from the 17:00Z tick (11:00 Chicago) after a clean 16:00Z run. Because the audio is
+uploaded **before** the note is written (the design decision above), each attempt created a new artifact, uploaded the audio,
+failed on the transcript, and left no `pocketRecordingId` note, so the next attempt did it all again: up to three artifacts per
+failing recording per tick (`backoffLimit: 2` restarts the whole process in the same pod). The annotator's scoped MinIO user has
+no `s3:DeleteObject` ([recording-annotator](recording-annotator.md)), so those orphans stay. The count was an estimate of a dozen
+or more and was never measured.
+
+Detection and response: `KubeJobFailed` (warning) was firing from about 17:20Z. `PocketBridgeSyncNotSucceeding` waits 18 hours
+after the last success, which is right for an outage and far too slow for a failure that leaves residue every hour, so the first
+move was to suspend the CronJob (#1129, last scheduled tick 22:00Z) and fix the source afterwards. The alert stays as the reminder
+to un-suspend.
+
+Fix: `0.2.4` splits any cue over 19000 UTF-16 code units into pieces, shares the cue's time span between them in proportion to
+their length, and keeps the sequence-aware clamp from `0.2.1`. RecordingAnnotator's validation was again left alone. #1131 bumped
+the image and removed `suspend`. The first live run (2026-11-26 03:00Z) split one segment into four cues and ended
+`1 processed, 19 skipped, 0 failed`. The 12:00, 13:00 and 14:00Z runs each ended `0 processed, 20 skipped, 0 failed`, so nothing
+was re-uploaded. Only one recording has taken the split path, so that is the extent of the proof.
+
+Follow-ups this left:
+
+- **The orphan audio is probably in AWS for the retention period.** The hourly media mirror has no `--remove` and every run since
+  18:23Z succeeded, so the orphans' audio will have been copied into the Object-Locked bucket, where nothing can delete it until
+  the lock expires. Expected, not checked against the bucket.
+- **The media mirror failed once in the same hour, and the cause is unknown.** The 17:23Z run exited 1 three times in about 90
+  seconds after sending about 280 MB. It was not an OOM (memory peaked near 185 MiB against a 512Mi limit), Silo had no restarts,
+  and the failed pod and its successful neighbours all ran on `hiro-cmp-02`. The 18:23Z run succeeded, the longest gap between
+  successes in the 14 days before 2026-11-26 was about two hours, and this is the only `KubeJobFailed` for the mirror in that
+  window. The manifest header says the first real write into the locked bucket with `pgsty/mc` was untested; whether this was that
+  write is not known.
+- **A failed Job here leaves no pod, so there is no log to read.** With `restartPolicy: OnFailure`, `backoffLimit` counts container
+  restarts inside one pod. The three failed pocket-bridge Jobs still listed on 2026-11-26 had no pods, and the failed mirror pod
+  vanished from kube-state-metrics at 17:25Z, which fits the Job controller deleting the still-running pod when the limit is hit.
+  Pod logs for these namespaces were not found in Loki either (its label scheme was not investigated). Diagnose a failed run from
+  the other side of the call (here, the annotator's own log), or catch the next failure live. Switching these CronJobs to
+  `restartPolicy: Never` would keep the failed pods for `ttlSecondsAfterFinished`; that is a change to a repo-wide pattern, so it
+  is a decision for the owner, not something done in passing.
 
 ## Cluster-side traps
 
