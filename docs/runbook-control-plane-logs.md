@@ -14,9 +14,11 @@ Control-plane static-pod logs are shipped by Alloy (#892). Datasource uid `loki`
 ```
 
 - `instance` is `kube-system/<pod>:<container>`, for example `kube-system/kube-controller-manager-hiro-cmp-02:kube-controller-manager`.
-- **There are no `namespace` or `pod` labels on these streams.** A selector on them returns nothing, which looks exactly
-  like "no logs". Match on `job` and `instance`. This holds for every pod, not just the control plane:
-  [gotchas-observability](gotchas-observability.md#loki-and-alloy) has the general recipe.
+- **Logs written before #1139 was deployed (merged after 2026-11-26) have no `namespace` or `pod` labels**, only `job` and `instance`, and a selector on a
+  missing label returns nothing, which looks exactly like "no logs". Match on `job` and `instance` for anything in that window
+  (everything below does). Newer lines also carry `namespace`, `pod`, `container` and `workload`
+  (`{namespace="kube-system", workload="kube-controller-manager"}`): see
+  [gotchas-observability](gotchas-observability.md#loki-and-alloy) for the general recipe.
 - **The query range is capped at 30d1h** (`400 ... exceeds the limit`). Use `now-29d`.
 - **Logs only exist from 2026-10-19 02:25 UTC**, so the first line Loki shows is not the true start of anything older.
 - To ask "is it still happening?", use `direction: backward`, `limit: 3` over 7 days and read the newest timestamp. For a

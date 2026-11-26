@@ -46,6 +46,84 @@ data:
         replacement  = "loki.source.kubernetes.pods"
       }
 
+      // Conventional labels beside the legacy instance/job pair (2026-11-26).
+      // instance and job stay: the pipeline below, runbooks and saved queries
+      // select on them. These add no streams, because each is fixed by
+      // instance (namespace/pod:container), so chunks and bytes are unchanged;
+      // they exist so {namespace="x", container="y"} works and a guessed
+      // namespace/pod selector no longer returns an empty result that reads as
+      // "no logs". Read positions are keyed by path AND labels, so the first
+      // reload re-reads each container's current log file into the new
+      // streams (one-time, tens of MB; tested 2026-11-26): pre-change lines
+      // can show twice in instance/job queries until the old streams age out
+      // (14d). Docs: docs/gotchas-observability.md, "Finding a pod's logs".
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+
+      // workload: the owner's name with the part that changes per run or per
+      // rollout removed, so one selector covers every pod of a CronJob or
+      // Deployment ({workload="recording-annotator-media-mirror"}). Later rules
+      // override earlier ones when they match.
+      //   StatefulSet, DaemonSet: owner name as is (loki, alloy).
+      //   Job from a CronJob: <cronjob>-<scheduled minute since epoch>, 8+
+      //     digits; a bare Job with no such suffix keeps its whole name.
+      //   ReplicaSet from a Deployment: <deployment>-<pod-template-hash>.
+      //   Static pod (kube-apiserver and friends, owned by the Node): the
+      //     container name, since the owner is the node.
+      //   No owner (a bare pod): the pod name.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_controller_name"]
+        regex         = "(.+)"
+        target_label  = "workload"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_controller_kind", "__meta_kubernetes_pod_controller_name"]
+        separator     = ";"
+        regex         = "Job;(.+)-[0-9]{8,}"
+        replacement   = "$1"
+        target_label  = "workload"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_controller_kind", "__meta_kubernetes_pod_controller_name"]
+        separator     = ";"
+        regex         = "ReplicaSet;(.+)-[a-z0-9]{5,10}"
+        replacement   = "$1"
+        target_label  = "workload"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_controller_kind", "__meta_kubernetes_pod_container_name"]
+        separator     = ";"
+        regex         = "Node;(.+)"
+        replacement   = "$1"
+        target_label  = "workload"
+      }
+      rule {
+        source_labels = ["workload", "__meta_kubernetes_pod_name"]
+        separator     = ";"
+        regex         = ";(.+)"
+        replacement   = "$1"
+        target_label  = "workload"
+      }
+
+      // Without this Loki fills service_name from whichever known label it
+      // finds; before 2026-11-26 that was job, the same value for every pod
+      // (checked 2026-11-26), so per-service views in Explore and Logs
+      // Drilldown lumped all pods into one service. Set it explicitly.
+      rule {
+        source_labels = ["workload"]
+        target_label  = "service_name"
+      }
+
       // Directory uid on the node. Static pods (Talos runs kube-apiserver,
       // -controller-manager and -scheduler this way) are discovered through
       // their API *mirror* pod, whose metadata.uid is NOT what the kubelet names

@@ -97,21 +97,37 @@ about 37% real use):
 
 ## Loki and Alloy
 
-- **Finding a pod's logs in Loki (checked 2026-11-26).** Every pod's stdout and stderr is shipped, in every namespace, Job and
-  CronJob pods included, and kept for 14d. A stream carries only `job="loki.source.kubernetes.pods"` (the same value on every
-  pod), `instance="<namespace>/<pod>:<container>"`, `stream` (`stdout` or `stderr`) and `service_name` (a copy of `job`, so
-  per-service views in Explore group every pod as one service). **There are no `namespace`, `pod`, `container` or `job_name`
-  labels:** a selector on them returns nothing, which looks exactly like "no logs" (on 2026-11-26 a `{namespace="storage"}`
-  query was read as "Loki holds no pod logs"; the failed media-mirror pod's log was there all along). Match on `instance`:
+- **Finding a pod's logs in Loki (2026-11-26).** Every pod's stdout and stderr is shipped, in every namespace, Job and CronJob
+  pods included, and kept for 14d. A stream carries `namespace`, `pod`, `container`, `workload` (the owner's name without its
+  per-run or per-rollout suffix: the CronJob, Deployment, StatefulSet or DaemonSet; for a static pod such as kube-apiserver the
+  container name), `service_name` (= `workload`), `stream` (`stdout` or `stderr`), and the legacy
+  `instance="<namespace>/<pod>:<container>"` and `job="loki.source.kubernetes.pods"`. Every run of a CronJob:
+  ```logql
+  {namespace="storage", workload="recording-annotator-media-mirror"}
+  ```
+  Add `pod="<full name>"` for one run. A CronJob pod is `<cronjob>-<scheduled minute since epoch>-<5 chars>`.
+  **Logs written before the labels were deployed (#1139, merged after 2026-11-26; take the date from `git log`) carry only
+  `instance` and `job`**, and a selector on a label a stream
+  does not have returns nothing, which looks exactly like "no logs" (on 2026-11-26 a `{namespace="storage"}` query was read as
+  "Loki holds no pod logs"; the failed media-mirror pod's log was there all along). Until those lines age out (14d), match
+  on `instance` for them:
   ```logql
   {job="loki.source.kubernetes.pods", instance=~"storage/recording-annotator-media-mirror-.*"}
   ```
-  A CronJob pod is `<cronjob>-<scheduled minute since epoch>-<5 chars>`, so the prefix finds every run and the full name reads
-  one. `list_loki_label_values` on `instance`, with that `job` as the matcher and a bounded range, lists the pods that exist.
-  `filename` is dropped before write, so a `/var/log/pods/...` selector matches nothing either. The schema was not a design
-  choice: the first Alloy config (#120, 2026-04-06) had no relabel rules and used whatever `loki.source.kubernetes` emits, and
-  the file-tailing rewrite (0733d07a, 2026-07-26) copied `job` and `instance` so existing queries kept working. For pocket-bridge
-  add `!= "ExecutionAttempt"` to the selector: its Polly retry lines are numerous and bury the sync events. Worked example:
+  **Expect duplicates in that window.** Alloy keys a file's read position by path *and* labels, so the first reload under the
+  new labels re-read every container's current log file into new streams (a test with unchanged labels re-read none, with new
+  labels all of them; 2026-11-26). A pre-change line can therefore show twice in an `instance` or `job` query, once per schema,
+  and a `count_over_time` over that span is doubled, until the old streams age out (14d). The new-label streams got the
+  re-read lines too, so they reach back toward each file's start instead of the deploy time, but only as far as Loki's
+  `reject_old_samples_max_age` (168h): older lines in a quiet pod's file are rejected (expect a few "too old" send errors in
+  Alloy's log right after the reload). Any later change to the labels
+  `discovery.relabel` puts on a target does the same.
+  `list_loki_label_values` on `workload` (or on `instance`, with that `job` as the matcher) lists what exists; keep the range
+  bounded. `filename` is dropped before write, so a `/var/log/pods/...` selector matches nothing. Why two schemas: the first Alloy
+  config (#120, 2026-04-06) had no relabel rules and used whatever `loki.source.kubernetes` emits (`instance`, `job`); the
+  file-tailing rewrite (0733d07a, 2026-07-26) copied them so queries kept working, and the pipeline's own drop selectors and the
+  runbooks still use `instance`. The extra labels add no streams (each is fixed by `instance`). For pocket-bridge add
+  `!= "ExecutionAttempt"` to the selector: its Polly retry lines are numerous and bury the sync events. Worked example:
   [runbook-control-plane-logs](runbook-control-plane-logs.md).
 - **`| regexp` keeps lines that do not match.** The extracted labels are simply absent, and `| __error__=""` does not remove
   them (a miss is not an error), so `count_over_time(... | regexp ...)` counts the whole stream and `sum by (dst)` returns an
