@@ -373,6 +373,7 @@ tasks:
   # A node with a slow system disk runs longest: hiro-cmp-05's /var and etcd sit on
   # one spinning SAS disk (slow fsync, ~16 ms writes, collapses under parallel image
   # pulls), see docs/runbook-node-disk-slow.md. The 7200 s default leaves room for it.
+  # The whole sequence, with the commands for each step: docs/runbook-talos-rolling-upgrade.md.
   longhorn:maintenance:
     desc: Stop Longhorn relocating replicas during a rolling node operation (mode=on|off|status; off restores the originals)
     summary: |

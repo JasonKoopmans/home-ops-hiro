@@ -76,7 +76,8 @@ tasks:
   # `task longhorn:maintenance mode=on` once before the first node (`mode=off`
   # after the last, or after an abandoned roll) so Longhorn waits for the node
   # instead of rebuilding its replicas elsewhere. Gate each node with
-  # `task node:predrain node=<name>`.
+  # `task node:predrain node=<name>`. Node order and the whole sequence:
+  # docs/runbook-talos-rolling-upgrade.md.
   # topf compares the node's running version and schematic with talos/topf.yaml
   # and skips a node that already matches; `DRY_RUN=1` shows what it would do.
   upgrade-node:
