@@ -75,7 +75,8 @@ to un-suspend.
 Fix: `0.2.4` splits any cue over 19000 UTF-16 code units into pieces, shares the cue's time span between them in proportion to
 their length, and keeps the sequence-aware clamp from `0.2.1`. RecordingAnnotator's validation was again left alone. #1131 bumped
 the image and removed `suspend`. The first live run (2026-11-26 03:00Z) split one segment into four cues and ended
-`1 processed, 19 skipped, 0 failed`; that is one run, so it proves the path for one recording, not the whole backlog.
+`1 processed, 19 skipped, 0 failed`. The 12:00, 13:00 and 14:00Z runs each ended `0 processed, 20 skipped, 0 failed`, so nothing
+was re-uploaded. Only one recording has taken the split path, so that is the extent of the proof.
 
 Follow-ups this left:
 
