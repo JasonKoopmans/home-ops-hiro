@@ -106,7 +106,7 @@ about 37% real use):
   {namespace="storage", workload="recording-annotator-media-mirror"}
   ```
   Add `pod="<full name>"` for one run. A CronJob pod is `<cronjob>-<scheduled minute since epoch>-<5 chars>`.
-  **Logs written before the labels were deployed (#1139, merged after 2026-11-26; take the date from `git log`) carry only
+  **Logs written before the labels were deployed (#1139, merged 2026-11-26 16:05Z, Alloy reloaded about 16:08Z) carry only
   `instance` and `job`**, and a selector on a label a stream
   does not have returns nothing, which looks exactly like "no logs" (on 2026-11-26 a `{namespace="storage"}` query was read as
   "Loki holds no pod logs"; the failed media-mirror pod's log was there all along). Until those lines age out (14d), match
@@ -117,10 +117,12 @@ about 37% real use):
   **Expect duplicates in that window.** Alloy keys a file's read position by path *and* labels, so the first reload under the
   new labels re-read every container's current log file into new streams (a test with unchanged labels re-read none, with new
   labels all of them; 2026-11-26). A pre-change line can therefore show twice in an `instance` or `job` query, once per schema,
-  and a `count_over_time` over that span is doubled, until the old streams age out (14d). The new-label streams got the
-  re-read lines too, so they reach back toward each file's start instead of the deploy time, but only as far as Loki's
-  `reject_old_samples_max_age` (168h): older lines in a quiet pod's file are rejected (expect a few "too old" send errors in
-  Alloy's log right after the reload). Any later change to the labels
+  and a `count_over_time` over that span is doubled, until the old streams age out (14d); seen on kube-scheduler, where the
+  same 4 lines in the 3h before 16:00Z were in both schemas (2026-11-26). The new-label streams got the re-read lines too, so
+  they reach back toward each file's start instead of the deploy time, but not all the way: right after the reload each Alloy
+  pod logged 5 to 9 HTTP 400s in 25 seconds (none since), `entry too far behind` for entries 2 to 5 days old. That is inside
+  `reject_old_samples_max_age` (168h), so by the message it is Loki's per-stream ordering window rejecting them (inferred, not
+  confirmed in Loki's source), and those lines exist only under the old labels. Any later change to the labels
   `discovery.relabel` puts on a target does the same.
   `list_loki_label_values` on `workload` (or on `instance`, with that `job` as the matcher) lists what exists; keep the range
   bounded. `filename` is dropped before write, so a `/var/log/pods/...` selector matches nothing. Why two schemas: the first Alloy
