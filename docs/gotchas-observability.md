@@ -126,7 +126,8 @@ about 37% real use):
   bounded. `filename` is dropped before write, so a `/var/log/pods/...` selector matches nothing. Why two schemas: the first Alloy
   config (#120, 2026-04-06) had no relabel rules and used whatever `loki.source.kubernetes` emits (`instance`, `job`); the
   file-tailing rewrite (0733d07a, 2026-07-26) copied them so queries kept working, and the pipeline's own drop selectors and the
-  runbooks still use `instance`. The extra labels add no streams (each is fixed by `instance`). Worked example:
+  runbooks still use `instance`. The extra labels add no streams (each is fixed by `instance`). For pocket-bridge add
+  `!= "ExecutionAttempt"` to the selector: its Polly retry lines are numerous and bury the sync events. Worked example:
   [runbook-control-plane-logs](runbook-control-plane-logs.md).
 - **`| regexp` keeps lines that do not match.** The extracted labels are simply absent, and `| __error__=""` does not remove
   them (a miss is not an error), so `count_over_time(... | regexp ...)` counts the whole stream and `sum by (dst)` returns an
