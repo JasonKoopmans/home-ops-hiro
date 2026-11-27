@@ -131,6 +131,28 @@ about 37% real use):
   runbooks still use `instance`. The extra labels add no streams (each is fixed by `instance`). For pocket-bridge add
   `!= "ExecutionAttempt"` to the selector: its Polly retry lines are numerous and bury the sync events. Worked example:
   [runbook-control-plane-logs](runbook-control-plane-logs.md).
+- **Log level: three Loki sources, three vocabularies (2026-11-27).** Query `detected_level`, which Explore shows, not `level`.
+  - *Pod logs* (`job="loki.source.kubernetes.pods"`): `detected_level` is lowercase `trace`, `debug`, `info`, `warn`, `error`
+    or `fatal`. For JSON lines (keys `level`, `severity`, `LogLevel`, ...) and klog lines, `loki.process "pods"` sets the `level`
+    structured metadata and Loki uses it verbatim; #1141 (merged 2026-11-27) makes `Warning` come out `warn`, `Critical`
+    `fatal` and `Information`/`Informational` `info`. Before it, 752 lines in 24h had `detected_level="information"` and 389
+    had `"warning"`, and `Informational` was stored as `informationinfo` (a `stage.replace` only replaces capture-group text:
+    `kubernetes/apps/monitoring/alloy/AGENTS.md`). A logfmt line (`level=warning`) gets no `level` metadata, and Loki's own
+    detection already gives it `detected_level="warn"` (2801 lines in 24h); do not add a `stage.logfmt` for that.
+  - *OPNsense syslog* (`job="syslog"`): `severity` is a stream **label** holding the RFC 5424 long names, and `detected_level`
+    copies it. Values seen over 14d: `informational` 101,794, `error` 2,002, `warning` 919, `critical` 2 (checked 2026-11-27).
+  - *Proxmox and PBS journal* (`job="systemd-journal"`): shipped by the `alloy` Ansible role in the separate `home-ops-private`
+    repo, not by this cluster. Until its PR 39 is merged and rolled out every line is `detected_level="unknown"`, with no
+    priority or unit. PR 39 adds `unit` and a `priority` label holding Alloy's keywords (`emerg`, `alert`, `crit`, `error`,
+    `warning`, `notice`, `info`, `debug`; Alloy v1.20.1 source, `error` not `err`).
+  - **Decided 2026-11-27: each source keeps its own vocabulary; nothing is mapped onto the pod names.** The journal `priority`
+    stays verbatim, and the syslog `severity` has never been mapped (nothing was decided to change it). Reasons: both are
+    labels, so rewriting them re-keys every stream and breaks selectors (the filterlog bullet below selects on
+    `severity="informational"`); a mapping is lossy, because syslog and the journal have 8 levels and the pod names 6, with no
+    counterpart for `notice`, `alert` or `emergency`; and the label names differ (`severity`, `priority`), so neither is taken
+    for the canonical field. The price is that a query across sources needs alternations: info is `info|informational`, warn
+    is `warn|warning`, critical is `crit|critical` (pods have only `fatal`), and `error` is the same everywhere.
+    Revisit if you want one level panel across all three, and then add a derived `level` and keep the label.
 - **`| regexp` keeps lines that do not match.** The extracted labels are simply absent, and `| __error__=""` does not remove
   them (a miss is not an error), so `count_over_time(... | regexp ...)` counts the whole stream and `sum by (dst)` returns an
   extra label-less series holding every non-matching line (65k beside the true 9k+9k). After the parser add
