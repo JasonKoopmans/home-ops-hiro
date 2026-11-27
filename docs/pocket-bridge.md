@@ -100,9 +100,11 @@ Follow-ups this left:
   inside one pod, and the failed pods here vanished (the failed mirror pod left kube-state-metrics at 17:25Z, and the three failed
   pocket-bridge Jobs still listed on 2026-11-26 had no pods), which fits the Job controller deleting the still-running pod when the
   limit is hit. `kubectl logs` then has nothing, but Alloy ships pod logs and they were readable the next day
-  ([how to query them](gotchas-observability.md#loki-and-alloy)). Switching these CronJobs to `restartPolicy: Never` would also keep
-  the failed pods for `kubectl logs` until `ttlSecondsAfterFinished`, at the cost of a reschedule per retry. With the log in Loki
-  that is a convenience, not a gap, and it is a change to a repo-wide pattern, so it is the owner's decision.
+  ([how to query them](gotchas-observability.md#loki-and-alloy)). pocket-bridge and the media mirror now use
+  `restartPolicy: Never` (the app-template default), which also keeps each failed pod for `kubectl logs` until
+  `ttlSecondsAfterFinished` (24h), at the cost of a reschedule per retry. With the log in Loki that is a convenience, not a gap.
+  The other recurring CronJobs (`lifeos/warehouse`, `mcp-postgres-grants`) still use `OnFailure`; their failed pods vanish the
+  same way and their logs are in Loki.
 
 ## Cluster-side traps
 
