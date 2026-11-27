@@ -42,7 +42,8 @@ Established with #414 (2026-08-08), after #410 restored Telegram delivery and ex
   the same shape against `kube_job_complete` gave 6 series at a 7d window and 0 at 1s.
 - **A rule must not depend on the TTL being right.** `ttlSecondsAfterFinished` is still worth setting: bjw-s app-template renders it from
   the `cronjob:` key into `jobTemplate.spec`. Scale it to the schedule (recording-annotator uses 24h for hourly jobs, 48h for daily,
-  7d for monthly). It deletes the Job **and its pods**, so their logs go with it.
+  7d for monthly). It deletes the Job **and its pods**, so `kubectl logs` goes with them. Their stdout/stderr stays in Loki for 14d
+  (`retention_period`), so a deleted Job pod is still diagnosable: see *Finding a pod's logs in Loki* below.
 - **Pair a rule that reads an app's own gauge with a second rule on a different data path.** The `recording_annotator_*_timestamp_seconds`
   series comes from the app's ServiceMonitor; if that scrape breaks, the `*Stale` expressions go empty and stop alerting with no
   dead-man. Give the backstop a looser threshold and a lower severity, so a real outage pages once and not twice.
@@ -96,6 +97,38 @@ about 37% real use):
 
 ## Loki and Alloy
 
+- **Finding a pod's logs in Loki (2026-11-26).** Every pod's stdout and stderr is shipped, in every namespace, Job and CronJob
+  pods included, and kept for 14d. A stream carries `namespace`, `pod`, `container`, `workload` (the owner's name without its
+  per-run or per-rollout suffix: the CronJob, Deployment, StatefulSet or DaemonSet; for a static pod such as kube-apiserver the
+  container name), `service_name` (= `workload`), `stream` (`stdout` or `stderr`), and the legacy
+  `instance="<namespace>/<pod>:<container>"` and `job="loki.source.kubernetes.pods"`. Every run of a CronJob:
+  ```logql
+  {namespace="storage", workload="recording-annotator-media-mirror"}
+  ```
+  Add `pod="<full name>"` for one run. A CronJob pod is `<cronjob>-<scheduled minute since epoch>-<5 chars>`.
+  **Logs written before the labels were deployed (#1139, merged after 2026-11-26; take the date from `git log`) carry only
+  `instance` and `job`**, and a selector on a label a stream
+  does not have returns nothing, which looks exactly like "no logs" (on 2026-11-26 a `{namespace="storage"}` query was read as
+  "Loki holds no pod logs"; the failed media-mirror pod's log was there all along). Until those lines age out (14d), match
+  on `instance` for them:
+  ```logql
+  {job="loki.source.kubernetes.pods", instance=~"storage/recording-annotator-media-mirror-.*"}
+  ```
+  **Expect duplicates in that window.** Alloy keys a file's read position by path *and* labels, so the first reload under the
+  new labels re-read every container's current log file into new streams (a test with unchanged labels re-read none, with new
+  labels all of them; 2026-11-26). A pre-change line can therefore show twice in an `instance` or `job` query, once per schema,
+  and a `count_over_time` over that span is doubled, until the old streams age out (14d). The new-label streams got the
+  re-read lines too, so they reach back toward each file's start instead of the deploy time, but only as far as Loki's
+  `reject_old_samples_max_age` (168h): older lines in a quiet pod's file are rejected (expect a few "too old" send errors in
+  Alloy's log right after the reload). Any later change to the labels
+  `discovery.relabel` puts on a target does the same.
+  `list_loki_label_values` on `workload` (or on `instance`, with that `job` as the matcher) lists what exists; keep the range
+  bounded. `filename` is dropped before write, so a `/var/log/pods/...` selector matches nothing. Why two schemas: the first Alloy
+  config (#120, 2026-04-06) had no relabel rules and used whatever `loki.source.kubernetes` emits (`instance`, `job`); the
+  file-tailing rewrite (0733d07a, 2026-07-26) copied them so queries kept working, and the pipeline's own drop selectors and the
+  runbooks still use `instance`. The extra labels add no streams (each is fixed by `instance`). For pocket-bridge add
+  `!= "ExecutionAttempt"` to the selector: its Polly retry lines are numerous and bury the sync events. Worked example:
+  [runbook-control-plane-logs](runbook-control-plane-logs.md).
 - **`| regexp` keeps lines that do not match.** The extracted labels are simply absent, and `| __error__=""` does not remove
   them (a miss is not an error), so `count_over_time(... | regexp ...)` counts the whole stream and `sum by (dst)` returns an
   extra label-less series holding every non-matching line (65k beside the true 9k+9k). After the parser add

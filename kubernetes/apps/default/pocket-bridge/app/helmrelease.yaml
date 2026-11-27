@@ -47,8 +47,8 @@ spec:
           ttlSecondsAfterFinished: 86400
         pod:
           # Never, not OnFailure: with OnFailure `backoffLimit` counts container restarts inside one pod, and when
-          # the Job fails its controller deletes that pod, so a failed run leaves no log (2026-11-25). Never keeps
-          # each failed pod until `ttlSecondsAfterFinished`. Same total attempts: three runs of the whole process.
+          # the Job fails its controller deletes that pod, so `kubectl logs` has nothing (the log is still in Loki).
+          # Never keeps each failed pod until `ttlSecondsAfterFinished`. Same total attempts: three runs of the process.
           restartPolicy: Never
           imagePullSecrets:
             - name: pocket-bridge-pullsecret

@@ -67,8 +67,8 @@ spec:
       template:
         spec:
           # Never, not OnFailure: with OnFailure `backoffLimit` counts container restarts inside one pod, and when
-          # the Job fails its controller deletes that pod, so a failed run leaves no log. The 17:23Z failure on
-          # 2026-11-25 left none and its cause could not be read back. Never keeps each failed pod until
+          # the Job fails its controller deletes that pod, so `kubectl logs` has nothing (the log is still in Loki,
+          # which is where the 2026-11-25 17:23Z failure was read back). Never keeps each failed pod until
           # `ttlSecondsAfterFinished`; the same three attempts, each in its own pod.
           restartPolicy: Never
           securityContext:
