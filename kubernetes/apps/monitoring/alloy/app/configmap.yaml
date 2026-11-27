@@ -234,10 +234,7 @@ data:
       // stage.replace substitutes only the text a capture group matched: an
       // expression with no group matches nothing, and one with the wrong group
       // edits the wrong part. Each expression below wraps the whole value in a
-      // group. Before 2026-11-27 "warning", "critical" and "information" passed
-      // through unchanged and "informational" became "informationinfo" (only
-      // its "(al)" group was replaced). Tested in a throwaway grafana/alloy
-      // v1.22.0 container, see AGENTS.md.
+      // group. How to test a change here: kubernetes/apps/monitoring/alloy/AGENTS.md.
       stage.template {
         source   = "extracted_level"
         template = "{{ ToLower .Value }}"
